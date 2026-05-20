@@ -2341,6 +2341,13 @@ fn validate_workload_artifact_manifest(
         );
     }
 
+    let cells_artifact: serde_json::Value = serde_json::from_str(cells_text)?;
+    if manifest["workload"] != cells_artifact["summary"] {
+        return Err(
+            std::io::Error::other("workload artifact manifest workload summary mismatch").into(),
+        );
+    }
+
     Ok(WorkloadBundleManifest {
         manifest_path,
         manifest_fingerprint: fnv1a64_fingerprint(&manifest_text),

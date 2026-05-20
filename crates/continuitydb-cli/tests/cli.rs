@@ -631,6 +631,52 @@ fn cli_replay_workload_require_manifest_rejects_artifact_dir_mismatch(
 }
 
 #[test]
+fn cli_replay_workload_require_manifest_rejects_workload_summary_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-manifest-summary-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["workload"]["cell_count"] = Value::from(7);
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "workload artifact manifest workload summary mismatch",
+        ));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[test]
 fn cli_replay_workload_require_manifest_failure_report_records_validation_failure(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let artifact_dir = std::env::temp_dir().join(format!(
