@@ -15,6 +15,7 @@ The first milestone builds:
 - Deterministic checkout.
 - Commit-scoped checkout.
 - Audit traces.
+- Commit-aware audit traces.
 - Deterministic Steward proposal substrate.
 - Pluggable proposal audit ledger store contract.
 - JSONL file-backed proposal audit store.

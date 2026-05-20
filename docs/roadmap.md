@@ -76,6 +76,7 @@ Storage kernel
 7. Add dependency-aware audit traces. Implemented `AuditDependency` metadata in checkout audit traces so selected cells explain dependency and causality links alongside citations.
 8. Add structured evidence audit traces. Implemented `AuditEvidence` metadata in checkout audit traces so selected cells expose source IDs, citation locators, confidence scores, and trust signals.
 9. Add commit-scoped checkout constraints. Implemented `CheckoutRequest.commit_id` with pushdown into `CellLookup.commit_id`, allowing continuity slices to be materialized for one explicit database commit boundary.
+10. Add commit-aware audit traces. Implemented `AuditTrace.commit_id` so direct audit and checkout-selected audit traces expose the database commit boundary that wrote each cell.
 
 ## Utility Feedback Milestones
 

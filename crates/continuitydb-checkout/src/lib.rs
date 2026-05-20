@@ -105,6 +105,8 @@ pub struct CheckoutAlternative {
 pub struct AuditTrace {
     /// Audited cell identifier.
     pub cell_id: StateCellId,
+    /// Database commit boundary that wrote the audited cell.
+    pub commit_id: CommitId,
     /// Citation locators supporting the cell.
     pub citations: Vec<String>,
     /// Structured evidence provenance supporting the cell.
@@ -220,6 +222,7 @@ pub fn checkout<K: StorageKernel>(
 pub fn audit(cell: &StateCell) -> AuditTrace {
     AuditTrace {
         cell_id: cell.id,
+        commit_id: cell.commit_id,
         citations: citations(cell),
         evidence: cell
             .evidence
@@ -890,6 +893,17 @@ mod tests {
     }
 
     #[test]
+    fn audit_includes_commit_id() -> Result<(), Box<dyn std::error::Error>> {
+        let mut cell = sample_cell("project:continuitydb:audit-commit", 0.95, 10)?;
+        cell.commit_id = CommitId::new();
+
+        let trace = audit(&cell);
+
+        assert_eq!(trace.commit_id, cell.commit_id);
+        Ok(())
+    }
+
+    #[test]
     fn audit_includes_structured_evidence() -> Result<(), Box<dyn std::error::Error>> {
         let cell = sample_cell("project:continuitydb:audit-evidence", 0.95, 10)?;
         let trace = audit(&cell);
@@ -969,6 +983,36 @@ mod tests {
             slice.audit_traces[0].dependencies[0].rationale,
             "depends on target state"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_audit_traces_include_commit_ids() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let selected = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:audit-commit-checkout", 0.95, 10)?,
+        )?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                system_at: None,
+                commit_id: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 10,
+            },
+        )?;
+
+        assert_eq!(slice.audit_traces.len(), 1);
+        assert_eq!(slice.audit_traces[0].cell_id, selected.id);
+        assert_eq!(slice.audit_traces[0].commit_id, selected.commit_id);
         Ok(())
     }
 }
