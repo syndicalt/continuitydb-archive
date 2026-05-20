@@ -312,7 +312,10 @@ name = "continuitydb-workload"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "continuitydb-checkout",
  "continuitydb-core",
+ "continuitydb-kernel",
+ "continuitydb-memory",
  "thiserror",
 ]
 

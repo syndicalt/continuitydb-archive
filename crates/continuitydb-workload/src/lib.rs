@@ -1,11 +1,14 @@
 //! Deterministic workload generation for ContinuityDB benchmarks.
 
 use chrono::{DateTime, Utc};
+use continuitydb_checkout::{checkout, CheckoutError, CheckoutRequest};
 use continuitydb_core::{
     ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
     Citation, Confidence, Evidence, Scope, SemanticAnchor, StateCell, StateCellId, TrustSignal,
     UtilityFeedback, ValidTimeRange,
 };
+use continuitydb_kernel::{KernelError, StorageKernel};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 /// Deterministic workload generation parameters.
@@ -49,6 +52,43 @@ pub struct WorkloadSummary {
     pub total_token_cost: i64,
 }
 
+/// Measured operation count and elapsed wall-clock time.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MeasuredOperation {
+    /// Number of logical operations performed.
+    pub operation_count: usize,
+    /// Observed elapsed time for the operation group.
+    pub elapsed: Duration,
+}
+
+/// Checkout result counts measured from a workload run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CheckoutMeasurement {
+    /// Number of checkout candidates matching request constraints.
+    pub matched_count: usize,
+    /// Number of cells selected into the returned slice.
+    pub selected_count: usize,
+    /// Number of matching cells omitted as alternatives.
+    pub alternative_count: usize,
+    /// Number of selected frontier cells.
+    pub frontier_count: usize,
+    /// Selected token total reported by checkout.
+    pub selected_token_count: i64,
+}
+
+/// End-to-end workload measurement over one kernel and checkout request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkloadMeasurement {
+    /// Summary of the generated workload that was measured.
+    pub workload_summary: WorkloadSummary,
+    /// Ingest operation measurement.
+    pub ingest: MeasuredOperation,
+    /// Checkout operation measurement.
+    pub checkout_operation: MeasuredOperation,
+    /// Checkout result counts.
+    pub checkout: CheckoutMeasurement,
+}
+
 /// Workload generation failure.
 #[derive(Debug, Error)]
 pub enum WorkloadError {
@@ -70,6 +110,17 @@ pub enum WorkloadError {
     /// Core StateCell construction failed.
     #[error(transparent)]
     Core(#[from] continuitydb_core::CoreError),
+}
+
+/// Workload measurement failure.
+#[derive(Debug, Error)]
+pub enum MeasurementError {
+    /// Storage kernel failure while ingesting workload cells.
+    #[error(transparent)]
+    Kernel(#[from] KernelError),
+    /// Checkout failure while materializing a workload slice.
+    #[error(transparent)]
+    Checkout(#[from] CheckoutError),
 }
 
 /// Generates a deterministic world-model workload for benchmarks and engine comparisons.
@@ -146,6 +197,44 @@ pub fn generate_world_model_workload(
     })
 }
 
+/// Measures ingest and checkout over a deterministic workload using any storage kernel.
+pub fn measure_ingest_and_checkout<K>(
+    kernel: &mut K,
+    workload: &ContinuityWorkload,
+    committed_at: DateTime<Utc>,
+    request: CheckoutRequest,
+) -> Result<WorkloadMeasurement, MeasurementError>
+where
+    K: StorageKernel,
+{
+    let ingest_started = Instant::now();
+    kernel.append_cells_at(workload.cells.clone(), committed_at)?;
+    let ingest_elapsed = ingest_started.elapsed();
+
+    let checkout_started = Instant::now();
+    let slice = checkout(kernel, request)?;
+    let checkout_elapsed = checkout_started.elapsed();
+
+    Ok(WorkloadMeasurement {
+        workload_summary: workload.summary,
+        ingest: MeasuredOperation {
+            operation_count: workload.cells.len(),
+            elapsed: ingest_elapsed,
+        },
+        checkout_operation: MeasuredOperation {
+            operation_count: 1,
+            elapsed: checkout_elapsed,
+        },
+        checkout: CheckoutMeasurement {
+            matched_count: slice.cells.len() + slice.alternatives.len(),
+            selected_count: slice.cells.len(),
+            alternative_count: slice.alternatives.len(),
+            frontier_count: slice.frontier_recommendations.len(),
+            selected_token_count: slice.total_tokens,
+        },
+    })
+}
+
 fn validate_config(config: &WorkloadConfig) -> Result<(), WorkloadError> {
     if config.cell_count == 0 {
         return Err(WorkloadError::EmptyWorkload);
@@ -194,7 +283,9 @@ fn utility_feedback_for(index: usize) -> Result<UtilityFeedback, WorkloadError> 
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use continuitydb_core::{ActivationState, CellDependencyKind, Scope};
+    use continuitydb_checkout::CheckoutRequest;
+    use continuitydb_core::{ActivationState, CellDependencyKind, Confidence, Scope};
+    use continuitydb_memory::MemoryKernel;
 
     fn sample_config() -> Result<WorkloadConfig, Box<dyn std::error::Error>> {
         let valid_from = Utc
@@ -291,6 +382,113 @@ mod tests {
             Err(WorkloadError::InvalidFrontierInterval)
         ));
 
+        Ok(())
+    }
+
+    #[test]
+    fn workload_measurement_reports_memory_ingest_and_checkout_counts(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let workload = generate_world_model_workload(sample_config()?)?;
+        let mut kernel = MemoryKernel::default();
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let request = CheckoutRequest {
+            semantic_anchor: None,
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: None,
+            system_at: None,
+            commit_id: None,
+            activation: None,
+            answerability_question: None,
+            evidence_source: None,
+            dependency_target: None,
+            dependency_kind: None,
+            minimum_confidence: Confidence::new(0.0)?,
+            token_budget: 400,
+        };
+
+        let measurement =
+            measure_ingest_and_checkout(&mut kernel, &workload, committed_at, request)?;
+
+        assert_eq!(measurement.workload_summary, workload.summary);
+        assert_eq!(measurement.ingest.operation_count, 8);
+        assert_eq!(measurement.checkout.matched_count, 8);
+        assert_eq!(measurement.checkout.selected_count, 3);
+        assert_eq!(measurement.checkout.alternative_count, 5);
+        assert_eq!(measurement.checkout.frontier_count, 0);
+        assert!(measurement.checkout.selected_token_count <= 400);
+        Ok(())
+    }
+
+    #[test]
+    fn workload_measurement_reports_frontier_checkout_counts(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let workload = generate_world_model_workload(sample_config()?)?;
+        let mut kernel = MemoryKernel::default();
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let request = CheckoutRequest {
+            semantic_anchor: None,
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: None,
+            system_at: None,
+            commit_id: None,
+            activation: Some(ActivationState::Frontier),
+            answerability_question: None,
+            evidence_source: None,
+            dependency_target: None,
+            dependency_kind: None,
+            minimum_confidence: Confidence::new(0.0)?,
+            token_budget: 400,
+        };
+
+        let measurement =
+            measure_ingest_and_checkout(&mut kernel, &workload, committed_at, request)?;
+
+        assert_eq!(measurement.checkout.matched_count, 2);
+        assert_eq!(measurement.checkout.selected_count, 2);
+        assert_eq!(measurement.checkout.alternative_count, 0);
+        assert_eq!(measurement.checkout.frontier_count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn workload_measurement_reports_duplicate_ingest_errors(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let workload = generate_world_model_workload(sample_config()?)?;
+        let mut kernel = MemoryKernel::default();
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let request = CheckoutRequest {
+            semantic_anchor: None,
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: None,
+            system_at: None,
+            commit_id: None,
+            activation: None,
+            answerability_question: None,
+            evidence_source: None,
+            dependency_target: None,
+            dependency_kind: None,
+            minimum_confidence: Confidence::new(0.0)?,
+            token_budget: 400,
+        };
+
+        measure_ingest_and_checkout(&mut kernel, &workload, committed_at, request.clone())?;
+        let result = measure_ingest_and_checkout(&mut kernel, &workload, committed_at, request);
+
+        assert!(matches!(
+            result,
+            Err(MeasurementError::Kernel(
+                continuitydb_kernel::KernelError::DuplicateCell
+            ))
+        ));
         Ok(())
     }
 }
