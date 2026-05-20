@@ -832,9 +832,16 @@ fn benchmark_local_model_json(
         .artifact_dir
         .filter(|_artifact_dir| !options.dry_run)
         .map(|dir| dir.join("responses"));
+    let artifact_changed_case_report_path = options
+        .artifact_dir
+        .filter(|_artifact_dir| !options.dry_run && options.compare_baseline)
+        .map(|dir| dir.join("changed-cases.json"));
     let effective_contract_dir = options.contract_dir.or(artifact_contract_dir.as_deref());
     let effective_prompt_dir = options.prompt_dir.or(artifact_prompt_dir.as_deref());
     let effective_response_dir = options.response_dir.or(artifact_response_dir.as_deref());
+    let effective_changed_case_report_path = options
+        .changed_case_report_path
+        .or(artifact_changed_case_report_path.as_deref());
     let contract_artifacts = effective_contract_dir
         .map(write_local_model_contract_artifacts)
         .transpose()?;
@@ -924,7 +931,7 @@ fn benchmark_local_model_json(
     {
         if options.artifact_dir.is_some()
             || options.failure_report_path.is_some()
-            || options.changed_case_report_path.is_some()
+            || effective_changed_case_report_path.is_some()
         {
             let (report, responses) = if effective_response_dir.is_some() {
                 benchmark.run_with_responses(identity)
@@ -958,7 +965,7 @@ fn benchmark_local_model_json(
                 stability.as_ref(),
             );
             report =
-                finalize_local_model_benchmark_report(report, options.changed_case_report_path)?;
+                finalize_local_model_benchmark_report(report, effective_changed_case_report_path)?;
             if let Some(artifact_dir) = options.artifact_dir {
                 report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
             }
@@ -1001,7 +1008,7 @@ fn benchmark_local_model_json(
             },
             stability.as_ref(),
         );
-        report = finalize_local_model_benchmark_report(report, options.changed_case_report_path)?;
+        report = finalize_local_model_benchmark_report(report, effective_changed_case_report_path)?;
         if let Some(artifact_dir) = options.artifact_dir {
             report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
         }
@@ -1044,7 +1051,7 @@ fn benchmark_local_model_json(
             },
             stability.as_ref(),
         );
-        report = finalize_local_model_benchmark_report(report, options.changed_case_report_path)?;
+        report = finalize_local_model_benchmark_report(report, effective_changed_case_report_path)?;
         if let Some(artifact_dir) = options.artifact_dir {
             report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
         }
@@ -1068,7 +1075,7 @@ fn benchmark_local_model_json(
         },
         stability.as_ref(),
     );
-    finalize_local_model_benchmark_report(report, options.changed_case_report_path)
+    finalize_local_model_benchmark_report(report, effective_changed_case_report_path)
 }
 
 #[cfg(feature = "local-model")]
@@ -1467,6 +1474,7 @@ fn write_local_model_bundle_manifest(
         "prompt_artifacts": report["prompt_artifacts"].clone(),
         "response_artifacts": report["response_artifacts"].clone(),
         "response_artifact_manifest": report["response_artifact_manifest"].clone(),
+        "changed_case_report_path": report["changed_case_report_path"].clone(),
     });
     let manifest_text = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, &manifest_text)?;

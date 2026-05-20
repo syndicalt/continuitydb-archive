@@ -1982,6 +1982,102 @@ fn cli_benchmark_local_model_changed_case_report_path_writes_compact_report(
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_benchmark_local_model_artifact_dir_writes_changed_case_report(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-changed-bundle-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-changed-bundle-baseline");
+    let contract_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-changed-bundle-contracts-{}",
+        std::process::id()
+    ));
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-changed-bundle-dir-{}",
+        std::process::id()
+    ));
+    if contract_dir.exists() {
+        fs::remove_dir_all(&contract_dir)?;
+    }
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    let current_script = passing_local_model_runner_script().replace(
+        "The evidence is thin, so uncertainty remains.",
+        "Uncertainty remains because the evidence is thin.",
+    );
+    fs::write(&executable_path, passing_local_model_runner_script())?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--contract-dir")
+        .arg(&contract_dir)
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+    fs::write(&executable_path, current_script)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--compare-baseline")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--contract-dir")
+        .arg(&contract_dir)
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout_report: Value = serde_json::from_slice(&output)?;
+    let changed_case_report_path = artifact_dir.join("changed-cases.json");
+    let bundle_manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    assert_eq!(
+        stdout_report["changed_case_report_path"].as_str(),
+        Some(changed_case_report_path.display().to_string().as_str())
+    );
+    let changed_case_report: Value =
+        serde_json::from_str(&fs::read_to_string(&changed_case_report_path)?)?;
+    assert_eq!(
+        changed_case_report["format"].as_str(),
+        Some("continuitydb.local_model.changed_cases")
+    );
+    assert_eq!(
+        changed_case_report["comparison"]["changed_cases"].as_u64(),
+        Some(9)
+    );
+    let bundle_manifest: Value = serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+    assert_eq!(
+        bundle_manifest["changed_case_report_path"].as_str(),
+        Some(changed_case_report_path.display().to_string().as_str())
+    );
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(contract_dir)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-passing-gate-runner");
