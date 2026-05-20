@@ -24,11 +24,11 @@ pub use ledger::{
 #[cfg(feature = "local-model")]
 pub use local_model::{
     default_steward_evaluation_suite, latest_compatible_local_model_benchmark_baseline,
-    latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
-    local_model_response_json_schema, record_local_model_benchmark_baseline,
-    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
-    FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
-    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    latest_local_model_benchmark_baseline, local_model_prompt_for_input,
+    local_model_response_gbnf_grammar, local_model_response_json_schema,
+    record_local_model_benchmark_baseline, record_local_model_benchmark_baseline_with_regression,
+    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
+    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
     LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
     LocalModelRuntimeManifest, LocalModelSteward, LocalModelStewardInput,
@@ -46,8 +46,9 @@ mod tests {
     #[cfg(feature = "local-model")]
     use super::{
         default_steward_evaluation_suite, latest_compatible_local_model_benchmark_baseline,
-        latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
-        local_model_response_json_schema, record_local_model_benchmark_baseline,
+        latest_local_model_benchmark_baseline, local_model_prompt_for_input,
+        local_model_response_gbnf_grammar, local_model_response_json_schema,
+        record_local_model_benchmark_baseline,
         record_local_model_benchmark_baseline_with_regression, small_model_candidates,
         FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
         LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
@@ -706,6 +707,26 @@ mod tests {
         assert_eq!(
             steward.backend().requests.borrow()[0].task(),
             "find frontier cells"
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_prompt_helper_matches_backend_prompt() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let response = r#"{"proposals":[]}"#.to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let input = LocalModelStewardInput::new(created_at(), "find uncertain cells")
+            .with_evidence("test://evidence", "Evidence text.");
+        let expected_prompt = local_model_prompt_for_input(&input);
+
+        let _ = steward.propose(input)?;
+
+        assert_eq!(steward.backend().requests.borrow().len(), 1);
+        assert_eq!(
+            steward.backend().requests.borrow()[0].prompt(),
+            expected_prompt
         );
         Ok(())
     }

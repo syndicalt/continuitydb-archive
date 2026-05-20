@@ -446,6 +446,11 @@ impl LocalModelRequest {
     }
 }
 
+/// Renders the deterministic prompt sent to a local model Steward backend.
+pub fn local_model_prompt_for_input(input: &LocalModelStewardInput) -> String {
+    LocalModelRequest::from_input(input).prompt
+}
+
 /// Evidence snippet supplied to a local model Steward.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalModelEvidence {

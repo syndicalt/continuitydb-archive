@@ -89,6 +89,7 @@ The first milestone builds:
 - CLI local model benchmark grammar path support.
 - CLI local model candidate requirement enforcement.
 - CLI local model benchmark contract artifact directory.
+- CLI local model benchmark prompt artifact directory.
 - CLI local model benchmark dry-run preflight output.
 - CLI local model contract fingerprints.
 - Durable local model contract fingerprints.

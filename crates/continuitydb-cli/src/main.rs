@@ -16,11 +16,12 @@ use continuitydb_kernel::{
 use continuitydb_memory::MemoryKernel;
 #[cfg(feature = "local-model")]
 use continuitydb_steward::{
-    default_steward_evaluation_suite, local_model_response_gbnf_grammar,
-    local_model_response_json_schema, record_local_model_benchmark_baseline_with_regression,
-    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
-    LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
-    LocalModelBenchmarkRegression, SmallModelCandidate, StewardAction, StewardIdentity,
+    default_steward_evaluation_suite, local_model_prompt_for_input,
+    local_model_response_gbnf_grammar, local_model_response_json_schema,
+    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
+    FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner, LocalExecutableRunnerConfig,
+    LocalModelBenchmark, LocalModelBenchmarkBaseline, LocalModelBenchmarkRegression,
+    SmallModelCandidate, StewardAction, StewardEvaluationSuite, StewardIdentity,
     LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
@@ -68,6 +69,7 @@ struct LocalModelBenchmarkOptions<'a> {
     candidate_defaults: bool,
     grammar_path: Option<&'a Path>,
     contract_dir: Option<&'a Path>,
+    prompt_dir: Option<&'a Path>,
     enforce_candidate_requirements: bool,
     baseline_path: &'a Path,
     dry_run: bool,
@@ -81,6 +83,14 @@ struct LocalModelContractArtifacts {
     grammar_path: PathBuf,
     schema_fingerprint: String,
     grammar_fingerprint: String,
+}
+
+#[cfg(feature = "local-model")]
+struct LocalModelPromptArtifact {
+    case_name: String,
+    prompt_path: PathBuf,
+    prompt_fingerprint: String,
+    prompt_bytes: usize,
 }
 
 /// Named kernel requirement profiles understood by the CLI.
@@ -232,6 +242,9 @@ enum Command {
         /// Directory where benchmark-local Steward schema and grammar artifacts are written.
         #[arg(long = "contract-dir")]
         contract_dir: Option<PathBuf>,
+        /// Directory where benchmark-local Steward evaluation prompts are written.
+        #[arg(long = "prompt-dir")]
+        prompt_dir: Option<PathBuf>,
         /// Reject benchmark configurations that violate selected candidate requirements.
         #[arg(long = "enforce-candidate-requirements")]
         enforce_candidate_requirements: bool,
@@ -437,6 +450,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             candidate_defaults,
             grammar_path,
             contract_dir,
+            prompt_dir,
             enforce_candidate_requirements,
             baseline_path,
             dry_run,
@@ -451,6 +465,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 candidate_defaults,
                 grammar_path: grammar_path.as_deref(),
                 contract_dir: contract_dir.as_deref(),
+                prompt_dir: prompt_dir.as_deref(),
                 enforce_candidate_requirements,
                 baseline_path: &baseline_path,
                 dry_run,
@@ -632,10 +647,16 @@ fn benchmark_local_model_json(
     options: LocalModelBenchmarkOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let candidate = local_model_candidate(options.candidate_id)?;
+    let suite = default_steward_evaluation_suite();
     let contract_artifacts = options
         .contract_dir
         .map(write_local_model_contract_artifacts)
         .transpose()?;
+    let prompt_artifacts = options
+        .prompt_dir
+        .map(|prompt_dir| write_local_model_prompt_artifacts(prompt_dir, &suite))
+        .transpose()?
+        .unwrap_or_default();
     let effective_grammar_path = options.grammar_path.or_else(|| {
         contract_artifacts
             .as_ref()
@@ -673,14 +694,11 @@ fn benchmark_local_model_json(
             &config,
             options.baseline_path,
             contract_artifacts.as_ref(),
+            &prompt_artifacts,
         ));
     }
 
-    let benchmark = LocalModelBenchmark::new(
-        candidate,
-        LocalExecutableRunner::new(config),
-        default_steward_evaluation_suite(),
-    );
+    let benchmark = LocalModelBenchmark::new(candidate, LocalExecutableRunner::new(config), suite);
     let mut store = FileLocalModelBenchmarkBaselineStore::open(options.baseline_path)?;
     let identity = StewardIdentity::new("continuitydb-cli-local-model", "0.1.0", "strict")?;
     let report = record_local_model_benchmark_baseline_with_regression(
@@ -700,6 +718,7 @@ fn benchmark_local_model_json(
         report.current_baseline(),
         report.regression(),
         contract_artifacts.as_ref(),
+        &prompt_artifacts,
     ))
 }
 
@@ -709,6 +728,7 @@ fn local_model_benchmark_dry_run_json(
     config: &LocalExecutableRunnerConfig,
     baseline_path: &Path,
     contract_artifacts: Option<&LocalModelContractArtifacts>,
+    prompt_artifacts: &[LocalModelPromptArtifact],
 ) -> serde_json::Value {
     serde_json::json!({
         "dry_run": true,
@@ -721,6 +741,7 @@ fn local_model_benchmark_dry_run_json(
         "schema_fingerprint": local_model_contract_fingerprint(local_model_response_json_schema()),
         "grammar_fingerprint": local_model_contract_fingerprint(local_model_response_gbnf_grammar()),
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
+        "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
         "runtime": {
             "executable": config.executable().display().to_string(),
             "arguments": config.command_arguments(),
@@ -775,6 +796,77 @@ fn local_model_contract_artifacts_json(
 }
 
 #[cfg(feature = "local-model")]
+fn write_local_model_prompt_artifacts(
+    prompt_dir: &Path,
+    suite: &StewardEvaluationSuite,
+) -> Result<Vec<LocalModelPromptArtifact>, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(prompt_dir)?;
+    suite
+        .cases()
+        .iter()
+        .enumerate()
+        .map(|(index, case)| {
+            let prompt = local_model_prompt_for_input(case.input());
+            let filename = format!(
+                "{:03}-{}.prompt.txt",
+                index + 1,
+                local_model_prompt_filename_slug(case.name())
+            );
+            let prompt_path = prompt_dir.join(filename);
+            std::fs::write(&prompt_path, &prompt)?;
+            Ok(LocalModelPromptArtifact {
+                case_name: case.name().to_string(),
+                prompt_path,
+                prompt_fingerprint: local_model_contract_fingerprint(&prompt),
+                prompt_bytes: prompt.len(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_prompt_filename_slug(name: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_dash = false;
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character.to_ascii_lowercase());
+            previous_dash = false;
+        } else if !previous_dash && !slug.is_empty() {
+            slug.push('-');
+            previous_dash = true;
+        }
+    }
+    if slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "case".to_string()
+    } else {
+        slug
+    }
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_prompt_artifacts_json(
+    prompt_artifacts: &[LocalModelPromptArtifact],
+) -> serde_json::Value {
+    serde_json::Value::Array(
+        prompt_artifacts
+            .iter()
+            .map(|artifact| {
+                serde_json::json!({
+                    "case_name": artifact.case_name,
+                    "prompt_path": artifact.prompt_path.display().to_string(),
+                    "prompt_fingerprint": artifact.prompt_fingerprint,
+                    "prompt_bytes": artifact.prompt_bytes,
+                })
+            })
+            .collect(),
+    )
+}
+
+#[cfg(feature = "local-model")]
 fn local_model_candidate(
     candidate_id: &str,
 ) -> Result<SmallModelCandidate, Box<dyn std::error::Error>> {
@@ -792,6 +884,7 @@ fn local_model_benchmark_json(
     baseline: &LocalModelBenchmarkBaseline,
     regression: Option<&LocalModelBenchmarkRegression>,
     contract_artifacts: Option<&LocalModelContractArtifacts>,
+    prompt_artifacts: &[LocalModelPromptArtifact],
 ) -> serde_json::Value {
     let summary = baseline.evaluation_summary();
     serde_json::json!({
@@ -810,6 +903,7 @@ fn local_model_benchmark_json(
         "schema_fingerprint": baseline.schema_fingerprint(),
         "grammar_fingerprint": baseline.grammar_fingerprint(),
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
+        "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
         "runtime": {
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),

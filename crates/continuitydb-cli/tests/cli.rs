@@ -568,6 +568,67 @@ fn cli_benchmark_local_model_contract_dir_writes_artifacts_and_supplies_grammar(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_prompt_dir_writes_prompt_artifacts(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-prompt-dir-baseline");
+    let prompt_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-prompt-dir-{}",
+        std::process::id()
+    ));
+    if prompt_dir.exists() {
+        fs::remove_dir_all(&prompt_dir)?;
+    }
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--prompt-dir")
+        .arg(&prompt_dir)
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let artifacts = json["prompt_artifacts"]
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("missing prompt artifacts"))?;
+
+    assert_eq!(artifacts.len(), 2);
+    assert_eq!(
+        artifacts[0]["case_name"].as_str(),
+        Some("insufficient evidence uncertainty")
+    );
+    assert!(artifacts[0]["prompt_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(artifacts[0]["prompt_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    let first_prompt_path = artifacts[0]["prompt_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing prompt path"))?;
+    let first_prompt = fs::read_to_string(first_prompt_path)?;
+    assert!(first_prompt.contains("You are the ContinuityDB database Steward."));
+    assert!(first_prompt.contains("Assess whether thin evidence needs verification."));
+    assert!(first_prompt.contains("continuitydb://evaluation/thin-evidence"));
+    assert!(first_prompt.contains("One weak source mentions the claim without corroboration."));
+    assert!(!baseline_path.exists());
+
+    fs::remove_dir_all(prompt_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_evaluation_suite_outputs_case_contracts(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::cargo_bin("continuitydb")?

@@ -257,6 +257,7 @@ Storage kernel
 45. Add CLI local-model benchmark grammar path support. Added `benchmark-local-model --grammar-path` so dry-runs and benchmark runs can pass generated GBNF grammar artifacts as first-class runtime arguments.
 46. Add CLI local-model candidate requirement enforcement. Added `benchmark-local-model --enforce-candidate-requirements` so strict dry-runs and benchmark runs reject grammar-required candidates when no grammar artifact path is supplied.
 47. Add CLI local-model benchmark contract artifact directory. Added `benchmark-local-model --contract-dir` so dry-runs and benchmark runs can materialize schema and grammar artifacts, report their fingerprints, and use the generated grammar path for strict grammar-required candidates.
+48. Add CLI local-model benchmark prompt artifact directory. Added `benchmark-local-model --prompt-dir` so dry-runs and benchmark runs can write deterministic per-case prompt artifacts and report their fingerprints for reproducible local Steward model trials.
 
 ## Small Embeddable Model Track
 
