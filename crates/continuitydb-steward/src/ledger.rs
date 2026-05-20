@@ -1,9 +1,17 @@
 //! Append-only proposal audit ledger.
 
+use std::{
+    fs::{File, OpenOptions},
+    io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
+};
+
+use serde::{Deserialize, Serialize};
+
 use crate::{ProposalDecision, ProposalId, StewardError, StewardProposal};
 
 /// Audit record preserving a proposal and its deterministic policy decision.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProposalAuditRecord {
     proposal: StewardProposal,
     decision: ProposalDecision,
@@ -104,6 +112,79 @@ impl ProposalLedgerStore for MemoryProposalStore {
             .iter()
             .find(|record| record.proposal().id() == proposal_id)
             .cloned())
+    }
+}
+
+/// JSONL file-backed proposal ledger store.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileProposalStore {
+    path: PathBuf,
+}
+
+impl FileProposalStore {
+    /// Opens a JSONL proposal store at the supplied path.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, StewardError> {
+        let path = path.as_ref().to_path_buf();
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|_error| StewardError::ProposalStoreIo)?;
+
+        Ok(Self { path })
+    }
+
+    /// Returns the backing file path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn read_records(&self) -> Result<Vec<ProposalAuditRecord>, StewardError> {
+        let file = File::open(&self.path).map_err(|_error| StewardError::ProposalStoreIo)?;
+        let reader = BufReader::new(file);
+        let mut records = Vec::new();
+
+        for line in reader.lines() {
+            let line = line.map_err(|_error| StewardError::ProposalStoreIo)?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            records.push(
+                serde_json::from_str(&line).map_err(|_error| StewardError::ProposalStoreCorrupt)?,
+            );
+        }
+
+        Ok(records)
+    }
+}
+
+impl ProposalLedgerStore for FileProposalStore {
+    fn append_record(&mut self, record: ProposalAuditRecord) -> Result<(), StewardError> {
+        let encoded =
+            serde_json::to_string(&record).map_err(|_error| StewardError::ProposalStoreCorrupt)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|_error| StewardError::ProposalStoreIo)?;
+
+        file.write_all(encoded.as_bytes())
+            .and_then(|()| file.write_all(b"\n"))
+            .map_err(|_error| StewardError::ProposalStoreIo)
+    }
+
+    fn list_records(&self) -> Result<Vec<ProposalAuditRecord>, StewardError> {
+        self.read_records()
+    }
+
+    fn get_record(
+        &self,
+        proposal_id: ProposalId,
+    ) -> Result<Option<ProposalAuditRecord>, StewardError> {
+        Ok(self
+            .read_records()?
+            .into_iter()
+            .find(|record| record.proposal().id() == proposal_id))
     }
 }
 

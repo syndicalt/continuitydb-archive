@@ -11,13 +11,13 @@ chrono.workspace = true
 continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-revision = { path = "../continuitydb-revision" }
 serde.workspace = true
-serde_json = { workspace = true, optional = true }
+serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
 [features]
 default = []
-local-model = ["dep:serde_json"]
+local-model = []
 
 [lints]
 workspace = true

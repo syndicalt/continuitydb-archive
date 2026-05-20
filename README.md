@@ -16,6 +16,7 @@ The first milestone builds:
 - Audit traces.
 - Deterministic Steward proposal substrate.
 - Pluggable proposal audit ledger store contract.
+- JSONL file-backed proposal audit store.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.

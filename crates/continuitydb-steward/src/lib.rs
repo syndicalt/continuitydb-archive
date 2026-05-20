@@ -12,8 +12,8 @@ mod proposal;
 pub use error::StewardError;
 pub use frontier::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
 pub use ledger::{
-    MemoryProposalStore, ProposalAuditRecord, ProposalLedger, ProposalLedgerStore,
-    StoredProposalLedger,
+    FileProposalStore, MemoryProposalStore, ProposalAuditRecord, ProposalLedger,
+    ProposalLedgerStore, StoredProposalLedger,
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
@@ -28,18 +28,17 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
-    use continuitydb_core::{SemanticAnchor, StateCellId};
-    use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "local-model")]
-    use std::cell::RefCell;
-    #[cfg(feature = "local-model")]
-    use std::{fs, path::PathBuf};
-
     #[cfg(feature = "local-model")]
     use super::{
         small_model_candidates, StewardEvaluationCase, StewardEvaluationFailure,
         StewardEvaluationSuite,
+    };
+    use super::{
+        FileProposalStore, MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule,
+        ProposalDecision, ProposalId, ProposalLedger, ProposalLedgerStore, ProposalOutcome,
+        ProposalPolicy, StewardAction, StewardError, StewardIdentity, StewardProposal,
+        StoredProposalLedger,
     };
     use super::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
     #[cfg(feature = "local-model")]
@@ -47,11 +46,12 @@ mod tests {
         LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelRequest,
         LocalModelSteward, LocalModelStewardInput,
     };
-    use super::{
-        MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule, ProposalDecision,
-        ProposalId, ProposalLedger, ProposalOutcome, ProposalPolicy, StewardAction, StewardError,
-        StewardIdentity, StewardProposal, StoredProposalLedger,
-    };
+    use chrono::{TimeZone, Utc};
+    use continuitydb_core::{SemanticAnchor, StateCellId};
+    use continuitydb_revision::RevisionLinkKind;
+    #[cfg(feature = "local-model")]
+    use std::cell::RefCell;
+    use std::{fs, path::PathBuf};
 
     fn created_at() -> chrono::DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
@@ -76,6 +76,10 @@ mod tests {
             vec!["test://evidence".to_string()],
             created_at(),
         )
+    }
+
+    fn temp_proposal_store_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{name}-{:?}.jsonl", ProposalId::new()))
     }
 
     #[test]
@@ -990,6 +994,59 @@ mod tests {
 
         assert!(matches!(result, Err(StewardError::MismatchedDecision)));
         assert!(ledger.records()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn file_proposal_store_persists_records_across_reopen() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_proposal_store_path("continuitydb-proposal-store");
+        let proposal = valid_link_revision()?;
+        let decision = ProposalPolicy::strict().evaluate(&proposal, created_at());
+
+        {
+            let mut ledger = StoredProposalLedger::new(FileProposalStore::open(&path)?);
+            ledger.record(proposal.clone(), decision)?;
+        }
+
+        let reopened = StoredProposalLedger::new(FileProposalStore::open(&path)?);
+        let records = reopened.records()?;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].proposal().id(), proposal.id());
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_proposal_store_gets_record_by_id_after_reopen() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_proposal_store_path("continuitydb-proposal-store-get");
+        let proposal = valid_link_revision()?;
+        let decision = ProposalPolicy::strict().evaluate(&proposal, created_at());
+
+        StoredProposalLedger::new(FileProposalStore::open(&path)?)
+            .record(proposal.clone(), decision)?;
+
+        let reopened = StoredProposalLedger::new(FileProposalStore::open(&path)?);
+        let record = reopened.record_by_id(proposal.id())?;
+        assert_eq!(
+            record.map(|record| record.proposal().id()),
+            Some(proposal.id())
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_proposal_store_rejects_invalid_jsonl() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_proposal_store_path("continuitydb-proposal-store-invalid");
+        fs::write(&path, "{not valid json}\n")?;
+        let store = FileProposalStore::open(&path)?;
+
+        let result = store.list_records();
+
+        assert!(matches!(result, Err(StewardError::ProposalStoreCorrupt)));
+        fs::remove_file(path)?;
         Ok(())
     }
 }

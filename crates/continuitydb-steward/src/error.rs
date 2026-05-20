@@ -23,4 +23,10 @@ pub enum StewardError {
     /// Local model executable failed to produce a usable response.
     #[error("local model executable failed")]
     LocalModelExecutionFailed,
+    /// Proposal store I/O failed.
+    #[error("proposal store I/O failed")]
+    ProposalStoreIo,
+    /// Proposal store content could not be decoded.
+    #[error("proposal store content is corrupt")]
+    ProposalStoreCorrupt,
 }
