@@ -476,6 +476,21 @@ impl<K: StorageKernel> ContinuityDb<K> {
 }
 
 impl ContinuityDb<FileKernel> {
+    /// Opens a file-backed ContinuityDB instance.
+    pub fn open_file<P: AsRef<Path>>(path: P) -> Result<Self, ContinuityError> {
+        FileKernel::open(path).map(Self::new).map_err(Into::into)
+    }
+
+    /// Opens a file-backed ContinuityDB instance only when the kernel satisfies the requested guarantees.
+    pub fn open_file_with_requirements<P: AsRef<Path>>(
+        path: P,
+        requirements: KernelRequirements,
+    ) -> Result<Self, ContinuityError> {
+        let db = Self::open_file(path)?;
+        db.ensure_kernel_requirements(requirements)?;
+        Ok(db)
+    }
+
     /// Rewrites a file-backed store into the current canonical durable record format.
     pub fn compact_file_store(&mut self) -> Result<(), ContinuityError> {
         self.kernel.compact().map_err(Into::into)
@@ -522,6 +537,7 @@ mod tests {
         KernelRequirements, StorageKernel,
     };
     use continuitydb_memory::MemoryKernel;
+    use std::fs;
 
     use super::{
         CommitExportBatch, CommitExportFileSummary, CommitSlice, ContinuityDb, ContinuityError,
@@ -609,6 +625,55 @@ mod tests {
                 actual: error_actual,
             }) if error_required == required && error_actual == actual
         ));
+    }
+
+    #[test]
+    fn api_opens_file_backed_database() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-open-file");
+
+        let db = ContinuityDb::open_file(&path)?;
+
+        assert_eq!(db.kernel().path(), path.as_path());
+        assert!(db.kernel_satisfies(KernelRequirements::durable_append_log()));
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_open_file_accepts_satisfied_kernel_requirements(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-open-file-require-durable");
+
+        let db = ContinuityDb::open_file_with_requirements(
+            &path,
+            KernelRequirements::durable_append_log(),
+        )?;
+
+        assert_eq!(db.kernel().path(), path.as_path());
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_open_file_rejects_unsatisfied_kernel_requirements() {
+        let path = temp_file_kernel_path("api-open-file-require-indexed");
+        let required = KernelRequirements::indexed_embedded();
+
+        let result = ContinuityDb::open_file_with_requirements(&path, required);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::KernelRequirementsNotMet {
+                required: error_required,
+                actual,
+            }) if error_required == required
+                && actual.durability == continuitydb_kernel::KernelDurability::AppendLog
+                && !actual.persistent_indexes
+        ));
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]
