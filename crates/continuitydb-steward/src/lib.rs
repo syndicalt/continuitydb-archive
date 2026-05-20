@@ -22,13 +22,14 @@ pub use ledger::{
 #[cfg(feature = "local-model")]
 pub use local_model::{
     latest_local_model_benchmark_baseline, record_local_model_benchmark_baseline,
-    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
-    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
-    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression,
-    LocalModelBenchmarkReport, LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
-    MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
-    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
-    StewardEvaluationReport, StewardEvaluationSuite,
+    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
+    FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
+    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
+    LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest, LocalModelSteward,
+    LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile,
+    SmallModelCandidate, StewardEvaluationCase, StewardEvaluationCaseReport,
+    StewardEvaluationFailure, StewardEvaluationReport, StewardEvaluationSuite,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -39,11 +40,12 @@ mod tests {
     #[cfg(feature = "local-model")]
     use super::{
         latest_local_model_benchmark_baseline, record_local_model_benchmark_baseline,
-        small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
-        LocalModelBenchmark, LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
-        LocalModelBenchmarkRegression, MemoryLocalModelBenchmarkBaselineStore,
-        MistralRsRuntimeProfile, SmallModelCandidate, StewardEvaluationCase,
-        StewardEvaluationFailure, StewardEvaluationSuite,
+        record_local_model_benchmark_baseline_with_regression, small_model_candidates,
+        FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
+        LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
+        LocalModelBenchmarkGateReport, LocalModelBenchmarkRegression,
+        MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
+        StewardEvaluationCase, StewardEvaluationFailure, StewardEvaluationSuite,
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
@@ -111,6 +113,17 @@ mod tests {
         cell_id: StateCellId,
         response: String,
     ) -> Result<LocalModelBenchmarkBaseline, Box<dyn std::error::Error>> {
+        Ok(LocalModelBenchmarkBaseline::from_report(
+            local_model_benchmark_for_response(cell_id, response)?.run(steward()?),
+            created_at(),
+        ))
+    }
+
+    #[cfg(feature = "local-model")]
+    fn local_model_benchmark_for_response(
+        cell_id: StateCellId,
+        response: String,
+    ) -> Result<LocalModelBenchmark, Box<dyn std::error::Error>> {
         let script = write_local_model_script(
             "continuitydb-local-model-baseline-regression",
             &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
@@ -126,11 +139,10 @@ mod tests {
         .with_evidence("test://frontier", "Evidence is stale.")
         .expect_action(StewardAction::MarkFrontier { cell_id })
         .require_citation("test://frontier")]);
-        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
-
-        Ok(LocalModelBenchmarkBaseline::from_report(
-            benchmark.run(steward()?),
-            created_at(),
+        Ok(LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            runner,
+            suite,
         ))
     }
 
@@ -1340,6 +1352,100 @@ mod tests {
         let latest = latest_local_model_benchmark_baseline(&store, small_model_candidates()[0])?;
 
         assert_eq!(latest, None);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_baseline_gate_records_without_previous_regression(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let benchmark = local_model_benchmark_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://frontier"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+
+        let report: LocalModelBenchmarkGateReport =
+            record_local_model_benchmark_baseline_with_regression(
+                &benchmark,
+                steward()?,
+                created_at(),
+                &mut store,
+            )?;
+
+        assert!(report.current_baseline().passed());
+        assert_eq!(report.regression(), None);
+        assert!(!report.regressed());
+        assert_eq!(
+            store.list_baselines()?,
+            vec![report.current_baseline().clone()]
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_baseline_gate_reports_regression_against_latest_previous(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let previous = local_model_baseline_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://frontier"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let benchmark = local_model_benchmark_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://other"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(previous)?;
+
+        let report: LocalModelBenchmarkGateReport =
+            record_local_model_benchmark_baseline_with_regression(
+                &benchmark,
+                steward()?,
+                created_at(),
+                &mut store,
+            )?;
+
+        let Some(regression) = report.regression() else {
+            return Err("previous baseline missing".into());
+        };
+        assert!(regression.regressed());
+        assert_eq!(regression.previous_passed_cases(), 1);
+        assert_eq!(regression.current_passed_cases(), 0);
+        assert!(report.regressed());
+        assert_eq!(store.list_baselines()?.len(), 2);
         Ok(())
     }
 

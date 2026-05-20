@@ -740,6 +740,43 @@ impl LocalModelBenchmarkRegression {
     }
 }
 
+/// Result of recording a current benchmark baseline and comparing with prior state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelBenchmarkGateReport {
+    current_baseline: LocalModelBenchmarkBaseline,
+    regression: Option<LocalModelBenchmarkRegression>,
+}
+
+impl LocalModelBenchmarkGateReport {
+    /// Creates a local model benchmark gate report.
+    pub fn new(
+        current_baseline: LocalModelBenchmarkBaseline,
+        regression: Option<LocalModelBenchmarkRegression>,
+    ) -> Self {
+        Self {
+            current_baseline,
+            regression,
+        }
+    }
+
+    /// Returns the newly recorded baseline.
+    pub fn current_baseline(&self) -> &LocalModelBenchmarkBaseline {
+        &self.current_baseline
+    }
+
+    /// Returns the regression comparison, if a previous baseline existed.
+    pub fn regression(&self) -> Option<&LocalModelBenchmarkRegression> {
+        self.regression.as_ref()
+    }
+
+    /// Returns whether the current baseline regressed against the previous baseline.
+    pub fn regressed(&self) -> bool {
+        self.regression
+            .as_ref()
+            .is_some_and(LocalModelBenchmarkRegression::regressed)
+    }
+}
+
 /// Runs a configured local model benchmark and records the resulting baseline.
 pub fn record_local_model_benchmark_baseline<S>(
     benchmark: &LocalModelBenchmark,
@@ -753,6 +790,25 @@ where
     let baseline = LocalModelBenchmarkBaseline::from_report(benchmark.run(identity), recorded_at);
     store.append_baseline(baseline.clone())?;
     Ok(baseline)
+}
+
+/// Records a benchmark baseline and compares it with the latest previous baseline.
+pub fn record_local_model_benchmark_baseline_with_regression<S>(
+    benchmark: &LocalModelBenchmark,
+    identity: StewardIdentity,
+    recorded_at: DateTime<Utc>,
+    store: &mut S,
+) -> Result<LocalModelBenchmarkGateReport, StewardError>
+where
+    S: LocalModelBenchmarkBaselineStore,
+{
+    let previous = latest_local_model_benchmark_baseline(store, benchmark.candidate())?;
+    let current = record_local_model_benchmark_baseline(benchmark, identity, recorded_at, store)?;
+    let regression = previous
+        .as_ref()
+        .map(|previous| LocalModelBenchmarkRegression::compare(previous, &current));
+
+    Ok(LocalModelBenchmarkGateReport::new(current, regression))
 }
 
 /// Returns the newest stored benchmark baseline for a model candidate.
