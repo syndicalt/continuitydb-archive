@@ -531,6 +531,79 @@ impl FileKernelIndex {
             .collect()
     }
 
+    fn candidate_positions(&self, lookup: &CellLookup) -> Vec<usize> {
+        let mut candidates = Vec::new();
+
+        if let Some(cell_id) = lookup.cell_id {
+            candidates.push(
+                self.position_by_id(cell_id)
+                    .map(|position| vec![position])
+                    .unwrap_or_default(),
+            );
+        }
+        if let Some(anchor) = lookup.semantic_anchor.as_ref() {
+            candidates.push(self.anchors.get(anchor).cloned().unwrap_or_default());
+        }
+        if let Some(commit_id) = lookup.commit_id {
+            candidates.push(self.commits.get(&commit_id).cloned().unwrap_or_default());
+        }
+        if let Some(scope) = lookup.scope.as_ref() {
+            candidates.push(self.scopes.get(scope).cloned().unwrap_or_default());
+        }
+        if let Some(question) = lookup.answerability_question.as_ref() {
+            candidates.push(
+                self.answerability_questions
+                    .get(question)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+        }
+        if let Some(source) = lookup.evidence_source.as_ref() {
+            candidates.push(
+                self.evidence_sources
+                    .get(source)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+        }
+        if let Some(activation) = lookup.activation {
+            candidates.push(
+                self.activations
+                    .get(&activation)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+        }
+        if let Some(target) = lookup.dependency_target {
+            let positions = if let Some(kind) = lookup.dependency_kind {
+                self.dependency_target_kinds
+                    .get(&(target, kind))
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                self.dependency_targets
+                    .get(&target)
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            candidates.push(positions);
+        }
+        if let Some(minimum_confidence) = lookup.minimum_confidence {
+            candidates.push(self.positions_with_minimum_confidence(minimum_confidence));
+        }
+        if let Some(system_at) = lookup.system_at {
+            candidates.push(self.positions_at_system_time(system_at));
+        }
+        if let Some(valid_at) = lookup.valid_at {
+            candidates.push(self.positions_at_valid_time(valid_at));
+        }
+
+        candidates
+            .into_iter()
+            .min_by_key(Vec::len)
+            .unwrap_or_else(|| (0..self.cells.len()).collect())
+    }
+
     fn apply_explicit_manifest(&mut self, manifest: CommitManifest) -> Result<(), KernelError> {
         let existing_positions = self
             .commits
@@ -1201,122 +1274,12 @@ impl StorageKernel for FileKernel {
     }
 
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError> {
-        let candidates: Vec<&StateCell> = if let Some(cell_id) = lookup.cell_id {
-            self.index
-                .position_by_id(cell_id)
-                .map(|position| vec![&self.index.cells[position]])
-                .unwrap_or_default()
-        } else if let Some(anchor) = lookup.semantic_anchor.as_ref() {
-            self.index
-                .anchors
-                .get(anchor)
-                .map(|positions| {
-                    positions
-                        .iter()
-                        .map(|position| &self.index.cells[*position])
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else if let Some(commit_id) = lookup.commit_id {
-            self.index
-                .commits
-                .get(&commit_id)
-                .map(|positions| {
-                    positions
-                        .iter()
-                        .map(|position| &self.index.cells[*position])
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else if let Some(scope) = lookup.scope.as_ref() {
-            self.index
-                .scopes
-                .get(scope)
-                .map(|positions| {
-                    positions
-                        .iter()
-                        .map(|position| &self.index.cells[*position])
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else if let Some(question) = lookup.answerability_question.as_ref() {
-            self.index
-                .answerability_questions
-                .get(question)
-                .map(|positions| {
-                    positions
-                        .iter()
-                        .map(|position| &self.index.cells[*position])
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else if let Some(source) = lookup.evidence_source.as_ref() {
-            self.index
-                .evidence_sources
-                .get(source)
-                .map(|positions| {
-                    positions
-                        .iter()
-                        .map(|position| &self.index.cells[*position])
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else if let Some(activation) = lookup.activation {
-            self.index
-                .activations
-                .get(&activation)
-                .map(|positions| {
-                    positions
-                        .iter()
-                        .map(|position| &self.index.cells[*position])
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else if let Some(target) = lookup.dependency_target {
-            if let Some(kind) = lookup.dependency_kind {
-                self.index
-                    .dependency_target_kinds
-                    .get(&(target, kind))
-                    .map(|positions| {
-                        positions
-                            .iter()
-                            .map(|position| &self.index.cells[*position])
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else {
-                self.index
-                    .dependency_targets
-                    .get(&target)
-                    .map(|positions| {
-                        positions
-                            .iter()
-                            .map(|position| &self.index.cells[*position])
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            }
-        } else if let Some(minimum_confidence) = lookup.minimum_confidence {
-            self.index
-                .positions_with_minimum_confidence(minimum_confidence)
-                .iter()
-                .map(|position| &self.index.cells[*position])
-                .collect()
-        } else if let Some(system_at) = lookup.system_at {
-            self.index
-                .positions_at_system_time(system_at)
-                .iter()
-                .map(|position| &self.index.cells[*position])
-                .collect()
-        } else if let Some(valid_at) = lookup.valid_at {
-            self.index
-                .positions_at_valid_time(valid_at)
-                .iter()
-                .map(|position| &self.index.cells[*position])
-                .collect()
-        } else {
-            self.index.cells.iter().collect()
-        };
+        let candidates = self
+            .index
+            .candidate_positions(&lookup)
+            .into_iter()
+            .map(|position| &self.index.cells[position])
+            .collect::<Vec<_>>();
 
         let cells = candidates
             .into_iter()
@@ -3776,6 +3739,44 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(indexed, vec![expected]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_candidate_selection_prefers_smallest_indexed_constraint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-smallest-candidate-index");
+        let mut narrow = sample_cell("project:continuitydb:candidate-index-narrow", 0.91, 12)?;
+        narrow.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let narrow_id = narrow.id;
+        let broad_first =
+            sample_cell("project:continuitydb:candidate-index-broad-first", 0.83, 15)?;
+        let broad_second = sample_cell(
+            "project:continuitydb:candidate-index-broad-second",
+            0.82,
+            15,
+        )?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, broad_first)?;
+        append_committed(&mut kernel, narrow)?;
+        append_committed(&mut kernel, broad_second)?;
+        let narrow_position = kernel
+            .index
+            .position_by_id(narrow_id)
+            .ok_or_else(|| std::io::Error::other("missing indexed narrow cell"))?;
+        let lookup = CellLookup {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            answerability_question: Some("what changed?".to_string()),
+            ..CellLookup::default()
+        };
+
+        let candidate_positions = kernel.index.candidate_positions(&lookup);
+        let lookup_results = kernel.lookup_cells(lookup)?;
+
+        assert_eq!(candidate_positions, vec![narrow_position]);
+        assert_eq!(lookup_results.len(), 1);
+        assert_eq!(lookup_results[0].id, narrow_id);
         fs::remove_file(path)?;
         Ok(())
     }

@@ -88,6 +88,7 @@ Storage kernel
 32. Add file-kernel secondary indexes for minimum-confidence lookups. Implemented a derived max-evidence-confidence index rebuilt from the JSONL log and maintained after append so confidence-constrained checkout can start from indexed candidates while preserving exact final filtering.
 33. Add file-kernel secondary indexes for system-time lookups. Implemented a derived system-start-time index rebuilt from the JSONL log and maintained after append so transaction-time checkout can start from indexed candidates while preserving exact final range filtering.
 34. Add file-kernel secondary indexes for valid-time lookups. Implemented a derived valid-start-time index rebuilt from the JSONL log and maintained after append so real-world as-of checkout can start from indexed candidates while preserving exact final range filtering.
+35. Add file-kernel indexed candidate-set selection. Replaced fixed lookup-priority candidate selection with a smallest-indexed-candidate chooser so combined checkout constraints can start from the narrowest available derived index while preserving exact final filtering.
 
 ## Checkout Milestones
 
