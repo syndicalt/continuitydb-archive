@@ -5,7 +5,10 @@ use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
 #[cfg(feature = "steward")]
-use continuitydb_core::{ActivationState, Answerability, Confidence};
+use continuitydb_core::{
+    ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
+    Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, TrustSignal, ValidTimeRange,
+};
 use continuitydb_core::{
     CommitId, CommitManifest, CoreError, StateCell, StateCellId, UtilityFeedback,
 };
@@ -639,6 +642,74 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(Some(successor_id))
     }
 
+    /// Applies an accepted RequestVerification Steward proposal as an operational work StateCell.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_request_verification_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Option<StateCellId>, ContinuityError> {
+        if record.decision().outcome() == ProposalOutcome::Rejected {
+            return Ok(None);
+        }
+
+        let (target_cell_id, request) = match record.proposal().action() {
+            StewardAction::RequestVerification { cell_id, request } => (*cell_id, request),
+            _ => return Err(ContinuityError::UnsupportedStewardProposalAction),
+        };
+
+        if let Some(cell_id) = target_cell_id {
+            self.lookup_one_cell(cell_id)?;
+        }
+
+        let payload =
+            serde_json::to_value(record).map_err(|_error| StewardError::ProposalStoreCorrupt)?;
+        let target_anchor =
+            target_cell_id.map_or_else(|| "general".to_string(), |cell_id| cell_id.to_string());
+        let derived_confidence = Confidence::new(1.0)?;
+        let mut cell = StateCell::new(
+            StateCellId::new(),
+            vec![
+                SemanticAnchor::new("continuitydb:steward:verification-request"),
+                SemanticAnchor::new(format!(
+                    "continuitydb:steward:verification-request:{target_anchor}"
+                )),
+            ],
+            ValidTimeRange::new(committed_at, None)?,
+            Scope::Project("continuitydb-steward".to_string()),
+            Answerability::new(vec![
+                "what verification did the Steward request?".to_string()
+            ])?,
+            record
+                .proposal()
+                .citations()
+                .iter()
+                .map(|citation| Evidence {
+                    source: SourceId::new("continuitydb-steward"),
+                    citation: Citation {
+                        locator: citation.clone(),
+                    },
+                    confidence: derived_confidence,
+                    trust: vec![TrustSignal::Derived],
+                })
+                .collect(),
+            CellPayload::Json(payload),
+            CellCost::new(request.split_whitespace().count() as i64, 0)?,
+        )?;
+
+        if let Some(cell_id) = target_cell_id {
+            cell.dependencies.push(CellDependency::new(
+                cell_id,
+                CellDependencyKind::DependsOn,
+                "verification request targets this StateCell",
+            ));
+        }
+
+        let work_cell_id = cell.id;
+        self.kernel.append_cell_at(cell, committed_at)?;
+        Ok(Some(work_cell_id))
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -961,7 +1032,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_checkout::CheckoutRequest;
     #[cfg(feature = "steward")]
-    use continuitydb_core::ActivationState;
+    use continuitydb_core::{ActivationState, CellDependencyKind};
     use continuitydb_core::{
         Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence, Scope,
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
@@ -4046,6 +4117,240 @@ WHERE scope = project("continuitydb")
             db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
 
         let result = db.apply_accepted_adjust_confidence_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_request_verification_application_appends_targeted_work_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 45, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:verify-target", 0.51, 12)?,
+            initial_commit,
+        )?;
+        let request = "Refresh the upstream citation and verify the latest observed state.";
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::RequestVerification {
+                cell_id: Some(target_id),
+                request: request.to_string(),
+            },
+            "The target cell has high-impact uncertainty.",
+            vec!["test://verification-apply".to_string()],
+            initial_commit,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), initial_commit)?;
+
+        let work_cell_id = db
+            .apply_accepted_request_verification_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected verification work cell"))?;
+
+        let work_cell = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(work_cell_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing verification work cell"))?;
+        let decoded_record: continuitydb_steward::ProposalAuditRecord =
+            match work_cell.payload.clone() {
+                CellPayload::Json(value) => serde_json::from_value(value)?,
+                CellPayload::Text(_) | CellPayload::BlobRef(_) => {
+                    return Err(std::io::Error::other("expected JSON payload").into())
+                }
+            };
+
+        assert_eq!(work_cell.system_time.from(), apply_commit);
+        assert_eq!(
+            work_cell.valid_time.from(),
+            apply_commit,
+            "verification work becomes valid when deterministic application commits it"
+        );
+        assert_eq!(
+            work_cell.answerability.questions(),
+            &["what verification did the Steward request?".to_string()]
+        );
+        assert!(work_cell
+            .anchors
+            .iter()
+            .any(|anchor| anchor.as_str() == "continuitydb:steward:verification-request"));
+        assert!(work_cell.anchors.iter().any(|anchor| anchor.as_str()
+            == format!("continuitydb:steward:verification-request:{target_id}")));
+        assert_eq!(
+            work_cell.evidence[0].source.as_str(),
+            "continuitydb-steward"
+        );
+        assert_eq!(
+            work_cell.evidence[0].citation.locator,
+            "test://verification-apply"
+        );
+        assert_eq!(work_cell.evidence[0].confidence, Confidence::new(1.0)?);
+        assert_eq!(work_cell.evidence[0].trust, vec![TrustSignal::Derived]);
+        assert_eq!(
+            work_cell.cost.token_count,
+            request.split_whitespace().count() as i64
+        );
+        assert_eq!(decoded_record, record);
+        assert_eq!(work_cell.dependencies.len(), 1);
+        assert_eq!(work_cell.dependencies[0].target, target_id);
+        assert_eq!(
+            work_cell.dependencies[0].kind,
+            CellDependencyKind::DependsOn
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_request_verification_application_appends_general_work_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 14, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::RequestVerification {
+                cell_id: None,
+                request: "Check whether any frontier subscriptions need refreshed evidence."
+                    .to_string(),
+            },
+            "The Steward requested general verification work.",
+            vec!["test://verification-general".to_string()],
+            committed_at,
+        )?;
+        let record = continuitydb_steward::ProposalAuditRecord::new(
+            proposal.clone(),
+            ProposalPolicy::strict().evaluate(&proposal, committed_at),
+        )?;
+
+        let work_cell_id = db
+            .apply_accepted_request_verification_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected verification work cell"))?;
+
+        let work_cell = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(work_cell_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing verification work cell"))?;
+
+        assert!(work_cell
+            .anchors
+            .iter()
+            .any(|anchor| anchor.as_str() == "continuitydb:steward:verification-request:general"));
+        assert!(work_cell.dependencies.is_empty());
+        assert_eq!(work_cell.system_time.from(), apply_commit);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_request_verification_application_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-verification", 0.51, 12)?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::RequestVerification {
+                cell_id: Some(target_id),
+                request: "Rejected verification work should not be committed.".to_string(),
+            },
+            "Policy rejected this verification work.",
+            vec!["test://verification-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied = db.apply_accepted_request_verification_proposal_at(&record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_request_verification_application_rejects_unsupported_accepted_action(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: StateCellId::new(),
+            },
+            "Frontier application belongs to a different method.",
+            vec!["test://unsupported-verification-apply".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_request_verification_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::UnsupportedStewardProposalAction)
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_request_verification_application_reports_missing_target_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_id = StateCellId::new();
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::RequestVerification {
+                cell_id: Some(missing_id),
+                request: "Missing target should be reported before application.".to_string(),
+            },
+            "Missing target should be reported before application.",
+            vec!["test://verification-missing".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_request_verification_proposal_at(&record, committed_at);
 
         assert!(matches!(
             result,
