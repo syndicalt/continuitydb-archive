@@ -2035,10 +2035,13 @@ fn write_workload_bundle_manifest(
 ) -> Result<WorkloadBundleManifest, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(artifact_dir)?;
     let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let report_text = std::fs::read_to_string(report_path)?;
     let manifest = serde_json::json!({
         "format": "continuitydb.workload.bundle",
         "format_version": 1,
         "workload_report_path": report_path.display().to_string(),
+        "workload_report_fingerprint": fnv1a64_fingerprint(&report_text),
+        "workload_report_bytes": report_text.len(),
         "kernel": report["kernel"].clone(),
         "store_path": report["store_path"].clone(),
         "artifact_dir": report["artifact_dir"].clone(),

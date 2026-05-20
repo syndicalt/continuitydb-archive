@@ -313,6 +313,12 @@ fn cli_measure_workload_artifact_dir_writes_bundle() -> Result<(), Box<dyn std::
         bundle_manifest_json["workload_report_path"].as_str(),
         Some(report_path.display().to_string().as_str())
     );
+    assert!(bundle_manifest_json["workload_report_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(bundle_manifest_json["workload_report_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
     assert_eq!(bundle_manifest_json["kernel"].as_str(), Some("memory"));
     assert_eq!(
         bundle_manifest_json["baseline_comparison"],
