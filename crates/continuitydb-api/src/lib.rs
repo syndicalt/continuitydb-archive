@@ -61,6 +61,12 @@ pub enum ContinuityError {
         /// Actual backing kernel guarantees.
         actual: KernelCapabilities,
     },
+    /// File store is readable but should be compacted before use under the requested policy.
+    #[error("file store compaction is recommended")]
+    FileStoreCompactionRecommended {
+        /// Health report that explains why the store is not canonical.
+        health: FileKernelHealth,
+    },
 }
 
 /// Native embeddable ContinuityDB operation boundary.
@@ -491,6 +497,13 @@ impl ContinuityDb<FileKernel> {
         Ok(db)
     }
 
+    /// Opens a file-backed ContinuityDB instance only when the store is already canonical.
+    pub fn open_canonical_file<P: AsRef<Path>>(path: P) -> Result<Self, ContinuityError> {
+        let db = Self::open_file(path)?;
+        db.ensure_file_store_canonical()?;
+        Ok(db)
+    }
+
     /// Rewrites a file-backed store into the current canonical durable record format.
     pub fn compact_file_store(&mut self) -> Result<(), ContinuityError> {
         self.kernel.compact().map_err(Into::into)
@@ -504,6 +517,16 @@ impl ContinuityDb<FileKernel> {
     /// Returns the file-format health report for the backing file store.
     pub fn file_store_health(&self) -> FileKernelHealth {
         self.kernel.health()
+    }
+
+    /// Ensures the file-backed store does not require compaction.
+    pub fn ensure_file_store_canonical(&self) -> Result<(), ContinuityError> {
+        let health = self.file_store_health();
+        if health.compaction_recommended {
+            Err(ContinuityError::FileStoreCompactionRecommended { health })
+        } else {
+            Ok(())
+        }
     }
 
     /// Writes a versioned JSON commit export envelope to a file.
@@ -547,7 +570,7 @@ mod tests {
         KernelRequirements, StorageKernel,
     };
     use continuitydb_memory::MemoryKernel;
-    use std::fs;
+    use std::{fs, path::Path};
 
     use super::{
         CommitExportBatch, CommitExportFileSummary, CommitSlice, ContinuityDb, ContinuityError,
@@ -563,6 +586,19 @@ mod tests {
 
     fn temp_file_kernel_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("{name}-{:?}.jsonl", StateCellId::new()))
+    }
+
+    fn write_legacy_file_store(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:api-canonical-legacy", 0.91, 12)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
+        fs::write(path, format!("{}\n", serde_json::to_string(&cell)?))?;
+        Ok(())
     }
 
     fn sample_cell_with_payload_day_and_confidence(
@@ -684,6 +720,54 @@ mod tests {
         assert_eq!(health.checksum_free_records, 0);
         assert_eq!(health.canonical_records, 0);
         assert!(!health.compaction_recommended);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_accepts_canonical_file_store() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-store-canonical");
+        let db = ContinuityDb::open_file(&path)?;
+
+        db.ensure_file_store_canonical()?;
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_rejects_legacy_file_store_when_canonical_required(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-store-canonical-legacy");
+        write_legacy_file_store(&path)?;
+        let db = ContinuityDb::open_file(&path)?;
+
+        let result = db.ensure_file_store_canonical();
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::FileStoreCompactionRecommended { health })
+                if health.legacy_raw_cells == 1 && health.compaction_recommended
+        ));
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_open_canonical_file_rejects_legacy_file_store(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-open-canonical-file-legacy");
+        write_legacy_file_store(&path)?;
+
+        let result = ContinuityDb::open_canonical_file(&path);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::FileStoreCompactionRecommended { health })
+                if health.legacy_raw_cells == 1 && health.compaction_recommended
+        ));
 
         fs::remove_file(path)?;
         Ok(())
