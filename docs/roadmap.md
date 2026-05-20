@@ -61,6 +61,7 @@ Storage kernel
 5. Add first-class StateCell answerability filtering. Implemented in `CellLookup` across memory and file kernels.
 6. Add first-class evidence-source and minimum-confidence filtering. Implemented in `CellLookup` across memory and file kernels.
 7. Add deterministic in-process indexes for the durable file kernel. Implemented ID and semantic-anchor indexes rebuilt from the JSONL log on open and maintained after successful append, giving the first durable kernel a real indexing boundary while preserving the append log as source of truth.
+8. Add first-class system transaction-time stamping and lookup. Implemented `StateCell.system_time`, deterministic `StorageKernel::append_cell_at`, default append-time stamping, and `CellLookup.system_at` filtering across memory and file kernels.
 
 ## Checkout Milestones
 

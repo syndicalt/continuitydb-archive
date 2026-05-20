@@ -177,6 +177,19 @@ mod tests {
     }
 
     #[test]
+    fn state_cell_starts_with_default_system_time() -> Result<(), Box<dyn std::error::Error>> {
+        let cell = sample_state_cell("project:continuitydb:system-time")?;
+        let epoch = Utc
+            .timestamp_opt(0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid epoch timestamp"))?;
+
+        assert_eq!(cell.system_time.from(), epoch);
+        assert!(cell.system_time.contains(epoch));
+        Ok(())
+    }
+
+    #[test]
     fn state_cell_deserializes_missing_dependencies_as_empty(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let cell = sample_state_cell("project:continuitydb:legacy-dependencies")?;

@@ -1,6 +1,7 @@
 //! In-memory StorageKernel implementation for correctness tests.
 
-use continuitydb_core::StateCell;
+use chrono::{DateTime, Utc};
+use continuitydb_core::{StateCell, SystemTimeRange};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 
 /// Append-only in-memory storage kernel.
@@ -10,11 +11,16 @@ pub struct MemoryKernel {
 }
 
 impl StorageKernel for MemoryKernel {
-    fn append_cell(&mut self, cell: StateCell) -> Result<(), KernelError> {
+    fn append_cell_at(
+        &mut self,
+        mut cell: StateCell,
+        committed_at: DateTime<Utc>,
+    ) -> Result<(), KernelError> {
         if self.cells.iter().any(|stored| stored.id == cell.id) {
             return Err(KernelError::DuplicateCell);
         }
 
+        cell.system_time = SystemTimeRange::open_from(committed_at);
         self.cells.push(cell);
         Ok(())
     }
@@ -40,6 +46,11 @@ impl StorageKernel for MemoryKernel {
                 lookup
                     .valid_at
                     .map_or(true, |valid_at| cell.valid_time.contains(valid_at))
+            })
+            .filter(|cell| {
+                lookup
+                    .system_at
+                    .map_or(true, |system_at| cell.system_time.contains(system_at))
             })
             .filter(|cell| {
                 lookup
@@ -102,6 +113,22 @@ mod tests {
 
     use super::MemoryKernel;
 
+    fn test_commit_time() -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
+        Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp").into())
+    }
+
+    fn append_committed(
+        kernel: &mut MemoryKernel,
+        mut cell: StateCell,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        let committed_at = test_commit_time()?;
+        kernel.append_cell_at(cell.clone(), committed_at)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        Ok(cell)
+    }
+
     fn sample_cell(
         anchor: &str,
         confidence: f32,
@@ -145,7 +172,7 @@ mod tests {
         let mut kernel = MemoryKernel::default();
         let cell = sample_cell("project:continuitydb:status", 0.9, 12)?;
 
-        kernel.append_cell(cell.clone())?;
+        let cell = append_committed(&mut kernel, cell)?;
         let results = kernel.lookup_cells(CellLookup {
             semantic_anchor: Some("project:continuitydb:status".to_string()),
             ..CellLookup::default()
@@ -162,8 +189,8 @@ mod tests {
         active.activation = ActivationState::Active;
         let mut frontier = sample_cell("project:continuitydb:frontier", 0.8, 15)?;
         frontier.activation = ActivationState::Frontier;
-        kernel.append_cell(active)?;
-        kernel.append_cell(frontier.clone())?;
+        append_committed(&mut kernel, active)?;
+        let frontier = append_committed(&mut kernel, frontier)?;
 
         let results = kernel.lookup_cells(CellLookup {
             activation: Some(ActivationState::Frontier),
@@ -181,8 +208,8 @@ mod tests {
         status.answerability = Answerability::new(vec!["what is status?".to_string()])?;
         let mut frontier = sample_cell("project:continuitydb:frontier", 0.8, 15)?;
         frontier.answerability = Answerability::new(vec!["what is frontier?".to_string()])?;
-        kernel.append_cell(status)?;
-        kernel.append_cell(frontier.clone())?;
+        append_committed(&mut kernel, status)?;
+        let frontier = append_committed(&mut kernel, frontier)?;
 
         let results = kernel.lookup_cells(CellLookup {
             answerability_question: Some("what is frontier?".to_string()),
@@ -198,8 +225,8 @@ mod tests {
         let mut kernel = MemoryKernel::default();
         let observed = sample_cell_with_source("project:continuitydb:observed", "sensor", 0.9, 12)?;
         let reviewed = sample_cell_with_source("project:continuitydb:reviewed", "human", 0.8, 15)?;
-        kernel.append_cell(observed)?;
-        kernel.append_cell(reviewed.clone())?;
+        append_committed(&mut kernel, observed)?;
+        let reviewed = append_committed(&mut kernel, reviewed)?;
 
         let results = kernel.lookup_cells(CellLookup {
             evidence_source: Some("human".to_string()),
@@ -215,8 +242,8 @@ mod tests {
         let mut kernel = MemoryKernel::default();
         let weak = sample_cell("project:continuitydb:weak", 0.61, 12)?;
         let strong = sample_cell("project:continuitydb:strong", 0.86, 15)?;
-        kernel.append_cell(weak)?;
-        kernel.append_cell(strong.clone())?;
+        append_committed(&mut kernel, weak)?;
+        let strong = append_committed(&mut kernel, strong)?;
 
         let results = kernel.lookup_cells(CellLookup {
             minimum_confidence: Some(Confidence::new(0.8)?),
@@ -224,6 +251,36 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![strong]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_system_time() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let before_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 11, 59, 59)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let cell = sample_cell("project:continuitydb:system-time", 0.91, 12)?;
+        kernel.append_cell_at(cell.clone(), committed_at)?;
+
+        let current = kernel.lookup_cells(CellLookup {
+            system_at: Some(committed_at),
+            ..CellLookup::default()
+        })?;
+        let historical = kernel.lookup_cells(CellLookup {
+            system_at: Some(before_commit),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].id, cell.id);
+        assert_eq!(current[0].system_time.from(), committed_at);
+        assert!(historical.is_empty());
         Ok(())
     }
 
@@ -251,9 +308,9 @@ mod tests {
             CellDependencyKind::Supports,
             "supports target",
         ));
-        kernel.append_cell(dependent.clone())?;
-        kernel.append_cell(unrelated)?;
-        kernel.append_cell(support)?;
+        let dependent = append_committed(&mut kernel, dependent)?;
+        append_committed(&mut kernel, unrelated)?;
+        append_committed(&mut kernel, support)?;
 
         let results = kernel.lookup_cells(CellLookup {
             dependency_target: Some(target),

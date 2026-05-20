@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
-    ActivationState, CellDependencyKind, Confidence, Scope, StateCell, StateCellId,
+    ActivationState, CellDependencyKind, Confidence, Scope, StateCell, StateCellId, SystemTimeRange,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -35,6 +35,8 @@ pub struct CellLookup {
     pub scope: Option<Scope>,
     /// Optional valid-time as-of filter.
     pub valid_at: Option<DateTime<Utc>>,
+    /// Optional system transaction-time as-of filter.
+    pub system_at: Option<DateTime<Utc>>,
     /// Optional activation-state filter.
     pub activation: Option<ActivationState>,
     /// Optional exact answerability question filter.
@@ -52,7 +54,16 @@ pub struct CellLookup {
 /// Minimal append and lookup contract required by the first ContinuityDB milestone.
 pub trait StorageKernel {
     /// Appends an immutable StateCell version.
-    fn append_cell(&mut self, cell: StateCell) -> Result<(), KernelError>;
+    fn append_cell(&mut self, cell: StateCell) -> Result<(), KernelError> {
+        self.append_cell_at(cell, Utc::now())
+    }
+
+    /// Appends an immutable StateCell version at a deterministic system time.
+    fn append_cell_at(
+        &mut self,
+        cell: StateCell,
+        committed_at: DateTime<Utc>,
+    ) -> Result<(), KernelError>;
 
     /// Looks up StateCells matching deterministic constraints.
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError>;
@@ -157,11 +168,16 @@ fn read_cells_from_path(path: &Path) -> Result<Vec<StateCell>, KernelError> {
 }
 
 impl StorageKernel for FileKernel {
-    fn append_cell(&mut self, cell: StateCell) -> Result<(), KernelError> {
+    fn append_cell_at(
+        &mut self,
+        mut cell: StateCell,
+        committed_at: DateTime<Utc>,
+    ) -> Result<(), KernelError> {
         if self.index.contains_id(cell.id) {
             return Err(KernelError::DuplicateCell);
         }
 
+        cell.system_time = SystemTimeRange::open_from(committed_at);
         let encoded = serde_json::to_string(&cell).map_err(|_error| KernelError::StoreCorrupt)?;
         let mut file = OpenOptions::new()
             .create(true)
@@ -210,6 +226,11 @@ impl StorageKernel for FileKernel {
                 lookup
                     .valid_at
                     .map_or(true, |valid_at| cell.valid_time.contains(valid_at))
+            })
+            .filter(|cell| {
+                lookup
+                    .system_at
+                    .map_or(true, |system_at| cell.system_time.contains(system_at))
             })
             .filter(|cell| {
                 lookup
@@ -275,6 +296,22 @@ mod tests {
         std::env::temp_dir().join(format!("{name}-{:?}.jsonl", StateCellId::new()))
     }
 
+    fn test_commit_time() -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
+        Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp").into())
+    }
+
+    fn append_committed(
+        kernel: &mut FileKernel,
+        mut cell: StateCell,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        let committed_at = test_commit_time()?;
+        kernel.append_cell_at(cell.clone(), committed_at)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        Ok(cell)
+    }
+
     fn sample_cell(
         anchor: &str,
         confidence: f32,
@@ -317,9 +354,10 @@ mod tests {
     fn file_kernel_persists_cells_across_reopen() -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_kernel_path("continuitydb-file-kernel");
         let cell = sample_cell("project:continuitydb:durable", 0.91, 12)?;
+        let expected;
         {
             let mut kernel = FileKernel::open(&path)?;
-            kernel.append_cell(cell.clone())?;
+            expected = append_committed(&mut kernel, cell)?;
         }
 
         let reopened = FileKernel::open(&path)?;
@@ -328,7 +366,7 @@ mod tests {
             ..CellLookup::default()
         })?;
 
-        assert_eq!(results, vec![cell]);
+        assert_eq!(results, vec![expected]);
         fs::remove_file(path)?;
         Ok(())
     }
@@ -339,7 +377,7 @@ mod tests {
         let cell = sample_cell("project:continuitydb:duplicate", 0.91, 12)?;
         {
             let mut kernel = FileKernel::open(&path)?;
-            kernel.append_cell(cell.clone())?;
+            append_committed(&mut kernel, cell.clone())?;
         }
 
         let mut reopened = FileKernel::open(&path)?;
@@ -407,8 +445,8 @@ mod tests {
         frontier.activation = ActivationState::Frontier;
         {
             let mut kernel = FileKernel::open(&path)?;
-            kernel.append_cell(active)?;
-            kernel.append_cell(frontier.clone())?;
+            append_committed(&mut kernel, active)?;
+            frontier = append_committed(&mut kernel, frontier)?;
         }
 
         let reopened = FileKernel::open(&path)?;
@@ -431,8 +469,8 @@ mod tests {
         frontier.answerability = Answerability::new(vec!["what is frontier?".to_string()])?;
         {
             let mut kernel = FileKernel::open(&path)?;
-            kernel.append_cell(status)?;
-            kernel.append_cell(frontier.clone())?;
+            append_committed(&mut kernel, status)?;
+            frontier = append_committed(&mut kernel, frontier)?;
         }
 
         let reopened = FileKernel::open(&path)?;
@@ -451,11 +489,12 @@ mod tests {
         let path = temp_kernel_path("continuitydb-file-kernel-evidence-source");
         let observed =
             sample_cell_with_source("project:continuitydb:observed", "sensor", 0.91, 12)?;
-        let reviewed = sample_cell_with_source("project:continuitydb:reviewed", "human", 0.83, 15)?;
+        let mut reviewed =
+            sample_cell_with_source("project:continuitydb:reviewed", "human", 0.83, 15)?;
         {
             let mut kernel = FileKernel::open(&path)?;
-            kernel.append_cell(observed)?;
-            kernel.append_cell(reviewed.clone())?;
+            append_committed(&mut kernel, observed)?;
+            reviewed = append_committed(&mut kernel, reviewed)?;
         }
 
         let reopened = FileKernel::open(&path)?;
@@ -473,11 +512,11 @@ mod tests {
     fn file_kernel_filters_by_minimum_confidence() -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_kernel_path("continuitydb-file-kernel-minimum-confidence");
         let weak = sample_cell("project:continuitydb:weak", 0.61, 12)?;
-        let strong = sample_cell("project:continuitydb:strong", 0.86, 15)?;
+        let mut strong = sample_cell("project:continuitydb:strong", 0.86, 15)?;
         {
             let mut kernel = FileKernel::open(&path)?;
-            kernel.append_cell(weak)?;
-            kernel.append_cell(strong.clone())?;
+            append_committed(&mut kernel, weak)?;
+            strong = append_committed(&mut kernel, strong)?;
         }
 
         let reopened = FileKernel::open(&path)?;
@@ -487,6 +526,41 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![strong]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_system_time() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-system-time");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let before_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 11, 59, 59)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let cell = sample_cell("project:continuitydb:system-time", 0.91, 12)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell_at(cell.clone(), committed_at)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let current = reopened.lookup_cells(CellLookup {
+            system_at: Some(committed_at),
+            ..CellLookup::default()
+        })?;
+        let historical = reopened.lookup_cells(CellLookup {
+            system_at: Some(before_commit),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].id, cell.id);
+        assert_eq!(current[0].system_time.from(), committed_at);
+        assert!(historical.is_empty());
         fs::remove_file(path)?;
         Ok(())
     }
@@ -517,9 +591,9 @@ mod tests {
         ));
         {
             let mut kernel = FileKernel::open(&path)?;
-            kernel.append_cell(dependent.clone())?;
-            kernel.append_cell(unrelated)?;
-            kernel.append_cell(support)?;
+            dependent = append_committed(&mut kernel, dependent)?;
+            append_committed(&mut kernel, unrelated)?;
+            append_committed(&mut kernel, support)?;
         }
 
         let reopened = FileKernel::open(&path)?;

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Confidence, CoreError, Evidence, ValidTimeRange};
+use crate::{Confidence, CoreError, Evidence, SystemTimeRange, ValidTimeRange};
 
 /// Immutable identifier for a StateCell version.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -205,6 +205,9 @@ pub struct StateCell {
     pub anchors: Vec<SemanticAnchor>,
     /// Real-world validity interval.
     pub valid_time: ValidTimeRange,
+    /// Database transaction-time interval for this observed version.
+    #[serde(default)]
+    pub system_time: SystemTimeRange,
     /// Scope for visibility and applicability.
     pub scope: Scope,
     /// Questions this cell can help answer.
@@ -250,6 +253,7 @@ impl StateCell {
             id,
             anchors,
             valid_time,
+            system_time: SystemTimeRange::default(),
             scope,
             answerability,
             activation: ActivationState::Active,

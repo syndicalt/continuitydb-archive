@@ -61,4 +61,25 @@ impl SystemTimeRange {
 
         Ok(Self { from, to })
     }
+
+    /// Creates an open-ended system-time range starting at commit time.
+    pub fn open_from(from: DateTime<Utc>) -> Self {
+        Self { from, to: None }
+    }
+
+    /// Returns true when `as_of` falls inside the half-open system-time range.
+    pub fn contains(&self, as_of: DateTime<Utc>) -> bool {
+        as_of >= self.from && self.to.map_or(true, |to| as_of < to)
+    }
+
+    /// Returns the inclusive start of the system-time range.
+    pub fn from(&self) -> DateTime<Utc> {
+        self.from
+    }
+}
+
+impl Default for SystemTimeRange {
+    fn default() -> Self {
+        Self::open_from(DateTime::<Utc>::UNIX_EPOCH)
+    }
 }

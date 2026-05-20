@@ -219,11 +219,11 @@ fn first_anchor(cell: &StateCell) -> &str {
 mod tests {
     use std::cell::RefCell;
 
-    use chrono::{TimeZone, Utc};
+    use chrono::{DateTime, TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
         Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
-        TrustSignal, UtilityFeedback, ValidTimeRange,
+        SystemTimeRange, TrustSignal, UtilityFeedback, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
@@ -281,7 +281,11 @@ mod tests {
     }
 
     impl StorageKernel for RecordingKernel {
-        fn append_cell(&mut self, _cell: StateCell) -> Result<(), KernelError> {
+        fn append_cell_at(
+            &mut self,
+            _cell: StateCell,
+            _committed_at: DateTime<Utc>,
+        ) -> Result<(), KernelError> {
             Ok(())
         }
 
@@ -289,6 +293,22 @@ mod tests {
             *self.lookup.borrow_mut() = Some(lookup);
             Ok(Vec::new())
         }
+    }
+
+    fn test_commit_time() -> Result<DateTime<Utc>, Box<dyn std::error::Error>> {
+        Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp").into())
+    }
+
+    fn append_committed(
+        kernel: &mut MemoryKernel,
+        mut cell: StateCell,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        let committed_at = test_commit_time()?;
+        kernel.append_cell_at(cell.clone(), committed_at)?;
+        cell.system_time = SystemTimeRange::open_from(committed_at);
+        Ok(cell)
     }
 
     #[test]
@@ -360,8 +380,8 @@ mod tests {
         let mut kernel = MemoryKernel::default();
         let high = sample_cell("project:continuitydb:high", 0.95, 10)?;
         let low = sample_cell("project:continuitydb:low", 0.40, 10)?;
-        kernel.append_cell(high.clone())?;
-        kernel.append_cell(low)?;
+        let high = append_committed(&mut kernel, high)?;
+        append_committed(&mut kernel, low)?;
 
         let slice = checkout(
             &kernel,
@@ -400,8 +420,10 @@ mod tests {
             Confidence::new(1.0)?,
             Confidence::new(1.0)?,
         );
-        kernel.append_cell(high_confidence_low_utility.clone())?;
-        kernel.append_cell(lower_confidence_high_utility.clone())?;
+        let high_confidence_low_utility =
+            append_committed(&mut kernel, high_confidence_low_utility)?;
+        let lower_confidence_high_utility =
+            append_committed(&mut kernel, lower_confidence_high_utility)?;
 
         let slice = checkout(
             &kernel,
@@ -449,9 +471,9 @@ mod tests {
             CellDependencyKind::Supports,
             "supports target",
         ));
-        kernel.append_cell(dependent.clone())?;
-        kernel.append_cell(unrelated)?;
-        kernel.append_cell(support)?;
+        let dependent = append_committed(&mut kernel, dependent)?;
+        append_committed(&mut kernel, unrelated)?;
+        append_committed(&mut kernel, support)?;
 
         let slice = checkout(
             &kernel,
@@ -489,8 +511,8 @@ mod tests {
             0.90,
             10,
         )?;
-        kernel.append_cell(status)?;
-        kernel.append_cell(frontier.clone())?;
+        append_committed(&mut kernel, status)?;
+        let frontier = append_committed(&mut kernel, frontier)?;
 
         let slice = checkout(
             &kernel,
@@ -528,8 +550,8 @@ mod tests {
             0.90,
             10,
         )?;
-        kernel.append_cell(observed)?;
-        kernel.append_cell(reviewed.clone())?;
+        append_committed(&mut kernel, observed)?;
+        let reviewed = append_committed(&mut kernel, reviewed)?;
 
         let slice = checkout(
             &kernel,
@@ -557,8 +579,8 @@ mod tests {
         let active = sample_cell("project:continuitydb:active", 0.95, 10)?;
         let mut frontier = sample_cell("project:continuitydb:frontier", 0.72, 10)?;
         frontier.activation = ActivationState::Frontier;
-        kernel.append_cell(active.clone())?;
-        kernel.append_cell(frontier.clone())?;
+        let active = append_committed(&mut kernel, active)?;
+        let frontier = append_committed(&mut kernel, frontier)?;
 
         let slice = checkout(
             &kernel,
@@ -603,8 +625,8 @@ mod tests {
         let mut kernel = MemoryKernel::default();
         let selected = sample_cell("project:continuitydb:selected", 0.95, 10)?;
         let omitted = sample_cell("project:continuitydb:omitted", 0.90, 10)?;
-        kernel.append_cell(selected.clone())?;
-        kernel.append_cell(omitted.clone())?;
+        let selected = append_committed(&mut kernel, selected)?;
+        let omitted = append_committed(&mut kernel, omitted)?;
 
         let slice = checkout(
             &kernel,

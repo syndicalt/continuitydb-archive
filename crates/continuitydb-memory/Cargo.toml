@@ -7,11 +7,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+chrono.workspace = true
 continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-kernel = { path = "../continuitydb-kernel" }
 
 [dev-dependencies]
-chrono.workspace = true
 
 [lints]
 workspace = true
