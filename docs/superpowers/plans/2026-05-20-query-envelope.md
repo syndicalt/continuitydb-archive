@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add envelope tests**
+- [x] **Step 1: Add envelope tests**
 
 Add these tests to the existing test module in `crates/continuitydb-query/src/lib.rs`:
 
@@ -95,7 +95,7 @@ fn query_envelope_rejects_malformed_json() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -111,7 +111,7 @@ Expected: FAIL because `QueryEnvelope`, `QueryEnvelopeError`, constants, and hel
 - Modify: `crates/continuitydb-query/Cargo.toml`
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Promote serde_json dependency**
+- [x] **Step 1: Promote serde_json dependency**
 
 Move `serde_json.workspace = true` from `[dev-dependencies]` to `[dependencies]` in `crates/continuitydb-query/Cargo.toml`:
 
@@ -127,7 +127,7 @@ thiserror.workspace = true
 
 Remove the empty `[dev-dependencies]` section if no dev dependencies remain.
 
-- [ ] **Step 2: Add envelope constants and type**
+- [x] **Step 2: Add envelope constants and type**
 
 Add this near the top-level query type definitions in `crates/continuitydb-query/src/lib.rs`:
 
@@ -169,7 +169,7 @@ impl QueryEnvelope {
 }
 ```
 
-- [ ] **Step 3: Add encode/decode helpers and error**
+- [x] **Step 3: Add encode/decode helpers and error**
 
 Add this after the `QueryError` definition:
 
@@ -199,7 +199,7 @@ pub fn decode_query_json(bytes: &[u8]) -> Result<ContinuityQuery, QueryEnvelopeE
 }
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -210,7 +210,7 @@ cargo test -p continuitydb-query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit implementation**
+- [x] **Step 5: Commit implementation**
 
 ```bash
 git add crates/continuitydb-query/Cargo.toml crates/continuitydb-query/src/lib.rs Cargo.lock docs/superpowers/plans/2026-05-20-query-envelope.md

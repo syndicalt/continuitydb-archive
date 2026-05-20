@@ -6,6 +6,42 @@ use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCe
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Wire-format marker for versioned query JSON envelopes.
+pub const QUERY_ENVELOPE_FORMAT: &str = "continuitydb.query";
+/// Supported query JSON envelope version.
+pub const QUERY_ENVELOPE_FORMAT_VERSION: u32 = 1;
+
+/// Versioned JSON envelope for portable typed query files.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QueryEnvelope {
+    /// Wire-format marker.
+    pub format: String,
+    /// Wire-format version.
+    pub version: u32,
+    /// Serialized typed query.
+    pub query: ContinuityQuery,
+}
+
+impl QueryEnvelope {
+    /// Wraps a typed query in the current JSON envelope.
+    pub fn new(query: ContinuityQuery) -> Self {
+        Self {
+            format: QUERY_ENVELOPE_FORMAT.to_string(),
+            version: QUERY_ENVELOPE_FORMAT_VERSION,
+            query,
+        }
+    }
+
+    /// Validates the envelope format and version.
+    pub fn validate(&self) -> Result<(), QueryEnvelopeError> {
+        if self.format == QUERY_ENVELOPE_FORMAT && self.version == QUERY_ENVELOPE_FORMAT_VERSION {
+            Ok(())
+        } else {
+            Err(QueryEnvelopeError::InvalidEnvelope)
+        }
+    }
+}
+
 /// Top-level typed ContinuityDB query.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -176,6 +212,30 @@ pub enum QueryError {
     /// The requested optimization policy is not supported by this compiler.
     #[error("unsupported optimization: {0:?}")]
     UnsupportedOptimization(QueryOptimization),
+}
+
+/// Query envelope encoding and decoding errors.
+#[derive(Debug, Error, PartialEq)]
+pub enum QueryEnvelopeError {
+    /// Query envelope JSON could not be encoded or decoded.
+    #[error("query envelope JSON is invalid")]
+    InvalidJson,
+    /// Query envelope has an unsupported format or version.
+    #[error("query envelope is invalid")]
+    InvalidEnvelope,
+}
+
+/// Encodes a typed query as a versioned JSON envelope.
+pub fn encode_query_json(query: ContinuityQuery) -> Result<Vec<u8>, QueryEnvelopeError> {
+    serde_json::to_vec(&QueryEnvelope::new(query)).map_err(|_error| QueryEnvelopeError::InvalidJson)
+}
+
+/// Decodes a typed query from a versioned JSON envelope.
+pub fn decode_query_json(bytes: &[u8]) -> Result<ContinuityQuery, QueryEnvelopeError> {
+    let envelope = serde_json::from_slice::<QueryEnvelope>(bytes)
+        .map_err(|_error| QueryEnvelopeError::InvalidJson)?;
+    envelope.validate()?;
+    Ok(envelope.query)
 }
 
 #[cfg(test)]
@@ -394,5 +454,71 @@ mod tests {
             QueryError::UnsupportedReturnShape(QueryReturnShape::CellsOnly)
         );
         Ok(())
+    }
+
+    #[test]
+    fn query_envelope_encodes_format_version_and_query() -> Result<(), Box<dyn std::error::Error>> {
+        let query = ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+            "stored-facts",
+            "what is stored?",
+        )));
+
+        let encoded = encode_query_json(query.clone())?;
+        let value: serde_json::Value = serde_json::from_slice(&encoded)?;
+
+        assert_eq!(value["format"].as_str(), Some(QUERY_ENVELOPE_FORMAT));
+        assert_eq!(
+            value["version"].as_u64(),
+            Some(QUERY_ENVELOPE_FORMAT_VERSION as u64)
+        );
+        assert!(value["query"]["checkout"].is_object());
+        assert_eq!(decode_query_json(&encoded)?, query);
+        Ok(())
+    }
+
+    #[test]
+    fn query_envelope_rejects_unsupported_format() -> Result<(), Box<dyn std::error::Error>> {
+        let envelope = QueryEnvelope {
+            format: "continuitydb.other".to_string(),
+            version: QUERY_ENVELOPE_FORMAT_VERSION,
+            query: ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+                "stored-facts",
+                "what is stored?",
+            ))),
+        };
+        let encoded = serde_json::to_vec(&envelope)?;
+
+        assert_eq!(
+            decode_query_json(&encoded),
+            Err(QueryEnvelopeError::InvalidEnvelope)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn query_envelope_rejects_unsupported_version() -> Result<(), Box<dyn std::error::Error>> {
+        let envelope = QueryEnvelope {
+            format: QUERY_ENVELOPE_FORMAT.to_string(),
+            version: QUERY_ENVELOPE_FORMAT_VERSION + 1,
+            query: ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+                "stored-facts",
+                "what is stored?",
+            ))),
+        };
+        let encoded = serde_json::to_vec(&envelope)?;
+
+        assert_eq!(
+            decode_query_json(&encoded),
+            Err(QueryEnvelopeError::InvalidEnvelope)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn query_envelope_rejects_malformed_json() {
+        assert_eq!(
+            decode_query_json(b"{not valid json}\n"),
+            Err(QueryEnvelopeError::InvalidJson)
+        );
     }
 }
