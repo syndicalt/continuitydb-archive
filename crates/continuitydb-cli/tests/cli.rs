@@ -2617,6 +2617,83 @@ fn cli_validate_workload_bundle_failure_report_path_records_validation_failure(
     Ok(())
 }
 
+#[test]
+fn cli_validate_workload_bundle_failure_report_records_fixture_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-validate-workload-bundle-failure-evidence-dir-{}",
+        std::process::id()
+    ));
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-validate-workload-bundle-failure-evidence")
+            .with_extension("json");
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if failure_report_path.exists() {
+        fs::remove_file(&failure_report_path)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let request_path = artifact_dir.join("checkout-request.json");
+    let mut cells_artifact: Value = serde_json::from_str(&fs::read_to_string(&cells_path)?)?;
+    cells_artifact["summary"]["cell_count"] = Value::from(7);
+    fs::write(&cells_path, serde_json::to_string_pretty(&cells_artifact)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-workload-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest fingerprint mismatch"));
+
+    let failure_report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    assert_eq!(
+        failure_report["workload_artifacts"]["cells_path"].as_str(),
+        Some(cells_path.display().to_string().as_str())
+    );
+    assert!(failure_report["workload_artifacts"]["cells_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(failure_report["workload_artifacts"]["cells_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    assert_eq!(
+        failure_report["workload_artifacts"]["checkout_request_path"].as_str(),
+        Some(request_path.display().to_string().as_str())
+    );
+    assert!(
+        failure_report["workload_artifacts"]["checkout_request_fingerprint"]
+            .as_str()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:"))
+    );
+    assert!(
+        failure_report["workload_artifacts"]["checkout_request_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0)
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_validate_local_model_bundle_accepts_report_metadata(

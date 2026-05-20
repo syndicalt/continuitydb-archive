@@ -2809,13 +2809,14 @@ fn write_workload_bundle_validation_failure_report(
     failure_report_path: &Path,
     message: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let workload_artifacts = workload_validation_failure_artifacts_json(artifact_dir);
     let output = serde_json::json!({
         "artifact_dir": artifact_dir.display().to_string(),
         "report_path": report_path.map(|path| path.display().to_string()),
         "failure_report_path": failure_report_path.display().to_string(),
         "manifest": serde_json::Value::Null,
         "workload_report": serde_json::Value::Null,
-        "workload_artifacts": serde_json::Value::Null,
+        "workload_artifacts": workload_artifacts,
         "failure": {
             "stage": "workload_bundle_validation",
             "message": message,
@@ -2823,6 +2824,26 @@ fn write_workload_bundle_validation_failure_report(
     });
     write_pretty_json_file(failure_report_path, &output)?;
     Ok(())
+}
+
+fn workload_validation_failure_artifacts_json(artifact_dir: &Path) -> serde_json::Value {
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let checkout_request_path = artifact_dir.join("checkout-request.json");
+    let Ok(cells_text) = std::fs::read_to_string(&cells_path) else {
+        return serde_json::Value::Null;
+    };
+    let Ok(request_text) = std::fs::read_to_string(&checkout_request_path) else {
+        return serde_json::Value::Null;
+    };
+
+    serde_json::json!({
+        "cells_path": cells_path.display().to_string(),
+        "cells_fingerprint": fnv1a64_fingerprint(&cells_text),
+        "cells_bytes": cells_text.len(),
+        "checkout_request_path": checkout_request_path.display().to_string(),
+        "checkout_request_fingerprint": fnv1a64_fingerprint(&request_text),
+        "checkout_request_bytes": request_text.len(),
+    })
 }
 
 fn validate_workload_manifest_report_content(
