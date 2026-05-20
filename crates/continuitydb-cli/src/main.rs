@@ -1407,6 +1407,8 @@ fn local_model_benchmark_json(
                 "current_recorded_at": regression.current_recorded_at(),
                 "previous_passed_cases": regression.previous_passed_cases(),
                 "current_passed_cases": regression.current_passed_cases(),
+                "previous_failure_counts": regression.previous_failure_counts(),
+                "current_failure_counts": regression.current_failure_counts(),
                 "pass_count_delta": regression.pass_count_delta(),
             })
         }).or_else(|| compared.then(|| serde_json::json!({

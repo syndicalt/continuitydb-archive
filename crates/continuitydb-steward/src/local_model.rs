@@ -1712,6 +1712,8 @@ pub struct LocalModelBenchmarkRegression {
     current_recorded_at: DateTime<Utc>,
     previous_passed_cases: usize,
     current_passed_cases: usize,
+    previous_failure_counts: BTreeMap<String, usize>,
+    current_failure_counts: BTreeMap<String, usize>,
     pass_count_delta: isize,
     regressed: bool,
 }
@@ -1724,6 +1726,8 @@ impl LocalModelBenchmarkRegression {
     ) -> Self {
         let previous_passed_cases = previous.evaluation_summary().passed_cases();
         let current_passed_cases = current.evaluation_summary().passed_cases();
+        let previous_failure_counts = owned_failure_counts(previous.evaluation().failure_counts());
+        let current_failure_counts = owned_failure_counts(current.evaluation().failure_counts());
         let pass_count_delta = current_passed_cases as isize - previous_passed_cases as isize;
         let regressed = current_passed_cases < previous_passed_cases
             || (previous.passed() && !current.passed());
@@ -1735,6 +1739,8 @@ impl LocalModelBenchmarkRegression {
             current_recorded_at: current.recorded_at(),
             previous_passed_cases,
             current_passed_cases,
+            previous_failure_counts,
+            current_failure_counts,
             pass_count_delta,
             regressed,
         }
@@ -1770,6 +1776,16 @@ impl LocalModelBenchmarkRegression {
         self.current_passed_cases
     }
 
+    /// Returns stable failure-code counts for the previous baseline.
+    pub fn previous_failure_counts(&self) -> &BTreeMap<String, usize> {
+        &self.previous_failure_counts
+    }
+
+    /// Returns stable failure-code counts for the current baseline.
+    pub fn current_failure_counts(&self) -> &BTreeMap<String, usize> {
+        &self.current_failure_counts
+    }
+
     /// Returns current passing cases minus previous passing cases.
     pub fn pass_count_delta(&self) -> isize {
         self.pass_count_delta
@@ -1779,6 +1795,13 @@ impl LocalModelBenchmarkRegression {
     pub fn regressed(&self) -> bool {
         self.regressed
     }
+}
+
+fn owned_failure_counts(counts: BTreeMap<&'static str, usize>) -> BTreeMap<String, usize> {
+    counts
+        .into_iter()
+        .map(|(code, count)| (code.to_string(), count))
+        .collect()
 }
 
 /// Result of recording a current benchmark baseline and comparing with prior state.

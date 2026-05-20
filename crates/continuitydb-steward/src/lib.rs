@@ -2901,6 +2901,11 @@ mod tests {
         assert!(regression.regressed());
         assert_eq!(regression.previous_passed_cases(), 1);
         assert_eq!(regression.current_passed_cases(), 0);
+        assert!(regression.previous_failure_counts().is_empty());
+        assert_eq!(
+            regression.current_failure_counts().get("missing_citation"),
+            Some(&1)
+        );
         assert!(report.regressed());
         assert_eq!(store.list_baselines()?.len(), 2);
         fs::remove_file(response_path)?;

@@ -286,6 +286,7 @@ Storage kernel
 74. Add typed local-model evaluation failure diagnostics. Split generic model errors into execution-failure and invalid-response failure reasons so benchmark reports distinguish runtime failures from undecodable model output while preserving deterministic evaluation artifacts.
 75. Add stable local-model evaluation failure code serialization. Updated durable Steward evaluation failure JSON to emit snake-case failure codes while accepting legacy Rust variant names from existing benchmark artifacts and baselines.
 76. Add local-model evaluation failure count summaries. Added deterministic aggregate counts keyed by stable failure code to public Steward evaluation reports and CLI benchmark JSON so CI can classify failed local model runs without scanning every case report.
+77. Add local-model regression failure count comparisons. Extended compatible baseline regression reports with previous and current stable failure-code count maps so CI can identify which failure classes changed across local Steward model baseline regressions.
 
 ## Small Embeddable Model Track
 
