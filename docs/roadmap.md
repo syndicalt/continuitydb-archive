@@ -147,6 +147,7 @@ Storage kernel
 17. Add conditional file-store compaction. Implemented `compact_file_store_if_needed` with before/after health summaries so embedders can automate explicit maintenance without rewriting canonical stores.
 18. Add commit import dry-run validation. Implemented `validate_commit_import` and `validate_commits_json_file` so embedders can validate replay batches and backup files without mutating target stores.
 19. Add commit import summaries. Implemented summary-returning import APIs so embedders can retrieve imported counts and backup cursors without decoding envelopes separately.
+20. Add native direct commit copy. Implemented `copy_commits_from` so embedders can replay cursor-selected commit pages between open databases without JSON file envelopes.
 
 ## Steward Milestones
 

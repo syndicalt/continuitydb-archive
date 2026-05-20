@@ -57,6 +57,7 @@ The first milestone builds:
 - Native commit slice materialization API for cursor-selected commit replay.
 - Native commit export batch API for backup and sync flows.
 - Native validated commit import batch API for replay flows.
+- Native direct commit copy between open databases for local sync.
 - Commit import dry-run validation for backup and sync workflows.
 - Commit import summaries with cursor metadata for checkpointed sync.
 - Versioned JSON commit export envelope for backup and sync files.
