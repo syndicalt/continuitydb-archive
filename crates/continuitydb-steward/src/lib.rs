@@ -1,10 +1,12 @@
 //! Deterministic Steward proposal substrate.
 
 mod error;
+mod ledger;
 mod policy;
 mod proposal;
 
 pub use error::StewardError;
+pub use ledger::{ProposalAuditRecord, ProposalLedger};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
 pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 
@@ -15,8 +17,8 @@ mod tests {
     use continuitydb_revision::RevisionLinkKind;
 
     use super::{
-        ProposalId, ProposalOutcome, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
-        StewardProposal,
+        ProposalDecision, ProposalId, ProposalLedger, ProposalOutcome, ProposalPolicy,
+        StewardAction, StewardError, StewardIdentity, StewardProposal,
     };
 
     fn created_at() -> chrono::DateTime<Utc> {
@@ -247,6 +249,63 @@ mod tests {
             decision.reasons(),
             &["policy:invalid-confidence".to_string()]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn ledger_preserves_accepted_and_rejected_proposals() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let decided_at = created_at();
+        let accepted = valid_link_revision()?;
+        let rejected = StewardProposal::new(
+            ProposalId::new(),
+            steward()?,
+            StewardAction::LabelAnswerability {
+                cell_id: StateCellId::new(),
+                questions: vec![" ".to_string()],
+            },
+            "The cell should answer a task question.",
+            vec!["test://evidence".to_string()],
+            created_at(),
+        )?;
+        let policy = ProposalPolicy::strict();
+        let accepted_decision = policy.evaluate(&accepted, decided_at);
+        let rejected_decision = policy.evaluate(&rejected, decided_at);
+        let mut ledger = ProposalLedger::default();
+
+        ledger.record(accepted.clone(), accepted_decision)?;
+        ledger.record(rejected.clone(), rejected_decision)?;
+
+        let records = ledger.records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].proposal().id(), accepted.id());
+        assert_eq!(records[0].decision().outcome(), ProposalOutcome::Accepted);
+        assert_eq!(records[1].proposal().id(), rejected.id());
+        assert_eq!(records[1].decision().outcome(), ProposalOutcome::Rejected);
+        assert_eq!(
+            ledger
+                .record_by_id(rejected.id())
+                .map(|record| record.proposal().id()),
+            Some(rejected.id())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ledger_rejects_mismatched_proposal_and_decision_ids(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposal = valid_link_revision()?;
+        let mismatched_decision = ProposalDecision::new(
+            ProposalId::new(),
+            ProposalOutcome::Accepted,
+            vec!["policy:structurally-valid".to_string()],
+            created_at(),
+        );
+        let mut ledger = ProposalLedger::default();
+
+        let result = ledger.record(proposal, mismatched_decision);
+
+        assert!(matches!(result, Err(StewardError::MismatchedDecision)));
         Ok(())
     }
 }
