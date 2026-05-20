@@ -59,6 +59,18 @@ struct WorkloadMeasureOptions<'a> {
     fail_on_regression: bool,
 }
 
+#[cfg(feature = "local-model")]
+struct LocalModelBenchmarkOptions<'a> {
+    candidate_id: &'a str,
+    executable: &'a Path,
+    model_path: &'a Path,
+    arguments: &'a [String],
+    baseline_path: &'a Path,
+    dry_run: bool,
+    compare_baseline: bool,
+    fail_on_regression: bool,
+}
+
 /// Named kernel requirement profiles understood by the CLI.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum RequirementProfile {
@@ -202,6 +214,9 @@ enum Command {
         /// JSONL path to append a benchmark baseline record.
         #[arg(long = "baseline-path")]
         baseline_path: PathBuf,
+        /// Print benchmark configuration without executing the model or recording a baseline.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
         /// Compare this run with the latest matching previous baseline.
         #[arg(long = "compare-baseline")]
         compare_baseline: bool,
@@ -396,18 +411,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model_path,
             arguments,
             baseline_path,
+            dry_run,
             compare_baseline,
             fail_on_regression,
         }) => {
-            let output = benchmark_local_model_json(
-                &candidate,
-                &executable,
-                &model_path,
-                &arguments,
-                &baseline_path,
-                compare_baseline || fail_on_regression,
+            let output = benchmark_local_model_json(LocalModelBenchmarkOptions {
+                candidate_id: &candidate,
+                executable: &executable,
+                model_path: &model_path,
+                arguments: &arguments,
+                baseline_path: &baseline_path,
+                dry_run,
+                compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
-            )?;
+            })?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         #[cfg(feature = "local-model")]
@@ -568,26 +585,28 @@ fn write_local_model_contract_json(
 
 #[cfg(feature = "local-model")]
 fn benchmark_local_model_json(
-    candidate_id: &str,
-    executable: &Path,
-    model_path: &Path,
-    arguments: &[String],
-    baseline_path: &Path,
-    compare_baseline: bool,
-    fail_on_regression: bool,
+    options: LocalModelBenchmarkOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let candidate = local_model_candidate(candidate_id)?;
-    let mut config = LocalExecutableRunnerConfig::new(executable.to_path_buf())
-        .with_model_path(model_path.to_path_buf());
-    for argument in arguments {
+    let candidate = local_model_candidate(options.candidate_id)?;
+    let mut config = LocalExecutableRunnerConfig::new(options.executable.to_path_buf())
+        .with_model_path(options.model_path.to_path_buf());
+    for argument in options.arguments {
         config = config.with_argument(argument);
     }
+    if options.dry_run {
+        return Ok(local_model_benchmark_dry_run_json(
+            candidate,
+            &config,
+            options.baseline_path,
+        ));
+    }
+
     let benchmark = LocalModelBenchmark::new(
         candidate,
         LocalExecutableRunner::new(config),
         default_steward_evaluation_suite(),
     );
-    let mut store = FileLocalModelBenchmarkBaselineStore::open(baseline_path)?;
+    let mut store = FileLocalModelBenchmarkBaselineStore::open(options.baseline_path)?;
     let identity = StewardIdentity::new("continuitydb-cli-local-model", "0.1.0", "strict")?;
     let report = record_local_model_benchmark_baseline_with_regression(
         &benchmark,
@@ -596,16 +615,37 @@ fn benchmark_local_model_json(
         &mut store,
     )?;
 
-    if fail_on_regression && report.regressed() {
+    if options.fail_on_regression && report.regressed() {
         return Err(std::io::Error::other("local model benchmark regression detected").into());
     }
 
     Ok(local_model_benchmark_json(
-        baseline_path,
-        compare_baseline,
+        options.baseline_path,
+        options.compare_baseline,
         report.current_baseline(),
         report.regression(),
     ))
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_benchmark_dry_run_json(
+    candidate: SmallModelCandidate,
+    config: &LocalExecutableRunnerConfig,
+    baseline_path: &Path,
+) -> serde_json::Value {
+    serde_json::json!({
+        "dry_run": true,
+        "will_record_baseline": false,
+        "candidate_model_id": candidate.model_id(),
+        "candidate_role": candidate.role(),
+        "baseline_path": baseline_path.display().to_string(),
+        "response_schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+        "evaluation_suite_fingerprint": default_steward_evaluation_suite().fingerprint(),
+        "runtime": {
+            "executable": config.executable().display().to_string(),
+            "arguments": config.command_arguments(),
+        },
+    })
 }
 
 #[cfg(feature = "local-model")]

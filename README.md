@@ -83,6 +83,7 @@ The first milestone builds:
 - Durable local model evaluation suite fingerprints.
 - CLI local model evaluation suite fingerprint output.
 - CLI small local Steward model candidate registry output.
+- CLI local model benchmark dry-run preflight output.
 - Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.

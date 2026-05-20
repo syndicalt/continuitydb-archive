@@ -302,6 +302,64 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-dry-run-baseline");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--temp")
+        .arg("--arg")
+        .arg("0")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["dry_run"].as_bool(), Some(true));
+    assert_eq!(json["will_record_baseline"].as_bool(), Some(false));
+    assert_eq!(
+        json["candidate_model_id"].as_str(),
+        Some("Qwen/Qwen2.5-0.5B-Instruct")
+    );
+    assert_eq!(json["candidate_role"].as_str(), Some("default-feasibility"));
+    assert_eq!(json["response_schema_version"].as_u64(), Some(1));
+    assert!(json["evaluation_suite_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_eq!(
+        json["baseline_path"].as_str(),
+        Some(baseline_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        json["runtime"]["executable"].as_str(),
+        Some("/missing/local-model-runner")
+    );
+    assert_eq!(json["runtime"]["arguments"][0].as_str(), Some("--model"));
+    assert_eq!(
+        json["runtime"]["arguments"][1].as_str(),
+        Some("/models/qwen.gguf")
+    );
+    assert_eq!(json["runtime"]["arguments"][2].as_str(), Some("--temp"));
+    assert_eq!(json["runtime"]["arguments"][3].as_str(), Some("0"));
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_evaluation_suite_outputs_case_contracts(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::cargo_bin("continuitydb")?

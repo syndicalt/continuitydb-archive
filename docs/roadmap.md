@@ -248,6 +248,7 @@ Storage kernel
 36. Add local-model evaluation suite fingerprints. Persisted deterministic evaluation-suite fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
 37. Add CLI local-model evaluation suite fingerprint output. Included the deterministic suite fingerprint in the feature-gated `local-model-evaluation-suite` JSON so operators can match inspected benchmark contracts to recorded baselines.
 38. Add CLI small-model candidate registry output. Exposed the fixed local Steward candidate registry through `local-model-candidates` JSON so operators can inspect supported model IDs and roles before benchmark runs.
+39. Add CLI local-model benchmark dry-run preflight output. Added `benchmark-local-model --dry-run` so operators can inspect candidate, runtime, schema, suite fingerprint, and baseline target metadata without executing a model or mutating baseline records.
 
 ## Small Embeddable Model Track
 
