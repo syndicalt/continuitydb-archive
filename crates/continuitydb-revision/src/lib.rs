@@ -6,20 +6,9 @@ use continuitydb_core::{
     ActivationState, Answerability, Confidence, SemanticAnchor, StateCell, StateCellId,
     UtilityFeedback,
 };
-use serde::{Deserialize, Serialize};
 
-/// Relationship between two StateCell versions.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum RevisionLinkKind {
-    /// Current cell directly follows a previous version.
-    Predecessor,
-    /// Current cell supersedes the target.
-    Supersedes,
-    /// Current cell conflicts with the target.
-    ConflictsWith,
-    /// Current cell was derived from the target.
-    DerivesFrom,
-}
+pub use continuitydb_core::RevisionLinkKind;
+use serde::{Deserialize, Serialize};
 
 /// Append-only revision graph for StateCell version relationships.
 #[derive(Default)]
@@ -462,6 +451,13 @@ mod tests {
             graph.targets(current, RevisionLinkKind::ConflictsWith),
             vec![conflict]
         );
+    }
+
+    #[test]
+    fn revision_link_kind_reexport_remains_available() {
+        let kind: RevisionLinkKind = continuitydb_core::RevisionLinkKind::DerivesFrom;
+
+        assert_eq!(kind, RevisionLinkKind::DerivesFrom);
     }
 
     #[test]

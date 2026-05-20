@@ -19,6 +19,7 @@ The first milestone builds:
 - A pluggable storage kernel trait.
 - An in-memory kernel for correctness tests.
 - Basic revision links.
+- Core native revision-link records.
 - Deterministic checkout.
 - Semantic-anchor scoped checkout and strict text query constraints.
 - Activation-aware checkout and strict text query constraints.

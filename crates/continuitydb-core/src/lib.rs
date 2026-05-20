@@ -7,7 +7,8 @@ mod time;
 
 pub use cell::{
     ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-    CommitId, CommitManifest, Scope, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
+    CommitId, CommitManifest, RevisionLinkKind, RevisionLinkRecord, Scope, SemanticAnchor,
+    StateCell, StateCellId, UtilityFeedback,
 };
 pub use error::CoreError;
 pub use evidence::{Citation, Confidence, Evidence, SourceId, TrustSignal};
@@ -185,6 +186,28 @@ mod tests {
             dependency.rationale,
             "release status depends on verification evidence"
         );
+    }
+
+    #[test]
+    fn revision_link_record_preserves_revision_relationship(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source = StateCellId::from_u128(1);
+        let target = StateCellId::from_u128(2);
+        let recorded_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+
+        let record =
+            RevisionLinkRecord::new(source, RevisionLinkKind::Supersedes, target, recorded_at);
+        let encoded = serde_json::to_string(&record)?;
+        let decoded: RevisionLinkRecord = serde_json::from_str(&encoded)?;
+
+        assert_eq!(decoded.source, source);
+        assert_eq!(decoded.target, target);
+        assert_eq!(decoded.kind, RevisionLinkKind::Supersedes);
+        assert_eq!(decoded.recorded_at, recorded_at);
+        Ok(())
     }
 
     #[test]

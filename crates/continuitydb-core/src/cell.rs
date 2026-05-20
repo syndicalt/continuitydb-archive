@@ -109,6 +109,49 @@ impl CommitManifest {
     }
 }
 
+/// Relationship between two StateCell versions.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum RevisionLinkKind {
+    /// Current cell directly follows a previous version.
+    Predecessor,
+    /// Current cell supersedes the target.
+    Supersedes,
+    /// Current cell conflicts with the target.
+    ConflictsWith,
+    /// Current cell was derived from the target.
+    DerivesFrom,
+}
+
+/// Append-only record of a revision relationship between StateCell versions.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RevisionLinkRecord {
+    /// Source StateCell version for the directed revision link.
+    pub source: StateCellId,
+    /// Revision relationship kind.
+    pub kind: RevisionLinkKind,
+    /// Target StateCell version for the directed revision link.
+    pub target: StateCellId,
+    /// System time when this revision link was recorded.
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl RevisionLinkRecord {
+    /// Creates a revision link record.
+    pub fn new(
+        source: StateCellId,
+        kind: RevisionLinkKind,
+        target: StateCellId,
+        recorded_at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        Self {
+            source,
+            kind,
+            target,
+            recorded_at,
+        }
+    }
+}
+
 /// Semantic anchor used to address a StateCell by meaning.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SemanticAnchor(String);
