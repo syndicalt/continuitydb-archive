@@ -138,6 +138,9 @@ pub struct CommitSlice {
 pub struct CommitExportBatch {
     /// Exported commit slices in database visibility order.
     pub slices: Vec<CommitSlice>,
+    /// Native revision-link records whose source StateCell is in the exported commit page.
+    #[serde(default)]
+    pub revision_links: Vec<RevisionLinkRecord>,
     /// Cursor to use as `CommitManifestLookup.after` for the next export batch.
     pub next_after: Option<CommitId>,
 }
@@ -483,8 +486,13 @@ impl<K: StorageKernel> ContinuityDb<K> {
         lookup: CommitManifestLookup,
     ) -> Result<CommitExportBatch, ContinuityError> {
         let slices = self.commit_slices(lookup)?;
+        let revision_links = self.revision_links_for_commit_slices(&slices)?;
         let next_after = slices.last().map(|slice| slice.manifest.commit_id);
-        Ok(CommitExportBatch { slices, next_after })
+        Ok(CommitExportBatch {
+            slices,
+            revision_links,
+            next_after,
+        })
     }
 
     /// Copies a cursor-selected commit page from another open database into this database.
@@ -520,6 +528,9 @@ impl<K: StorageKernel> ContinuityDb<K> {
                 slice.manifest.committed_at,
                 slice.manifest.commit_id,
             )?;
+        }
+        for revision_link in batch.revision_links {
+            self.kernel.append_revision_link(revision_link)?;
         }
         Ok(CommitImportSummary {
             imported_commits: imported,
@@ -1139,7 +1150,49 @@ impl<K: StorageKernel> ContinuityDb<K> {
                 }
             }
         }
+        let invalid_link_commit = batch
+            .slices
+            .first()
+            .map(|slice| slice.manifest.commit_id)
+            .unwrap_or_default();
+        for revision_link in &batch.revision_links {
+            if !cell_ids.contains(&revision_link.source)
+                && self.lookup_one_cell(revision_link.source).is_err()
+            {
+                return Err(ContinuityError::InvalidCommitExport {
+                    commit_id: invalid_link_commit,
+                });
+            }
+            if !cell_ids.contains(&revision_link.target)
+                && self.lookup_one_cell(revision_link.target).is_err()
+            {
+                return Err(ContinuityError::InvalidCommitExport {
+                    commit_id: invalid_link_commit,
+                });
+            }
+        }
         Ok(())
+    }
+
+    fn revision_links_for_commit_slices(
+        &self,
+        slices: &[CommitSlice],
+    ) -> Result<Vec<RevisionLinkRecord>, ContinuityError> {
+        let mut revision_links = Vec::new();
+        for cell_id in slices
+            .iter()
+            .flat_map(|slice| slice.manifest.cell_ids.iter().copied())
+        {
+            for revision_link in self.kernel.list_revision_links(RevisionLinkLookup {
+                source: Some(cell_id),
+                ..RevisionLinkLookup::default()
+            })? {
+                if !revision_links.contains(&revision_link) {
+                    revision_links.push(revision_link);
+                }
+            }
+        }
+        Ok(revision_links)
     }
 }
 
@@ -2449,9 +2502,37 @@ WHERE scope = project("continuitydb")
             batch,
             CommitExportBatch {
                 slices: Vec::new(),
+                revision_links: Vec::new(),
                 next_after: None,
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_commit_export_includes_source_owned_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source = sample_cell("project:continuitydb:revision-export-source", 0.91, 12)?;
+        let target = sample_cell("project:continuitydb:revision-export-target", 0.89, 12)?;
+        let source_id = source.id;
+        let target_id = target.id;
+        db.ingest_cells_at_with_commit_id(vec![source, target], committed_at, commit_id)?;
+        let link = db.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::Supersedes,
+            target_id,
+            committed_at,
+        )?;
+
+        let batch = db.export_commits(CommitManifestLookup::default())?;
+
+        assert_eq!(batch.revision_links, vec![link]);
         Ok(())
     }
 
@@ -2491,7 +2572,45 @@ WHERE scope = project("continuitydb")
 
         assert_eq!(envelope["format"], "continuitydb.commit_export");
         assert_eq!(envelope["version"], 1);
+        assert!(envelope["batch"]["revision_links"].is_array());
         assert_eq!(decoded, batch);
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_commit_export_import_restores_links() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        let source_cell = sample_cell("project:continuitydb:revision-import-source", 0.91, 12)?;
+        let target_cell = sample_cell("project:continuitydb:revision-import-target", 0.89, 12)?;
+        let source_id = source_cell.id;
+        let target_id = target_cell.id;
+        source.ingest_cells_at_with_commit_id(
+            vec![source_cell, target_cell],
+            committed_at,
+            commit_id,
+        )?;
+        let link = source.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::DerivesFrom,
+            target_id,
+            committed_at,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup::default())?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let imported = target.import_commit_batch(batch)?;
+
+        assert_eq!(imported, 1);
+        assert_eq!(
+            target.list_revision_links(RevisionLinkLookup::default())?,
+            vec![link]
+        );
         Ok(())
     }
 
@@ -2963,6 +3082,41 @@ WHERE scope = project("continuitydb")
     }
 
     #[test]
+    fn revision_link_commit_export_copy_restores_links() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        let source_cell = sample_cell("project:continuitydb:revision-copy-source", 0.91, 12)?;
+        let target_cell = sample_cell("project:continuitydb:revision-copy-target", 0.89, 12)?;
+        let source_id = source_cell.id;
+        let target_id = target_cell.id;
+        source.ingest_cells_at_with_commit_id(
+            vec![source_cell, target_cell],
+            committed_at,
+            commit_id,
+        )?;
+        let link = source.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::Predecessor,
+            target_id,
+            committed_at,
+        )?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let summary = target.copy_commits_from(&source, CommitManifestLookup::default())?;
+
+        assert_eq!(summary.imported_commits, 1);
+        assert_eq!(
+            target.list_revision_links(RevisionLinkLookup::default())?,
+            vec![link]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn api_copies_next_commit_page_from_source_database() -> Result<(), Box<dyn std::error::Error>>
     {
         let first_time = Utc
@@ -3102,6 +3256,7 @@ WHERE scope = project("continuitydb")
 
         let imported = target.import_commit_batch(CommitExportBatch {
             slices: Vec::new(),
+            revision_links: Vec::new(),
             next_after: None,
         })?;
 
@@ -3135,6 +3290,7 @@ WHERE scope = project("continuitydb")
                 manifest,
                 cells: vec![cell],
             }],
+            revision_links: Vec::new(),
             next_after: Some(commit_id),
         });
 

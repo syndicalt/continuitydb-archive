@@ -8,7 +8,7 @@ use continuitydb_core::{
     RevisionLinkKind, Scope, SemanticAnchor, SourceId, StateCell, StateCellId, SystemTimeRange,
     TrustSignal, ValidTimeRange,
 };
-use continuitydb_kernel::{CommitManifestLookup, FileKernel};
+use continuitydb_kernel::{CommitManifestLookup, FileKernel, RevisionLinkLookup};
 use continuitydb_query::{
     encode_query_json, CheckoutQuery, ContinuityQuery, QueryEnvelope, QueryOptimization,
     QueryRequirements, QueryReturnShape, QueryTask, QUERY_ENVELOPE_FORMAT,
@@ -822,7 +822,7 @@ fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Err
     let source_path = temp_store_path("continuitydb-cli-export-source");
     let target_path = temp_store_path("continuitydb-cli-import-target");
     let backup_path = temp_store_path("continuitydb-cli-export-backup");
-    write_committed_store(&source_path, "project:continuitydb:cli-backup")?;
+    write_revision_link_store(&source_path)?;
 
     let export_output = Command::cargo_bin("continuitydb")?
         .arg("export-commits")
@@ -858,14 +858,19 @@ fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Err
     let import_json: Value = serde_json::from_slice(&import_output)?;
     let source_batch = ContinuityDb::new(FileKernel::open(&source_path)?)
         .export_commits(CommitManifestLookup::default())?;
-    let target_batch = ContinuityDb::new(FileKernel::open(&target_path)?)
-        .export_commits(CommitManifestLookup::default())?;
+    let source_db = ContinuityDb::new(FileKernel::open(&source_path)?);
+    let target_db = ContinuityDb::new(FileKernel::open(&target_path)?);
+    let target_batch = target_db.export_commits(CommitManifestLookup::default())?;
 
     assert_eq!(import_json["path"].as_str(), target_path.to_str());
     assert_eq!(import_json["input"].as_str(), backup_path.to_str());
     assert_eq!(import_json["imported_commits"].as_u64(), Some(1));
     assert_eq!(import_json["next_after"], export_json["next_after"]);
     assert_eq!(target_batch, source_batch);
+    assert_eq!(
+        target_db.list_revision_links(RevisionLinkLookup::default())?,
+        source_db.list_revision_links(RevisionLinkLookup::default())?
+    );
 
     fs::remove_file(source_path)?;
     fs::remove_file(target_path)?;

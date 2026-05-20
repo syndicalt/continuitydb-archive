@@ -99,6 +99,7 @@ The first milestone builds:
 - Native commit export batch API for backup and sync flows.
 - Native validated commit import batch API for replay flows.
 - Native direct commit copy between open databases for local sync.
+- Revision-link-aware commit export, import, and direct copy.
 - Commit import dry-run validation for backup and sync workflows.
 - Commit import summaries with cursor metadata for checkpointed sync.
 - Versioned JSON commit export envelope for backup and sync files.
@@ -112,6 +113,7 @@ The first milestone builds:
 - CLI commit backup and restore commands over versioned export envelopes.
 - CLI incremental commit export for cursor-based backup and sync workflows.
 - CLI direct commit copy for local file-backed sync.
+- CLI backup and restore preservation of native revision links.
 - A thin CLI over library APIs.
 
 ## Roadmap

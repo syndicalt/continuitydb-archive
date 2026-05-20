@@ -149,6 +149,7 @@ Storage kernel
 12. Report commit import cursors. Extended `continuitydb import-commits` output with `next_after` so operators can checkpoint imported backup pages.
 13. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
 14. Execute saved query files from the CLI. Extended `continuitydb checkout-query` to accept raw typed query JSON, versioned `continuitydb.query` envelopes, and strict text `CHECKOUT` query files through the native query-file API.
+15. Preserve native revision links in backup and copy flows. Extended CLI commit export/import and direct copy behavior to round-trip source-owned native revision-link records through the versioned commit export envelope.
 
 ## Benchmark and Workload Milestones
 
@@ -200,6 +201,7 @@ Storage kernel
 36. Add native revision-link record operations. Implemented endpoint-validating native API append/list methods for `RevisionLinkRecord` plus a Steward `LinkRevision` application path that writes native revision-link records without adding an operational link StateCell.
 37. Add typed accepted Steward proposal dispatch. Implemented optional `steward` feature enum `StewardApplicationResult` and `apply_accepted_steward_proposal_typed_at` so unified application can return either committed StateCell IDs or native revision-link records while preserving the legacy `StateCellId` dispatcher.
 38. Add revision-link-aware direct audit. Implemented `ContinuityDb::audit_cell` enrichment over native revision-link records so direct cell audit exposes source-side and target-side revision relationships while preserving missing-cell error behavior.
+39. Add revision-link-aware commit export/import/copy. Extended `CommitExportBatch` with source-owned native revision links, validated imported link endpoints against existing or imported StateCells, and restored links after commit cell import.
 
 ## Steward Milestones
 
