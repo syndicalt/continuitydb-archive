@@ -174,6 +174,15 @@ pub struct StewardFrontierAudit {
     pub records: Vec<ProposalAuditRecord>,
 }
 
+/// Result of subscribed frontier/watch stewardship with accepted applications.
+#[cfg(feature = "steward")]
+pub struct StewardFrontierResolution {
+    /// Frontier/watch proposals and persisted proposal audit records.
+    pub audit: StewardFrontierAudit,
+    /// Accepted proposal applications committed through the typed dispatcher.
+    pub applications: Vec<StewardApplicationResult>,
+}
+
 /// Result of applying an accepted Steward proposal through the typed dispatcher.
 #[cfg(feature = "steward")]
 #[derive(Clone, Debug, PartialEq)]
@@ -620,6 +629,34 @@ impl<K: StorageKernel> ContinuityDb<K> {
         }
 
         Ok(StewardFrontierAudit { proposals, records })
+    }
+
+    /// Runs frontier/watch stewardship, records audits, and applies accepted results.
+    #[cfg(feature = "steward")]
+    pub fn resolve_frontier_watch_with_steward_at<S>(
+        &mut self,
+        runner: &FrontierSubscriptionRunner<S>,
+        events: Vec<FrontierWatchEvent>,
+        policy: &ProposalPolicy,
+        decided_at: DateTime<Utc>,
+    ) -> Result<StewardFrontierResolution, ContinuityError>
+    where
+        S: FrontierSubscriptionStore,
+    {
+        let audit = self.audit_frontier_watch_with_steward(runner, events, policy, decided_at)?;
+        let mut applications = Vec::new();
+        for record in &audit.records {
+            if let Some(application) =
+                self.apply_accepted_steward_proposal_typed_at(record, decided_at)?
+            {
+                applications.push(application);
+            }
+        }
+
+        Ok(StewardFrontierResolution {
+            audit,
+            applications,
+        })
     }
 
     /// Applies an accepted MarkFrontier Steward proposal as an append-only successor StateCell.
@@ -4517,6 +4554,159 @@ WHERE scope = project("continuitydb")
         assert_eq!(audit.proposals.len(), 1);
         assert_eq!(audit.records.len(), 1);
         assert_eq!(db.steward_proposal_records()?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_resolves_frontier_watch_with_steward_records_audit_and_applies_verification(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 16, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:frontier-stale-apply", 0.67, 12)?,
+            committed_at,
+        )?;
+        let runner = test_frontier_runner(cell_id, FrontierWatchSignal::StaleEvidence)?;
+        let event = FrontierWatchEvent::new(
+            cell_id,
+            FrontierWatchSignal::StaleEvidence,
+            "test://frontier-stale-apply",
+            committed_at,
+        );
+
+        let resolution = db.resolve_frontier_watch_with_steward_at(
+            &runner,
+            vec![event],
+            &ProposalPolicy::strict(),
+            apply_commit,
+        )?;
+
+        assert_eq!(resolution.audit.proposals.len(), 1);
+        assert_eq!(resolution.audit.records.len(), 1);
+        assert_eq!(resolution.applications.len(), 1);
+        let StewardApplicationResult::StateCell(work_cell_id) = resolution.applications[0] else {
+            return Err(std::io::Error::other("expected verification StateCell").into());
+        };
+        let work_cell = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(work_cell_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing verification work cell"))?;
+
+        assert_eq!(work_cell.system_time.from(), apply_commit);
+        assert_eq!(
+            work_cell.answerability.questions(),
+            &["what verification did the Steward request?".to_string()]
+        );
+        assert!(work_cell
+            .dependencies
+            .iter()
+            .any(|dependency| dependency.target == cell_id
+                && dependency.kind == CellDependencyKind::DependsOn));
+        assert_eq!(db.steward_proposal_records()?.len(), 1);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 3);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_resolves_frontier_watch_with_steward_applies_mark_frontier(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 16, 45, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:frontier-mark-apply", 0.61, 12)?,
+            committed_at,
+        )?;
+        let runner = test_frontier_runner(cell_id, FrontierWatchSignal::HighImpactUncertainty)?;
+        let event = FrontierWatchEvent::new(
+            cell_id,
+            FrontierWatchSignal::HighImpactUncertainty,
+            "test://frontier-mark-apply",
+            committed_at,
+        );
+
+        let resolution = db.resolve_frontier_watch_with_steward_at(
+            &runner,
+            vec![event],
+            &ProposalPolicy::strict(),
+            apply_commit,
+        )?;
+
+        assert_eq!(resolution.audit.proposals.len(), 1);
+        assert_eq!(resolution.audit.records.len(), 1);
+        assert_eq!(resolution.applications.len(), 1);
+        let StewardApplicationResult::StateCell(successor_id) = resolution.applications[0] else {
+            return Err(std::io::Error::other("expected frontier successor").into());
+        };
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing frontier successor"))?;
+
+        assert_eq!(successor.activation, ActivationState::Frontier);
+        assert_eq!(successor.system_time.from(), apply_commit);
+        assert_eq!(db.steward_proposal_records()?.len(), 1);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 3);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_resolve_frontier_watch_with_steward_ignores_unsubscribed_and_benign_events(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:frontier-noop-apply", 0.91, 12)?,
+            committed_at,
+        )?;
+        let runner = test_frontier_runner(cell_id, FrontierWatchSignal::StaleEvidence)?;
+        let events = vec![
+            FrontierWatchEvent::new(
+                StateCellId::new(),
+                FrontierWatchSignal::StaleEvidence,
+                "test://frontier-unsubscribed-apply",
+                committed_at,
+            ),
+            FrontierWatchEvent::new(
+                cell_id,
+                FrontierWatchSignal::Benign,
+                "test://frontier-benign-apply",
+                committed_at,
+            ),
+        ];
+
+        let resolution = db.resolve_frontier_watch_with_steward_at(
+            &runner,
+            events,
+            &ProposalPolicy::strict(),
+            committed_at,
+        )?;
+
+        assert!(resolution.audit.proposals.is_empty());
+        assert!(resolution.audit.records.is_empty());
+        assert!(resolution.applications.is_empty());
+        assert!(db.steward_proposal_records()?.is_empty());
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 1);
         Ok(())
     }
 
