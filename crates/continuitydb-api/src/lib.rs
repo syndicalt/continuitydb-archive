@@ -1267,8 +1267,8 @@ WHERE scope = project("continuitydb")
     }
 
     #[test]
-    fn api_checkout_query_file_reports_invalid_text_query(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn api_checkout_query_file_reports_invalid_text_query() -> Result<(), Box<dyn std::error::Error>>
+    {
         let db = ContinuityDb::new(MemoryKernel::default());
         let path = temp_file_kernel_path("invalid-query-file-text");
         fs::write(&path, r#"CHECKOUT "stored-facts" WHERE scope = global"#)?;
