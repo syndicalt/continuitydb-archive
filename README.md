@@ -15,6 +15,7 @@ The first milestone builds:
 - Deterministic checkout.
 - Audit traces.
 - Deterministic Steward proposal substrate.
+- Deterministic mock Steward for test-first development.
 - A thin CLI over library APIs.
 
 ## Roadmap

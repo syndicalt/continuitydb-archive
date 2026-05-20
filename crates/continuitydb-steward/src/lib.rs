@@ -2,11 +2,13 @@
 
 mod error;
 mod ledger;
+mod mock;
 mod policy;
 mod proposal;
 
 pub use error::StewardError;
 pub use ledger::{ProposalAuditRecord, ProposalLedger};
+pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
 pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 
@@ -17,8 +19,9 @@ mod tests {
     use continuitydb_revision::RevisionLinkKind;
 
     use super::{
-        ProposalDecision, ProposalId, ProposalLedger, ProposalOutcome, ProposalPolicy,
-        StewardAction, StewardError, StewardIdentity, StewardProposal,
+        MockSteward, MockStewardInput, MockStewardRule, ProposalDecision, ProposalId,
+        ProposalLedger, ProposalOutcome, ProposalPolicy, StewardAction, StewardError,
+        StewardIdentity, StewardProposal,
     };
 
     fn created_at() -> chrono::DateTime<Utc> {
@@ -306,6 +309,156 @@ mod tests {
         let result = ledger.record(proposal, mismatched_decision);
 
         assert!(matches!(result, Err(StewardError::MismatchedDecision)));
+        Ok(())
+    }
+
+    #[test]
+    fn mock_steward_returns_no_proposals_for_empty_input() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let steward = MockSteward::new(steward()?);
+        let proposals = steward.propose(MockStewardInput::new(created_at()))?;
+
+        assert!(proposals.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn mock_steward_emits_mark_frontier_with_identity() -> Result<(), Box<dyn std::error::Error>> {
+        let identity = steward()?;
+        let cell_id = StateCellId::new();
+        let mock = MockSteward::new(identity.clone());
+        let proposals = mock.propose(MockStewardInput::new(created_at()).with_rule(
+            MockStewardRule::MarkFrontier {
+                cell_id,
+                rationale: "Evidence is stale and high impact.".to_string(),
+                citations: vec!["test://frontier".to_string()],
+            },
+        ))?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].steward(), &identity);
+        assert!(matches!(
+            proposals[0].action(),
+            StewardAction::MarkFrontier { cell_id: actual } if *actual == cell_id
+        ));
+        assert_eq!(proposals[0].citations(), &["test://frontier".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn mock_steward_emits_link_revision_preserving_fields() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = StateCellId::new();
+        let target = StateCellId::new();
+        let mock = MockSteward::new(steward()?);
+        let proposals = mock.propose(MockStewardInput::new(created_at()).with_rule(
+            MockStewardRule::LinkRevision {
+                source,
+                kind: RevisionLinkKind::ConflictsWith,
+                target,
+                rationale: "The two cells make incompatible claims.".to_string(),
+                citations: vec!["test://conflict".to_string()],
+            },
+        ))?;
+
+        assert!(matches!(
+            proposals[0].action(),
+            StewardAction::LinkRevision {
+                source: actual_source,
+                kind: RevisionLinkKind::ConflictsWith,
+                target: actual_target,
+            } if *actual_source == source && *actual_target == target
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn mock_steward_preserves_rule_order() -> Result<(), Box<dyn std::error::Error>> {
+        let first = StateCellId::new();
+        let second = StateCellId::new();
+        let mock = MockSteward::new(steward()?);
+        let proposals = mock.propose(
+            MockStewardInput::new(created_at())
+                .with_rule(MockStewardRule::MarkFrontier {
+                    cell_id: first,
+                    rationale: "First frontier proposal.".to_string(),
+                    citations: vec!["test://first".to_string()],
+                })
+                .with_rule(MockStewardRule::RequestVerification {
+                    cell_id: Some(second),
+                    request: "Verify the second cell.".to_string(),
+                    rationale: "Second verification proposal.".to_string(),
+                    citations: vec!["test://second".to_string()],
+                }),
+        )?;
+
+        assert!(matches!(
+            proposals[0].action(),
+            StewardAction::MarkFrontier { cell_id } if *cell_id == first
+        ));
+        assert!(matches!(
+            proposals[1].action(),
+            StewardAction::RequestVerification { cell_id, request }
+                if *cell_id == Some(second) && request == "Verify the second cell."
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn mock_steward_reuses_proposal_constructor_validation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mock = MockSteward::new(steward()?);
+        let result = mock.propose(MockStewardInput::new(created_at()).with_rule(
+            MockStewardRule::MarkFrontier {
+                cell_id: StateCellId::new(),
+                rationale: " ".to_string(),
+                citations: vec!["test://frontier".to_string()],
+            },
+        ));
+
+        assert!(matches!(result, Err(StewardError::EmptyRationale)));
+        Ok(())
+    }
+
+    #[test]
+    fn mock_steward_output_can_be_evaluated_by_policy() -> Result<(), Box<dyn std::error::Error>> {
+        let mock = MockSteward::new(steward()?);
+        let proposals = mock.propose(MockStewardInput::new(created_at()).with_rule(
+            MockStewardRule::RequestVerification {
+                cell_id: None,
+                request: "Verify the newest release evidence.".to_string(),
+                rationale: "Release status depends on external evidence.".to_string(),
+                citations: vec!["test://release-evidence".to_string()],
+            },
+        ))?;
+        let decision = ProposalPolicy::strict().evaluate(&proposals[0], created_at());
+
+        assert_eq!(decision.proposal_id(), proposals[0].id());
+        assert_eq!(decision.outcome(), ProposalOutcome::Accepted);
+        Ok(())
+    }
+
+    #[test]
+    fn mock_steward_output_can_be_recorded_in_ledger() -> Result<(), Box<dyn std::error::Error>> {
+        let mock = MockSteward::new(steward()?);
+        let proposals = mock.propose(MockStewardInput::new(created_at()).with_rule(
+            MockStewardRule::AdjustConfidence {
+                cell_id: StateCellId::new(),
+                proposed_confidence: 0.65,
+                rationale: "New evidence lowers confidence.".to_string(),
+                citations: vec!["test://confidence-evidence".to_string()],
+            },
+        ))?;
+        let policy = ProposalPolicy::strict();
+        let decision = policy.evaluate(&proposals[0], created_at());
+        let mut ledger = ProposalLedger::default();
+
+        ledger.record(proposals[0].clone(), decision)?;
+
+        let records = ledger.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].proposal().id(), proposals[0].id());
+        assert_eq!(records[0].decision().outcome(), ProposalOutcome::Accepted);
         Ok(())
     }
 }
