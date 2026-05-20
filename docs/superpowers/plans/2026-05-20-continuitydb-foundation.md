@@ -126,16 +126,11 @@ cargo metadata --format-version 1
 cargo fmt --all -- --check
 ```
 
-Expected: both commands pass. The workspace starts with no members so the first commit is valid before crate creation.
+Expected: both commands fail because Cargo does not treat a virtual workspace with zero members as a valid metadata or formatting target. This is a guardrail: do not commit this intermediate state. Continue to Task 2 and commit the workspace foundation together with the first crate.
 
-- [ ] **Step 5: Commit workspace foundation**
+- [ ] **Step 5: Defer workspace foundation commit**
 
-Run:
-
-```bash
-git add Cargo.toml .gitignore README.md
-git commit -m "chore: add Rust workspace foundation"
-```
+Do not commit yet. The first valid commit includes this foundation plus `continuitydb-core` from Task 2.
 
 ## Task 2: Core StateCell Domain Model
 
@@ -636,7 +631,7 @@ Expected: PASS for the three core tests.
 Run:
 
 ```bash
-git add Cargo.toml crates/continuitydb-core
+git add Cargo.toml Cargo.lock .gitignore README.md crates/continuitydb-core
 git commit -m "feat: add core StateCell model"
 ```
 
