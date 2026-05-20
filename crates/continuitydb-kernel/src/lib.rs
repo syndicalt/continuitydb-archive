@@ -212,6 +212,8 @@ struct FileKernelIndex {
     cells: Vec<StateCell>,
     ids: HashMap<StateCellId, usize>,
     anchors: HashMap<String, Vec<usize>>,
+    answerability_questions: HashMap<String, Vec<usize>>,
+    evidence_sources: HashMap<String, Vec<usize>>,
     commits: HashMap<CommitId, Vec<usize>>,
     manifests: HashMap<CommitId, CommitManifest>,
     manifest_order: Vec<CommitId>,
@@ -252,6 +254,18 @@ impl FileKernelIndex {
         for anchor in &cell.anchors {
             self.anchors
                 .entry(anchor.as_str().to_string())
+                .or_default()
+                .push(position);
+        }
+        for question in cell.answerability.questions() {
+            self.answerability_questions
+                .entry(question.clone())
+                .or_default()
+                .push(position);
+        }
+        for evidence in &cell.evidence {
+            self.evidence_sources
+                .entry(evidence.source.as_str().to_string())
                 .or_default()
                 .push(position);
         }
@@ -689,6 +703,28 @@ impl StorageKernel for FileKernel {
             self.index
                 .commits
                 .get(&commit_id)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.index.cells[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(question) = lookup.answerability_question.as_ref() {
+            self.index
+                .answerability_questions
+                .get(question)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.index.cells[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(source) = lookup.evidence_source.as_ref() {
+            self.index
+                .evidence_sources
+                .get(source)
                 .map(|positions| {
                     positions
                         .iter()
@@ -2023,6 +2059,62 @@ mod tests {
     }
 
     #[test]
+    fn file_kernel_rebuilds_answerability_question_index() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-answerability-index-rebuild");
+        let mut status = sample_cell("project:continuitydb:index-status", 0.91, 12)?;
+        status.answerability = Answerability::new(vec!["what is status?".to_string()])?;
+        let mut frontier = sample_cell("project:continuitydb:index-frontier", 0.83, 15)?;
+        frontier.answerability = Answerability::new(vec!["what is frontier?".to_string()])?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            append_committed(&mut kernel, status)?;
+            frontier = append_committed(&mut kernel, frontier)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let positions = reopened
+            .index
+            .answerability_questions
+            .get("what is frontier?")
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![frontier]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_answerability_question_index_after_append(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-answerability-index-append");
+        let mut frontier = sample_cell("project:continuitydb:index-append-frontier", 0.83, 15)?;
+        frontier.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let mut kernel = FileKernel::open(&path)?;
+
+        frontier = append_committed(&mut kernel, frontier)?;
+        let positions = kernel
+            .index
+            .answerability_questions
+            .get("what changed?")
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![frontier]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
     fn file_kernel_filters_by_evidence_source() -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_kernel_path("continuitydb-file-kernel-evidence-source");
         let observed =
@@ -2042,6 +2134,65 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![reviewed]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rebuilds_evidence_source_index() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-evidence-index-rebuild");
+        let observed =
+            sample_cell_with_source("project:continuitydb:index-observed", "sensor", 0.91, 12)?;
+        let mut reviewed =
+            sample_cell_with_source("project:continuitydb:index-reviewed", "human", 0.83, 15)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            append_committed(&mut kernel, observed)?;
+            reviewed = append_committed(&mut kernel, reviewed)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let positions = reopened
+            .index
+            .evidence_sources
+            .get("human")
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![reviewed]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_evidence_source_index_after_append(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-evidence-index-append");
+        let mut reviewed = sample_cell_with_source(
+            "project:continuitydb:index-append-reviewed",
+            "human",
+            0.83,
+            15,
+        )?;
+        let mut kernel = FileKernel::open(&path)?;
+
+        reviewed = append_committed(&mut kernel, reviewed)?;
+        let positions = kernel
+            .index
+            .evidence_sources
+            .get("human")
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![reviewed]);
         fs::remove_file(path)?;
         Ok(())
     }

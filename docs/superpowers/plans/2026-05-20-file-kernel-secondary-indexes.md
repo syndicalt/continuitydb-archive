@@ -22,7 +22,7 @@
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add answerability rebuild test**
+- [x] **Step 1: Add answerability rebuild test**
 
 Add near `file_kernel_filters_by_answerability_question`:
 
@@ -58,7 +58,7 @@ fn file_kernel_rebuilds_answerability_question_index() -> Result<(), Box<dyn std
 }
 ```
 
-- [ ] **Step 2: Add answerability append-update test**
+- [x] **Step 2: Add answerability append-update test**
 
 Add:
 
@@ -89,7 +89,7 @@ fn file_kernel_updates_answerability_question_index_after_append(
 }
 ```
 
-- [ ] **Step 3: Add evidence-source rebuild test**
+- [x] **Step 3: Add evidence-source rebuild test**
 
 Add near `file_kernel_filters_by_evidence_source`:
 
@@ -124,7 +124,7 @@ fn file_kernel_rebuilds_evidence_source_index() -> Result<(), Box<dyn std::error
 }
 ```
 
-- [ ] **Step 4: Add evidence-source append-update test**
+- [x] **Step 4: Add evidence-source append-update test**
 
 Add:
 
@@ -155,7 +155,7 @@ fn file_kernel_updates_evidence_source_index_after_append() -> Result<(), Box<dy
 }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify RED**
+- [x] **Step 5: Run targeted tests and verify RED**
 
 Run:
 
@@ -170,7 +170,7 @@ Expected: compilation fails because `answerability_questions` and `evidence_sour
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add index fields**
+- [x] **Step 1: Add index fields**
 
 Change `FileKernelIndex` to include:
 
@@ -179,7 +179,7 @@ answerability_questions: HashMap<String, Vec<usize>>,
 evidence_sources: HashMap<String, Vec<usize>>,
 ```
 
-- [ ] **Step 2: Populate indexes during insert**
+- [x] **Step 2: Populate indexes during insert**
 
 In `FileKernelIndex::insert`, after anchor indexing and before commit indexing, add:
 
@@ -198,7 +198,7 @@ for evidence in &cell.evidence {
 }
 ```
 
-- [ ] **Step 3: Use indexes for candidate selection**
+- [x] **Step 3: Use indexes for candidate selection**
 
 In `FileKernel::lookup_cells`, add answerability/evidence branches after commit lookup and before full scan:
 
@@ -227,7 +227,7 @@ In `FileKernel::lookup_cells`, add answerability/evidence branches after commit 
         .unwrap_or_default()
 ```
 
-- [ ] **Step 4: Run targeted tests and verify GREEN**
+- [x] **Step 4: Run targeted tests and verify GREEN**
 
 Run:
 
@@ -247,7 +247,7 @@ Expected: all targeted file-kernel index and lookup tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-file-kernel-secondary-indexes.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope near the existing file-kernel index bullet:
 
@@ -255,7 +255,7 @@ Add to Current Scope near the existing file-kernel index bullet:
 - File-kernel secondary indexes for answerability questions and evidence sources.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add a Storage Kernel milestone after milestone 20:
 
@@ -263,7 +263,7 @@ Add a Storage Kernel milestone after milestone 20:
 21. Add file-kernel secondary indexes for answerability and evidence source lookups. Implemented derived in-process indexes rebuilt from the JSONL log and maintained after append so common context retrieval filters can start from indexed candidates while preserving append-order results and the canonical log as source of truth.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -277,7 +277,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
