@@ -1540,10 +1540,13 @@ fn write_local_model_bundle_manifest(
 ) -> Result<LocalModelBundleManifest, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(artifact_dir)?;
     let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let report_text = std::fs::read_to_string(report_path)?;
     let manifest = serde_json::json!({
         "format": "continuitydb.local_model.benchmark_bundle",
         "format_version": 1,
         "benchmark_report_path": report_path.display().to_string(),
+        "benchmark_report_fingerprint": local_model_contract_fingerprint(&report_text),
+        "benchmark_report_bytes": report_text.len(),
         "contract_artifacts": report["contract_artifacts"].clone(),
         "prompt_artifacts": report["prompt_artifacts"].clone(),
         "response_artifacts": report["response_artifacts"].clone(),
