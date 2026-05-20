@@ -1168,8 +1168,7 @@ mod tests {
     }
 
     #[test]
-    fn api_checkout_query_file_executes_query_envelope() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn api_checkout_query_file_executes_query_envelope() -> Result<(), Box<dyn std::error::Error>> {
         let mut db = ContinuityDb::new(MemoryKernel::default());
         db.ingest_cell(sample_cell(
             "project:continuitydb:query-file-envelope",
@@ -1195,10 +1194,13 @@ mod tests {
     }
 
     #[test]
-    fn api_checkout_query_file_executes_raw_query_json() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn api_checkout_query_file_executes_raw_query_json() -> Result<(), Box<dyn std::error::Error>> {
         let mut db = ContinuityDb::new(MemoryKernel::default());
-        db.ingest_cell(sample_cell("project:continuitydb:query-file-raw", 0.91, 12)?)?;
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-file-raw",
+            0.91,
+            12,
+        )?)?;
         let query = ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
             "stored-facts",
             "what should the agent know?",
@@ -1228,8 +1230,8 @@ mod tests {
     }
 
     #[test]
-    fn api_checkout_query_file_reports_invalid_raw_json(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn api_checkout_query_file_reports_invalid_raw_json() -> Result<(), Box<dyn std::error::Error>>
+    {
         let db = ContinuityDb::new(MemoryKernel::default());
         let path = temp_file_kernel_path("invalid-query-file-json");
         fs::write(&path, b"{not valid json}\n")?;
