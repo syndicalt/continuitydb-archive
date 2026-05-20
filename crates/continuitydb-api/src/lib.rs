@@ -6,7 +6,7 @@ use continuitydb_checkout::{
 };
 use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{
-    CellLookup, CommitManifestLookup, FileKernel, KernelError, StorageKernel,
+    CellLookup, CommitManifestLookup, FileKernel, KernelCapabilities, KernelError, StorageKernel,
 };
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
@@ -155,6 +155,11 @@ impl<K> ContinuityDb<K> {
 }
 
 impl<K: StorageKernel> ContinuityDb<K> {
+    /// Returns the storage guarantees exposed by the backing kernel.
+    pub fn kernel_capabilities(&self) -> KernelCapabilities {
+        self.kernel.capabilities()
+    }
+
     /// Appends an immutable StateCell version and returns its identifier.
     pub fn ingest_cell(&mut self, cell: StateCell) -> Result<StateCellId, ContinuityError> {
         let cell_id = cell.id;
@@ -486,7 +491,7 @@ mod tests {
         ValidTimeRange,
     };
     use continuitydb_kernel::{
-        CellLookup, CommitManifestLookup, FileKernel, KernelError, StorageKernel,
+        CellLookup, CommitManifestLookup, FileKernel, KernelDurability, KernelError, StorageKernel,
     };
     use continuitydb_memory::MemoryKernel;
 
@@ -535,6 +540,17 @@ mod tests {
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
+    }
+
+    #[test]
+    fn api_exposes_kernel_capabilities() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let capabilities = db.kernel_capabilities();
+
+        assert_eq!(KernelDurability::Ephemeral, capabilities.durability);
+        assert!(capabilities.append_only);
+        assert!(!capabilities.durable_flush);
     }
 
     #[test]

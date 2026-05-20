@@ -188,7 +188,9 @@ mod tests {
         Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
         StateCellId, TrustSignal, ValidTimeRange,
     };
-    use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
+    use continuitydb_kernel::{
+        CellLookup, CommitManifestLookup, KernelDurability, KernelError, StorageKernel,
+    };
 
     use super::MemoryKernel;
 
@@ -246,6 +248,20 @@ mod tests {
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
+    }
+
+    #[test]
+    fn memory_kernel_reports_ephemeral_capabilities() {
+        let kernel = MemoryKernel::default();
+        let capabilities = kernel.capabilities();
+
+        assert_eq!(KernelDurability::Ephemeral, capabilities.durability);
+        assert!(capabilities.append_only);
+        assert!(!capabilities.derived_indexes);
+        assert!(!capabilities.persistent_indexes);
+        assert!(!capabilities.explicit_commit_records);
+        assert!(!capabilities.durable_flush);
+        assert!(!capabilities.compaction);
     }
 
     #[test]
