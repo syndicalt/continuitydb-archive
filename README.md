@@ -81,6 +81,7 @@ The first milestone builds:
 - CLI local model benchmark stability reporting.
 - CLI local model instability failure gating.
 - CLI local model fixed evaluation failure gating.
+- CLI local model fixed evaluation failure report artifacts.
 - Default local model conflict-classification evaluation case.
 - Default local model unsupported-claim evaluation case.
 - Default local model multi-source citation preservation evaluation case.

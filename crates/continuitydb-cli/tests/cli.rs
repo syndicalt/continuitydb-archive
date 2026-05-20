@@ -486,14 +486,17 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
 
 #[cfg(feature = "local-model")]
 #[test]
-fn cli_benchmark_local_model_fail_on_failed_cases_dry_run_reports_gate(
+fn cli_benchmark_local_model_failure_report_path_dry_run_reports_gate(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let baseline_path = temp_store_path("continuitydb-cli-local-model-failed-cases-dry-run");
+    let report_path = temp_store_path("continuitydb-cli-local-model-failed-cases-dry-run-report");
 
     let output = Command::cargo_bin("continuitydb")?
         .arg("benchmark-local-model")
         .arg("--dry-run")
         .arg("--fail-on-failed-cases")
+        .arg("--failure-report-path")
+        .arg(&report_path)
         .arg("--candidate")
         .arg("Qwen/Qwen2.5-0.5B-Instruct")
         .arg("--executable")
@@ -511,16 +514,22 @@ fn cli_benchmark_local_model_fail_on_failed_cases_dry_run_reports_gate(
 
     assert_eq!(json["dry_run"].as_bool(), Some(true));
     assert_eq!(json["fail_on_failed_cases"].as_bool(), Some(true));
+    assert_eq!(
+        json["failure_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
     assert!(!baseline_path.exists());
+    assert!(!report_path.exists());
     Ok(())
 }
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
-fn cli_benchmark_local_model_fail_on_failed_cases_rejects_failed_evaluation_without_baseline(
+fn cli_benchmark_local_model_failure_report_path_rejects_failed_evaluation_without_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-failed-cases-runner");
     let baseline_path = temp_store_path("continuitydb-cli-local-model-failed-cases-baseline");
+    let report_path = temp_store_path("continuitydb-cli-local-model-failed-cases-report");
     let script = r#"#!/usr/bin/env sh
 cat >/dev/null
 printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]}]}'
@@ -541,6 +550,8 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         .arg("/models/qwen.gguf")
         .arg("--baseline-path")
         .arg(&baseline_path)
+        .arg("--failure-report-path")
+        .arg(&report_path)
         .assert()
         .failure()
         .stderr(contains(
@@ -548,17 +559,35 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         ));
 
     assert!(!baseline_path.exists());
+    let report_text = fs::read_to_string(&report_path)?;
+    let report: Value = serde_json::from_str(&report_text)?;
+
+    assert_eq!(report["passed"].as_bool(), Some(false));
+    assert_eq!(report["failed_cases"].as_u64(), Some(4));
+    assert_eq!(
+        report["baseline_path"].as_str(),
+        Some(baseline_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        report["evaluation"]["case_reports"][1]["name"].as_str(),
+        Some("conflict classification")
+    );
+    assert!(report["evaluation"]["case_reports"][1]["failures"]
+        .as_array()
+        .is_some_and(|failures| !failures.is_empty()));
 
     fs::remove_file(executable_path)?;
+    fs::remove_file(report_path)?;
     Ok(())
 }
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
-fn cli_benchmark_local_model_fail_on_failed_cases_records_passing_baseline(
+fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-passing-gate-runner");
     let baseline_path = temp_store_path("continuitydb-cli-local-model-passing-gate-baseline");
+    let report_path = temp_store_path("continuitydb-cli-local-model-passing-gate-report");
     let script = r#"#!/usr/bin/env sh
 cat >/dev/null
 printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
@@ -579,6 +608,8 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         .arg("/models/qwen.gguf")
         .arg("--baseline-path")
         .arg(&baseline_path)
+        .arg("--failure-report-path")
+        .arg(&report_path)
         .assert()
         .success()
         .get_output()
@@ -594,6 +625,7 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert_eq!(json["passed"].as_bool(), Some(true));
     assert_eq!(json["failed_cases"].as_u64(), Some(0));
     assert_eq!(records.len(), 1);
+    assert!(!report_path.exists());
 
     fs::remove_file(executable_path)?;
     fs::remove_file(baseline_path)?;

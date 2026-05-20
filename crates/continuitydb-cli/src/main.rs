@@ -75,6 +75,7 @@ struct LocalModelBenchmarkOptions<'a> {
     stability_trials: Option<usize>,
     fail_on_unstable: bool,
     fail_on_failed_cases: bool,
+    failure_report_path: Option<&'a Path>,
     dry_run: bool,
     compare_baseline: bool,
     fail_on_regression: bool,
@@ -101,6 +102,7 @@ struct LocalModelBenchmarkDryRunGates {
     baseline_preflight: Option<serde_json::Value>,
     stability_preflight: Option<serde_json::Value>,
     fail_on_failed_cases: bool,
+    failure_report_path: Option<PathBuf>,
 }
 
 /// Named kernel requirement profiles understood by the CLI.
@@ -270,6 +272,9 @@ enum Command {
         /// Exit non-zero before baseline recording when fixed evaluation cases fail.
         #[arg(long = "fail-on-failed-cases")]
         fail_on_failed_cases: bool,
+        /// Path to write benchmark JSON when a pre-recording quality gate fails.
+        #[arg(long = "failure-report-path")]
+        failure_report_path: Option<PathBuf>,
         /// Print benchmark configuration without executing the model or recording a baseline.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -475,6 +480,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             stability_trials,
             fail_on_unstable,
             fail_on_failed_cases,
+            failure_report_path,
             dry_run,
             compare_baseline,
             fail_on_regression,
@@ -493,6 +499,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 stability_trials,
                 fail_on_unstable,
                 fail_on_failed_cases,
+                failure_report_path: failure_report_path.as_deref(),
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
@@ -742,6 +749,7 @@ fn benchmark_local_model_json(
                     local_model_stability_preflight_json(trials, options.fail_on_unstable)
                 }),
                 fail_on_failed_cases: options.fail_on_failed_cases,
+                failure_report_path: options.failure_report_path.map(Path::to_path_buf),
             },
         ));
     }
@@ -762,6 +770,18 @@ fn benchmark_local_model_json(
     let current_baseline =
         LocalModelBenchmarkBaseline::from_report(benchmark.run(identity), Utc::now());
     if options.fail_on_failed_cases && !current_baseline.evaluation_summary().passed() {
+        if let Some(report_path) = options.failure_report_path {
+            let report = local_model_benchmark_json(
+                options.baseline_path,
+                options.compare_baseline,
+                &current_baseline,
+                None,
+                contract_artifacts.as_ref(),
+                &prompt_artifacts,
+                stability.as_ref(),
+            );
+            write_local_model_failure_report(report_path, &report)?;
+        }
         return Err(
             std::io::Error::other("local model benchmark fixed evaluation cases failed").into(),
         );
@@ -821,6 +841,10 @@ fn local_model_benchmark_dry_run_json(
         "grammar_fingerprint": local_model_contract_fingerprint(local_model_response_gbnf_grammar()),
         "prompt_fingerprint": local_model_prompt_fingerprint_for_suite(&default_steward_evaluation_suite()),
         "fail_on_failed_cases": gates.fail_on_failed_cases,
+        "failure_report_path": gates
+            .failure_report_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
         "runtime": {
@@ -835,6 +859,21 @@ fn local_model_benchmark_dry_run_json(
         value["stability_preflight"] = stability_preflight;
     }
     value
+}
+
+#[cfg(feature = "local-model")]
+fn write_local_model_failure_report(
+    report_path: &Path,
+    report: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = report_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(report_path, serde_json::to_string_pretty(report)?)?;
+    Ok(())
 }
 
 #[cfg(feature = "local-model")]
