@@ -178,6 +178,7 @@ Storage kernel
 11. Add CLI workload report artifacts. Added `measure-workload --report-path` so successful workload measurements can write the same structured JSON printed to stdout into an archiveable artifact for CI and storage-engine trials.
 12. Add CLI workload regression failure report artifacts. Added `measure-workload --failure-report-path` so regression-gated workload runs can preserve structured comparison evidence before exiting non-zero without recording the regressed run as a new baseline.
 13. Add CLI workload artifact bundles. Added `measure-workload --artifact-dir` so successful and regression-gated workload runs can write `workload-report.json` plus a versioned `continuitydb-workload.manifest.json` under one archiveable CI directory.
+14. Add CLI workload replay fixture artifacts. Extended workload artifact bundles with deterministic `workload-cells.json` and `checkout-request.json` files plus fingerprints so archived storage-engine runs carry the exact StateCell corpus and checkout predicate needed for replay.
 
 ## Native API Milestones
 

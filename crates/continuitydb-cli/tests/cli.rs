@@ -265,6 +265,8 @@ fn cli_measure_workload_artifact_dir_writes_bundle() -> Result<(), Box<dyn std::
     let report_path = artifact_dir.join("workload-report.json");
     let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
     let bundle_manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let checkout_request_path = artifact_dir.join("checkout-request.json");
 
     assert_eq!(stdout_json, report_json);
     assert_eq!(stdout_json["kernel"].as_str(), Some("memory"));
@@ -283,6 +285,22 @@ fn cli_measure_workload_artifact_dir_writes_bundle() -> Result<(), Box<dyn std::
     assert!(stdout_json["bundle_manifest"]["manifest_bytes"]
         .as_u64()
         .is_some_and(|bytes| bytes > 0));
+    assert_eq!(
+        stdout_json["workload_artifacts"]["cells_path"].as_str(),
+        Some(cells_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        stdout_json["workload_artifacts"]["checkout_request_path"].as_str(),
+        Some(checkout_request_path.display().to_string().as_str())
+    );
+    assert!(stdout_json["workload_artifacts"]["cells_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(
+        stdout_json["workload_artifacts"]["checkout_request_fingerprint"]
+            .as_str()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:"))
+    );
 
     let bundle_manifest_json: Value =
         serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
@@ -299,6 +317,40 @@ fn cli_measure_workload_artifact_dir_writes_bundle() -> Result<(), Box<dyn std::
     assert_eq!(
         bundle_manifest_json["baseline_comparison"],
         serde_json::Value::Null
+    );
+    assert_eq!(
+        bundle_manifest_json["workload_artifacts"]["cells_path"].as_str(),
+        Some(cells_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest_json["workload_artifacts"]["checkout_request_path"].as_str(),
+        Some(checkout_request_path.display().to_string().as_str())
+    );
+    let cells_json: Value = serde_json::from_str(&fs::read_to_string(&cells_path)?)?;
+    assert_eq!(
+        cells_json["format"].as_str(),
+        Some("continuitydb.workload.cells")
+    );
+    assert_eq!(cells_json["format_version"].as_u64(), Some(1));
+    assert_eq!(cells_json["cells"].as_array().map(Vec::len), Some(8));
+    let checkout_request_json: Value =
+        serde_json::from_str(&fs::read_to_string(&checkout_request_path)?)?;
+    assert_eq!(
+        checkout_request_json["format"].as_str(),
+        Some("continuitydb.workload.checkout_request")
+    );
+    assert_eq!(checkout_request_json["format_version"].as_u64(), Some(1));
+    assert_eq!(
+        checkout_request_json["request"]["scope"]["Project"].as_str(),
+        Some("continuitydb")
+    );
+    assert_eq!(
+        checkout_request_json["request"]["minimum_confidence"].as_f64(),
+        Some(0.0)
+    );
+    assert_eq!(
+        checkout_request_json["request"]["token_budget"].as_i64(),
+        Some(400)
     );
 
     fs::remove_dir_all(artifact_dir)?;
@@ -3304,6 +3356,8 @@ fn cli_measure_workload_artifact_dir_writes_regression_bundle(
     let report_path = artifact_dir.join("workload-report.json");
     let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
     let bundle_manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let checkout_request_path = artifact_dir.join("checkout-request.json");
     assert_eq!(
         report["baseline_comparison"]["passed"].as_bool(),
         Some(false)
@@ -3321,6 +3375,16 @@ fn cli_measure_workload_artifact_dir_writes_regression_bundle(
         bundle_manifest["workload_report_path"].as_str(),
         Some(report_path.display().to_string().as_str())
     );
+    assert_eq!(
+        report["workload_artifacts"]["cells_path"].as_str(),
+        Some(cells_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        report["workload_artifacts"]["checkout_request_path"].as_str(),
+        Some(checkout_request_path.display().to_string().as_str())
+    );
+    assert!(cells_path.exists());
+    assert!(checkout_request_path.exists());
     assert_eq!(fs::read_to_string(&baseline_path)?.lines().count(), 1);
 
     fs::remove_file(baseline_path)?;
