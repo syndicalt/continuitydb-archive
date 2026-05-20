@@ -46,6 +46,17 @@ impl StorageKernel for MemoryKernel {
                     .activation
                     .map_or(true, |activation| cell.activation == activation)
             })
+            .filter(|cell| {
+                lookup
+                    .answerability_question
+                    .as_ref()
+                    .map_or(true, |question| {
+                        cell.answerability
+                            .questions()
+                            .iter()
+                            .any(|candidate| candidate == question)
+                    })
+            })
             .cloned()
             .collect();
 
@@ -120,6 +131,25 @@ mod tests {
 
         let results = kernel.lookup_cells(CellLookup {
             activation: Some(ActivationState::Frontier),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![frontier]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_answerability_question() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut status = sample_cell("project:continuitydb:status", 0.9, 12)?;
+        status.answerability = Answerability::new(vec!["what is status?".to_string()])?;
+        let mut frontier = sample_cell("project:continuitydb:frontier", 0.8, 15)?;
+        frontier.answerability = Answerability::new(vec!["what is frontier?".to_string()])?;
+        kernel.append_cell(status)?;
+        kernel.append_cell(frontier.clone())?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            answerability_question: Some("what is frontier?".to_string()),
             ..CellLookup::default()
         })?;
 

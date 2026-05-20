@@ -34,6 +34,8 @@ pub struct CellLookup {
     pub valid_at: Option<DateTime<Utc>>,
     /// Optional activation-state filter.
     pub activation: Option<ActivationState>,
+    /// Optional exact answerability question filter.
+    pub answerability_question: Option<String>,
 }
 
 /// Minimal append and lookup contract required by the first ContinuityDB milestone.
@@ -137,6 +139,17 @@ impl StorageKernel for FileKernel {
                 lookup
                     .activation
                     .map_or(true, |activation| cell.activation == activation)
+            })
+            .filter(|cell| {
+                lookup
+                    .answerability_question
+                    .as_ref()
+                    .map_or(true, |question| {
+                        cell.answerability
+                            .questions()
+                            .iter()
+                            .any(|candidate| candidate == question)
+                    })
             })
             .collect();
 
@@ -275,6 +288,30 @@ mod tests {
         let reopened = FileKernel::open(&path)?;
         let results = reopened.lookup_cells(CellLookup {
             activation: Some(ActivationState::Frontier),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![frontier]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_answerability_question() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-answerability");
+        let mut status = sample_cell("project:continuitydb:status", 0.91, 12)?;
+        status.answerability = Answerability::new(vec!["what is status?".to_string()])?;
+        let mut frontier = sample_cell("project:continuitydb:frontier", 0.83, 15)?;
+        frontier.answerability = Answerability::new(vec!["what is frontier?".to_string()])?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell(status)?;
+            kernel.append_cell(frontier.clone())?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            answerability_question: Some("what is frontier?".to_string()),
             ..CellLookup::default()
         })?;
 

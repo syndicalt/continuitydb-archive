@@ -89,6 +89,11 @@ impl Answerability {
 
         Ok(Self { questions })
     }
+
+    /// Returns the normalized questions this StateCell can help answer.
+    pub fn questions(&self) -> &[String] {
+        &self.questions
+    }
 }
 
 /// Estimated materialization cost for a StateCell.

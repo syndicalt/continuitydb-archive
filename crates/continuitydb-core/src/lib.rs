@@ -50,6 +50,25 @@ mod tests {
     }
 
     #[test]
+    fn answerability_questions_returns_normalized_questions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let answerability = Answerability::new(vec![
+            " what is frontier? ".to_string(),
+            " ".to_string(),
+            "what needs verification?".to_string(),
+        ])?;
+
+        assert_eq!(
+            answerability.questions(),
+            &[
+                "what is frontier?".to_string(),
+                "what needs verification?".to_string()
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn valid_time_contains_as_of_in_half_open_range() -> Result<(), Box<dyn std::error::Error>> {
         let start = Utc
             .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
