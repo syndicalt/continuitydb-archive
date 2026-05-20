@@ -261,6 +261,67 @@ where
     }
 }
 
+/// Proposal ledger store adapter backed by a borrowed ContinuityDB storage kernel.
+pub struct BorrowedKernelProposalStore<'a, K> {
+    kernel: &'a mut K,
+}
+
+impl<'a, K> BorrowedKernelProposalStore<'a, K> {
+    /// Creates a proposal store backed by a borrowed storage kernel.
+    pub fn new(kernel: &'a mut K) -> Self {
+        Self { kernel }
+    }
+
+    /// Returns the backing storage kernel.
+    pub fn kernel(&self) -> &K {
+        self.kernel
+    }
+
+    /// Returns the mutable backing storage kernel.
+    pub fn kernel_mut(&mut self) -> &mut K {
+        self.kernel
+    }
+}
+
+impl<K> ProposalLedgerStore for BorrowedKernelProposalStore<'_, K>
+where
+    K: StorageKernel,
+{
+    fn append_record(&mut self, record: ProposalAuditRecord) -> Result<(), StewardError> {
+        self.kernel
+            .append_cell(record_to_cell(&record)?)
+            .map_err(|_error| StewardError::ProposalStoreIo)
+    }
+
+    fn list_records(&self) -> Result<Vec<ProposalAuditRecord>, StewardError> {
+        self.kernel
+            .lookup_cells(CellLookup {
+                semantic_anchor: Some(PROPOSAL_AUDIT_ANCHOR.to_string()),
+                ..CellLookup::default()
+            })
+            .map_err(|_error| StewardError::ProposalStoreIo)?
+            .into_iter()
+            .map(record_from_cell)
+            .collect()
+    }
+
+    fn get_record(
+        &self,
+        proposal_id: ProposalId,
+    ) -> Result<Option<ProposalAuditRecord>, StewardError> {
+        self.kernel
+            .lookup_cells(CellLookup {
+                semantic_anchor: Some(proposal_anchor(proposal_id)?),
+                ..CellLookup::default()
+            })
+            .map_err(|_error| StewardError::ProposalStoreIo)?
+            .into_iter()
+            .next()
+            .map(record_from_cell)
+            .transpose()
+    }
+}
+
 fn record_to_cell(record: &ProposalAuditRecord) -> Result<StateCell, StewardError> {
     let payload =
         serde_json::to_value(record).map_err(|_error| StewardError::ProposalStoreCorrupt)?;

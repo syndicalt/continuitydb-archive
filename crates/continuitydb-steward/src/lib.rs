@@ -18,8 +18,8 @@ pub use frontier::{
     MemoryFrontierSubscriptionStore,
 };
 pub use ledger::{
-    FileProposalStore, KernelProposalStore, MemoryProposalStore, ProposalAuditRecord,
-    ProposalLedger, ProposalLedgerStore, StoredProposalLedger,
+    BorrowedKernelProposalStore, FileProposalStore, KernelProposalStore, MemoryProposalStore,
+    ProposalAuditRecord, ProposalLedger, ProposalLedgerStore, StoredProposalLedger,
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
@@ -54,15 +54,15 @@ mod tests {
         LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
     };
     use super::{
+        BorrowedKernelProposalStore, FileProposalStore, KernelProposalStore, MemoryProposalStore,
+        MockSteward, MockStewardInput, MockStewardRule, ProposalDecision, ProposalId,
+        ProposalLedger, ProposalLedgerStore, ProposalOutcome, ProposalPolicy, StewardAction,
+        StewardError, StewardIdentity, StewardProposal, StoredProposalLedger,
+    };
+    use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
         FrontierSubscriptionId, FrontierSubscriptionRunner, FrontierSubscriptionStore,
         FrontierWatchEvent, FrontierWatchSignal, MemoryFrontierSubscriptionStore,
-    };
-    use super::{
-        FileProposalStore, KernelProposalStore, MemoryProposalStore, MockSteward, MockStewardInput,
-        MockStewardRule, ProposalDecision, ProposalId, ProposalLedger, ProposalLedgerStore,
-        ProposalOutcome, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
-        StewardProposal, StoredProposalLedger,
     };
     #[cfg(feature = "local-model")]
     use super::{
@@ -2089,6 +2089,30 @@ mod tests {
         let store = ledger.into_store();
         let reopened = StoredProposalLedger::new(KernelProposalStore::new(store.into_kernel()));
         assert_eq!(reopened.records()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn borrowed_kernel_proposal_store_records_without_consuming_kernel(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposal = valid_link_revision()?;
+        let decision = ProposalPolicy::strict().evaluate(&proposal, created_at());
+        let mut kernel = continuitydb_memory::MemoryKernel::default();
+
+        {
+            let store = BorrowedKernelProposalStore::new(&mut kernel);
+            let mut ledger = StoredProposalLedger::new(store);
+            ledger.record(proposal.clone(), decision)?;
+        }
+
+        let store = BorrowedKernelProposalStore::new(&mut kernel);
+        let ledger = StoredProposalLedger::new(store);
+        let record = ledger.record_by_id(proposal.id())?;
+
+        assert_eq!(
+            record.map(|record| record.proposal().id()),
+            Some(proposal.id())
+        );
         Ok(())
     }
 

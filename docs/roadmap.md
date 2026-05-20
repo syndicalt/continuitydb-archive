@@ -171,6 +171,7 @@ Storage kernel
 23. Add commit import dry-run validation. Implemented `validate_commit_import` and `validate_commits_json_file` so embedders can validate replay batches and backup files without mutating target stores.
 24. Add commit import summaries. Implemented summary-returning import APIs so embedders can retrieve imported counts and backup cursors without decoding envelopes separately.
 25. Add native direct commit copy. Implemented `copy_commits_from` so embedders can replay cursor-selected commit pages between open databases without JSON file envelopes.
+26. Add native Steward proposal audit operations. Implemented optional `steward` feature methods on `ContinuityDb<K>` for policy-evaluated proposal audit recording, listing, and lookup through the backing `StorageKernel`.
 
 ## Steward Milestones
 
@@ -185,6 +186,7 @@ Storage kernel
 9. Add conflict-resolution proposal integration. Implemented `ConflictResolutionSteward` to convert deterministic revision conflict recommendations into auditable `LinkRevision` or `RequestVerification` proposals without mutating committed truth.
 10. Add durable conflict-resolution proposal audit. Implemented `ConflictResolutionSteward::propose_and_record` so deterministic conflict-resolution proposals are policy-evaluated and persisted through any existing `StoredProposalLedger`.
 11. Add kernel-backed conflict-resolution audit. Implemented `ConflictResolutionSteward::propose_and_record_to_kernel` so deterministic conflict-resolution proposal audits can be persisted as StateCells through any `StorageKernel`.
+12. Add borrowed kernel proposal audit adapter. Implemented `BorrowedKernelProposalStore` so embedders can record Steward proposal audits through an existing `ContinuityDb`-owned kernel without moving ownership.
 
 ## Small Embeddable Model Track
 

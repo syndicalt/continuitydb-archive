@@ -13,9 +13,14 @@ continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-kernel = { path = "../continuitydb-kernel" }
 continuitydb-query = { path = "../continuitydb-query" }
 continuitydb-revision = { path = "../continuitydb-revision" }
+continuitydb-steward = { path = "../continuitydb-steward", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[features]
+default = []
+steward = ["dep:continuitydb-steward"]
 
 [dev-dependencies]
 continuitydb-memory = { path = "../continuitydb-memory" }

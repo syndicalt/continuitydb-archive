@@ -18,6 +18,11 @@ use continuitydb_revision::{
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
     ConflictResolutionRecommendation, ConflictResolutionScan,
 };
+#[cfg(feature = "steward")]
+use continuitydb_steward::{
+    BorrowedKernelProposalStore, ProposalAuditRecord, ProposalId, ProposalPolicy, StewardError,
+    StewardProposal, StoredProposalLedger,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::Path};
 use thiserror::Error;
@@ -45,6 +50,10 @@ pub enum ContinuityError {
     /// Query text parsing failure.
     #[error(transparent)]
     QueryText(#[from] QueryTextError),
+    /// Steward proposal audit failure.
+    #[cfg(feature = "steward")]
+    #[error(transparent)]
+    Steward(#[from] StewardError),
     /// Raw typed query JSON could not be decoded.
     #[error("query JSON is invalid")]
     QueryJson,
@@ -455,6 +464,43 @@ impl<K: StorageKernel> ContinuityDb<K> {
         })
     }
 
+    /// Records a Steward proposal and deterministic policy decision as audit StateCell evidence.
+    #[cfg(feature = "steward")]
+    pub fn record_steward_proposal(
+        &mut self,
+        proposal: StewardProposal,
+        policy: &ProposalPolicy,
+        decided_at: DateTime<Utc>,
+    ) -> Result<ProposalAuditRecord, ContinuityError> {
+        let decision = policy.evaluate(&proposal, decided_at);
+        let record = ProposalAuditRecord::new(proposal.clone(), decision.clone())?;
+        let store = BorrowedKernelProposalStore::new(&mut self.kernel);
+        let mut ledger = StoredProposalLedger::new(store);
+        ledger.record(proposal, decision)?;
+        Ok(record)
+    }
+
+    /// Returns all Steward proposal audit records stored in the backing kernel.
+    #[cfg(feature = "steward")]
+    pub fn steward_proposal_records(
+        &mut self,
+    ) -> Result<Vec<ProposalAuditRecord>, ContinuityError> {
+        let store = BorrowedKernelProposalStore::new(&mut self.kernel);
+        let ledger = StoredProposalLedger::new(store);
+        Ok(ledger.records()?)
+    }
+
+    /// Returns one Steward proposal audit record by proposal ID.
+    #[cfg(feature = "steward")]
+    pub fn steward_proposal_record(
+        &mut self,
+        proposal_id: ProposalId,
+    ) -> Result<Option<ProposalAuditRecord>, ContinuityError> {
+        let store = BorrowedKernelProposalStore::new(&mut self.kernel);
+        let ledger = StoredProposalLedger::new(store);
+        Ok(ledger.record_by_id(proposal_id)?)
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -758,6 +804,13 @@ mod tests {
         QueryError, QueryOptimization, QueryRequirements, QueryReturnShape, QueryTask,
         QueryTextError, QUERY_ENVELOPE_FORMAT, QUERY_ENVELOPE_FORMAT_VERSION,
     };
+    #[cfg(feature = "steward")]
+    use continuitydb_revision::RevisionLinkKind;
+    #[cfg(feature = "steward")]
+    use continuitydb_steward::{
+        ProposalId, ProposalOutcome, ProposalPolicy, StewardAction, StewardIdentity,
+        StewardProposal,
+    };
     use std::{fs, path::Path};
 
     use super::{
@@ -819,6 +872,40 @@ mod tests {
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
+    }
+
+    #[cfg(feature = "steward")]
+    fn test_steward_time() -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
+        Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp").into())
+    }
+
+    #[cfg(feature = "steward")]
+    fn test_steward_identity() -> Result<StewardIdentity, Box<dyn std::error::Error>> {
+        Ok(StewardIdentity::new(
+            "native-api-steward",
+            "0.1.0",
+            "strict",
+        )?)
+    }
+
+    #[cfg(feature = "steward")]
+    fn sample_steward_proposal(
+        rationale: &str,
+    ) -> Result<StewardProposal, Box<dyn std::error::Error>> {
+        Ok(StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: StateCellId::new(),
+                kind: RevisionLinkKind::Supersedes,
+                target: StateCellId::new(),
+            },
+            rationale,
+            vec!["test://steward".to_string()],
+            test_steward_time()?,
+        )?)
     }
 
     #[test]
@@ -3005,6 +3092,56 @@ WHERE scope = project("continuitydb")
             recommendations,
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_records_steward_proposal_audit_to_kernel() -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = sample_steward_proposal("New evidence supersedes the prior cell.")?;
+        let proposal_id = proposal.id();
+
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), test_steward_time()?)?;
+
+        assert_eq!(record.proposal().id(), proposal_id);
+        assert_eq!(record.decision().outcome(), ProposalOutcome::Accepted);
+        let records = db.steward_proposal_records()?;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].proposal().id(), proposal_id);
+        let by_id = db.steward_proposal_record(proposal_id)?;
+        assert_eq!(
+            by_id.map(|record| record.proposal().id()),
+            Some(proposal_id)
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_records_rejected_steward_proposal_audit() -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::AdjustConfidence {
+                cell_id: StateCellId::new(),
+                proposed_confidence: 1.5,
+            },
+            "Confidence adjustment is outside policy bounds.",
+            vec!["test://steward".to_string()],
+            test_steward_time()?,
+        )?;
+
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), test_steward_time()?)?;
+
+        assert_eq!(record.decision().outcome(), ProposalOutcome::Rejected);
+        assert_eq!(
+            record.decision().reasons(),
+            &["policy:invalid-confidence".to_string()]
+        );
         Ok(())
     }
 }

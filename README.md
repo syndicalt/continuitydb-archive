@@ -36,6 +36,7 @@ The first milestone builds:
 - Pluggable proposal audit ledger store contract.
 - JSONL file-backed proposal audit store.
 - StorageKernel-backed proposal audit store adapter.
+- Native feature-gated Steward proposal audit API.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.

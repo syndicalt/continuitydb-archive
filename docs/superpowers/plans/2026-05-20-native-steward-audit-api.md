@@ -20,27 +20,27 @@
 
 ## Task 1: RED Tests
 
-- [ ] Add Steward borrowed-store and API tests in `crates/continuitydb-steward/src/lib.rs` and `crates/continuitydb-api/src/lib.rs`.
-- [ ] Add optional `continuitydb-steward` dependency and `steward` feature so the API tests can compile far enough to fail on missing methods.
-- [ ] Run `cargo test -p continuitydb-api steward_proposal --features steward`.
-- [ ] Expected: FAIL because `ContinuityDb` has no Steward audit methods and `BorrowedKernelProposalStore` does not exist.
+- [x] Add Steward borrowed-store and API tests in `crates/continuitydb-steward/src/lib.rs` and `crates/continuitydb-api/src/lib.rs`.
+- [x] Add optional `continuitydb-steward` dependency and `steward` feature so the API tests can compile far enough to fail on missing methods.
+- [x] Run `cargo test -p continuitydb-api steward_proposal --features steward`.
+- [x] Expected: FAIL because `ContinuityDb` has no Steward audit methods and `BorrowedKernelProposalStore` does not exist.
 
 ## Task 2: Implementation
 
-- [ ] Implement `BorrowedKernelProposalStore<'a, K>` with `new`, `kernel`, `kernel_mut`, and `ProposalLedgerStore` impl using the same `record_to_cell`, `record_from_cell`, and `proposal_anchor` helpers as `KernelProposalStore`.
-- [ ] Re-export `BorrowedKernelProposalStore`.
-- [ ] Add `ContinuityError::Steward(#[from] StewardError)` behind `#[cfg(feature = "steward")]`.
-- [ ] Add `ContinuityDb<K>` methods behind `#[cfg(feature = "steward")]`:
+- [x] Implement `BorrowedKernelProposalStore<'a, K>` with `new`, `kernel`, `kernel_mut`, and `ProposalLedgerStore` impl using the same `record_to_cell`, `record_from_cell`, and `proposal_anchor` helpers as `KernelProposalStore`.
+- [x] Re-export `BorrowedKernelProposalStore`.
+- [x] Add `ContinuityError::Steward(#[from] StewardError)` behind `#[cfg(feature = "steward")]`.
+- [x] Add `ContinuityDb<K>` methods behind `#[cfg(feature = "steward")]`:
   - `record_steward_proposal`
   - `steward_proposal_records`
   - `steward_proposal_record`
-- [ ] Run targeted Steward/API tests.
+- [x] Run targeted Steward/API tests.
 
 ## Task 3: Docs, Gate, Commit
 
-- [ ] Update README current scope with native Steward proposal audit API.
-- [ ] Add Native API and Steward roadmap milestones.
-- [ ] Run:
+- [x] Update README current scope with native Steward proposal audit API.
+- [x] Add Native API and Steward roadmap milestones.
+- [x] Run:
 
 ```bash
 cargo fmt --all -- --check

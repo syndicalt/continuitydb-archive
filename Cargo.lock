@@ -205,6 +205,7 @@ dependencies = [
  "continuitydb-memory",
  "continuitydb-query",
  "continuitydb-revision",
+ "continuitydb-steward",
  "serde",
  "serde_json",
  "thiserror",
