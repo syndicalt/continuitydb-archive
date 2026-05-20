@@ -13,6 +13,7 @@ The first milestone builds:
 - An in-memory kernel for correctness tests.
 - Basic revision links.
 - Deterministic checkout.
+- Commit-scoped checkout.
 - Audit traces.
 - Deterministic Steward proposal substrate.
 - Pluggable proposal audit ledger store contract.

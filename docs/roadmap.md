@@ -75,6 +75,7 @@ Storage kernel
 6. Add system-time checkout constraints. Implemented `CheckoutRequest.system_at` with pushdown into `CellLookup.system_at`, allowing continuity slices to be materialized as of a database transaction time.
 7. Add dependency-aware audit traces. Implemented `AuditDependency` metadata in checkout audit traces so selected cells explain dependency and causality links alongside citations.
 8. Add structured evidence audit traces. Implemented `AuditEvidence` metadata in checkout audit traces so selected cells expose source IDs, citation locators, confidence scores, and trust signals.
+9. Add commit-scoped checkout constraints. Implemented `CheckoutRequest.commit_id` with pushdown into `CellLookup.commit_id`, allowing continuity slices to be materialized for one explicit database commit boundary.
 
 ## Utility Feedback Milestones
 

@@ -297,6 +297,7 @@ mod tests {
             scope: Some(Scope::Project("continuitydb".to_string())),
             valid_at: Some(committed_at),
             system_at: Some(committed_at),
+            commit_id: None,
             answerability_question: None,
             evidence_source: None,
             dependency_target: None,
