@@ -690,6 +690,35 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(Some(cell_id))
     }
 
+    /// Applies an accepted Steward proposal by dispatching to the action-specific application API.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_steward_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Option<StateCellId>, ContinuityError> {
+        match record.proposal().action() {
+            StewardAction::CreateCellDraft { .. } => {
+                self.apply_accepted_create_cell_draft_proposal_at(record, committed_at)
+            }
+            StewardAction::LinkRevision { .. } => {
+                self.apply_accepted_link_revision_proposal_at(record, committed_at)
+            }
+            StewardAction::AdjustConfidence { .. } => {
+                self.apply_accepted_adjust_confidence_proposal_at(record, committed_at)
+            }
+            StewardAction::LabelAnswerability { .. } => {
+                self.apply_accepted_label_answerability_proposal_at(record, committed_at)
+            }
+            StewardAction::MarkFrontier { .. } => {
+                self.apply_accepted_mark_frontier_proposal_at(record, committed_at)
+            }
+            StewardAction::RequestVerification { .. } => {
+                self.apply_accepted_request_verification_proposal_at(record, committed_at)
+            }
+        }
+    }
+
     /// Applies an accepted RequestVerification Steward proposal as an operational work StateCell.
     #[cfg(feature = "steward")]
     pub fn apply_accepted_request_verification_proposal_at(
@@ -4844,6 +4873,159 @@ WHERE scope = project("continuitydb")
         assert!(matches!(
             result,
             Err(ContinuityError::UnsupportedStewardProposalAction)
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_accepted_steward_proposal_dispatch_applies_create_cell_draft(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposal_time = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 14, 45, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let anchor = SemanticAnchor::new("project:continuitydb:dispatch-draft");
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::CreateCellDraft {
+                anchors: vec![anchor.clone()],
+                payload_text: "Dispatcher can promote accepted draft proposals.".to_string(),
+            },
+            "The accepted proposal should dispatch to draft application.",
+            vec!["test://dispatch-create-cell".to_string()],
+            proposal_time,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), proposal_time)?;
+
+        let created_id = db
+            .apply_accepted_steward_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected created StateCell"))?;
+
+        let created = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(created_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing created StateCell"))?;
+
+        assert_eq!(created.anchors, vec![anchor]);
+        assert_eq!(created.system_time.from(), apply_commit);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_accepted_steward_proposal_dispatch_applies_mark_frontier(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposal_time = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 15, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:dispatch-frontier", 0.91, 12)?,
+            proposal_time,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: original_id,
+            },
+            "The accepted proposal should dispatch to frontier application.",
+            vec!["test://dispatch-frontier".to_string()],
+            proposal_time,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), proposal_time)?;
+
+        let successor_id = db
+            .apply_accepted_steward_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected successor StateCell"))?;
+
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor StateCell"))?;
+
+        assert_eq!(successor.activation, ActivationState::Frontier);
+        assert_eq!(successor.system_time.from(), apply_commit);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_accepted_steward_proposal_dispatch_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::CreateCellDraft {
+                anchors: vec![SemanticAnchor::new(
+                    "project:continuitydb:dispatch-rejected",
+                )],
+                payload_text: "Rejected dispatch should not create state.".to_string(),
+            },
+            "Policy rejected this dispatched proposal.",
+            vec!["test://dispatch-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied = db.apply_accepted_steward_proposal_at(&record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 0);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_accepted_steward_proposal_dispatch_propagates_missing_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_id = StateCellId::new();
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: missing_id,
+            },
+            "Missing target should be reported by the delegated application method.",
+            vec!["test://dispatch-missing".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_steward_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
         Ok(())
     }
