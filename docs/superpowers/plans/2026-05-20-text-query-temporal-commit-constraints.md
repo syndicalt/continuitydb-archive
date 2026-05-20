@@ -152,7 +152,7 @@ cargo test -p continuitydb-query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit parser implementation**
+- [x] **Step 5: Commit parser implementation**
 
 ```bash
 git add crates/continuitydb-query/src/lib.rs crates/continuitydb-query/src/text.rs docs/superpowers/plans/2026-05-20-text-query-temporal-commit-constraints.md
@@ -166,7 +166,7 @@ git commit -m "feat: parse temporal text query constraints"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-text-query-temporal-commit-constraints.md`
 
-- [ ] **Step 1: Update README current scope**
+- [x] **Step 1: Update README current scope**
 
 Add this bullet after the first strict text parser bullet:
 
@@ -174,7 +174,7 @@ Add this bullet after the first strict text parser bullet:
 - Bitemporal and commit-scoped constraints in strict text `CHECKOUT` queries.
 ```
 
-- [ ] **Step 2: Update Query Language roadmap**
+- [x] **Step 2: Update Query Language roadmap**
 
 Add this milestone after the first strict text parser milestone:
 
@@ -182,7 +182,7 @@ Add this milestone after the first strict text parser milestone:
 8. Add temporal and commit constraints to text checkout queries. Implemented strict `valid_at`, `system_at`, and `commit_id` constraints so text `CHECKOUT` syntax can express bitemporal and commit-scoped materialization already available in the typed AST.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -196,7 +196,7 @@ git diff --check
 
 Expected: all commands exit successfully.
 
-- [ ] **Step 4: Commit documentation**
+- [x] **Step 4: Commit documentation**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-text-query-temporal-commit-constraints.md
