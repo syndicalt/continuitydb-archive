@@ -81,6 +81,7 @@ The first milestone builds:
 - Public local model evaluation contract introspection.
 - CLI local model evaluation suite contract export.
 - Durable local model evaluation suite fingerprints.
+- CLI local model evaluation suite fingerprint output.
 - Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.

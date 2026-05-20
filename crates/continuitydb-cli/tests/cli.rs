@@ -315,6 +315,9 @@ fn cli_local_model_evaluation_suite_outputs_case_contracts(
 
     assert_eq!(json["response_schema_version"].as_u64(), Some(1));
     assert_eq!(json["total_cases"].as_u64(), Some(2));
+    assert!(json["evaluation_suite_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert_eq!(
         json["cases"][0]["name"].as_str(),
         Some("insufficient evidence uncertainty")

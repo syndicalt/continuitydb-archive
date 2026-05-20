@@ -463,6 +463,7 @@ fn local_model_evaluation_suite_json() -> serde_json::Value {
 
     serde_json::json!({
         "response_schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+        "evaluation_suite_fingerprint": suite.fingerprint(),
         "total_cases": suite.len(),
         "cases": cases,
     })
