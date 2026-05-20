@@ -41,6 +41,11 @@ impl StorageKernel for MemoryKernel {
                     .valid_at
                     .map_or(true, |valid_at| cell.valid_time.contains(valid_at))
             })
+            .filter(|cell| {
+                lookup
+                    .activation
+                    .map_or(true, |activation| cell.activation == activation)
+            })
             .cloned()
             .collect();
 
@@ -52,8 +57,8 @@ impl StorageKernel for MemoryKernel {
 mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
-        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
+        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, StorageKernel};
 
@@ -100,6 +105,25 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![cell]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_activation_state() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut active = sample_cell("project:continuitydb:active", 0.9, 12)?;
+        active.activation = ActivationState::Active;
+        let mut frontier = sample_cell("project:continuitydb:frontier", 0.8, 15)?;
+        frontier.activation = ActivationState::Frontier;
+        kernel.append_cell(active)?;
+        kernel.append_cell(frontier.clone())?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            activation: Some(ActivationState::Frontier),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![frontier]);
         Ok(())
     }
 }

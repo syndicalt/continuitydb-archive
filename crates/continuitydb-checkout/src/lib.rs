@@ -54,6 +54,7 @@ pub fn checkout<K: StorageKernel>(
         semantic_anchor: None,
         scope: request.scope,
         valid_at: request.valid_at,
+        ..CellLookup::default()
     })?;
 
     candidates.retain(|cell| {

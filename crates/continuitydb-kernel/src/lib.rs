@@ -1,7 +1,7 @@
 //! Storage kernel interface for ContinuityDB backends.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{Scope, StateCell};
+use continuitydb_core::{ActivationState, Scope, StateCell};
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
@@ -32,6 +32,8 @@ pub struct CellLookup {
     pub scope: Option<Scope>,
     /// Optional valid-time as-of filter.
     pub valid_at: Option<DateTime<Utc>>,
+    /// Optional activation-state filter.
+    pub activation: Option<ActivationState>,
 }
 
 /// Minimal append and lookup contract required by the first ContinuityDB milestone.
@@ -131,6 +133,11 @@ impl StorageKernel for FileKernel {
                     .valid_at
                     .map_or(true, |valid_at| cell.valid_time.contains(valid_at))
             })
+            .filter(|cell| {
+                lookup
+                    .activation
+                    .map_or(true, |activation| cell.activation == activation)
+            })
             .collect();
 
         Ok(cells)
@@ -142,8 +149,8 @@ mod tests {
     use super::{CellLookup, FileKernel, KernelError, StorageKernel};
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
-        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
+        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
     };
     use std::{fs, path::PathBuf};
 
@@ -249,6 +256,30 @@ mod tests {
         assert!(parent.exists());
         assert!(path.exists());
         fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_activation_state() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-activation");
+        let mut active = sample_cell("project:continuitydb:active", 0.91, 12)?;
+        active.activation = ActivationState::Active;
+        let mut frontier = sample_cell("project:continuitydb:frontier", 0.83, 15)?;
+        frontier.activation = ActivationState::Frontier;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell(active)?;
+            kernel.append_cell(frontier.clone())?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            activation: Some(ActivationState::Frontier),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![frontier]);
+        fs::remove_file(path)?;
         Ok(())
     }
 }
