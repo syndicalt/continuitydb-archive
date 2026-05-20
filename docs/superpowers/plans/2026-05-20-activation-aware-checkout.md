@@ -24,7 +24,7 @@
 **Files:**
 - Modify: `crates/continuitydb-checkout/src/lib.rs`
 
-- [ ] **Step 1: Add activation field to existing request literals in tests**
+- [x] **Step 1: Add activation field to existing request literals in tests**
 
 For every `CheckoutRequest { ... }` literal in this file, add:
 
@@ -34,7 +34,7 @@ activation: None,
 
 right after `commit_id`. This keeps existing tests focused on current behavior before the new activation tests are added.
 
-- [ ] **Step 2: Add activation pushdown test**
+- [x] **Step 2: Add activation pushdown test**
 
 Add this test after `checkout_pushes_dependency_constraints_to_kernel`:
 
@@ -69,7 +69,7 @@ fn checkout_pushes_activation_to_kernel() -> Result<(), Box<dyn std::error::Erro
 }
 ```
 
-- [ ] **Step 3: Add activation materialization test**
+- [x] **Step 3: Add activation materialization test**
 
 Add this test near other checkout materialization tests:
 
@@ -105,7 +105,7 @@ fn checkout_filters_by_activation_state() -> Result<(), Box<dyn std::error::Erro
 }
 ```
 
-- [ ] **Step 4: Verify RED**
+- [x] **Step 4: Verify RED**
 
 Run:
 
@@ -120,7 +120,7 @@ Expected: FAIL because `CheckoutRequest` has no `activation` field yet.
 **Files:**
 - Modify: `crates/continuitydb-checkout/src/lib.rs`
 
-- [ ] **Step 1: Add request field**
+- [x] **Step 1: Add request field**
 
 Add this field after `commit_id` in `CheckoutRequest`:
 
@@ -129,7 +129,7 @@ Add this field after `commit_id` in `CheckoutRequest`:
 pub activation: Option<ActivationState>,
 ```
 
-- [ ] **Step 2: Push activation into storage lookup**
+- [x] **Step 2: Push activation into storage lookup**
 
 Add this field to the `CellLookup` in `checkout`:
 
@@ -137,7 +137,7 @@ Add this field to the `CellLookup` in `checkout`:
 activation: request.activation,
 ```
 
-- [ ] **Step 3: Verify GREEN**
+- [x] **Step 3: Verify GREEN**
 
 Run:
 
