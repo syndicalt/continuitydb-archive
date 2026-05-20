@@ -67,6 +67,7 @@ struct LocalModelBenchmarkOptions<'a> {
     arguments: &'a [String],
     candidate_defaults: bool,
     grammar_path: Option<&'a Path>,
+    enforce_candidate_requirements: bool,
     baseline_path: &'a Path,
     dry_run: bool,
     compare_baseline: bool,
@@ -219,6 +220,9 @@ enum Command {
         /// GBNF grammar path passed to the executable as `--grammar-file <path>`.
         #[arg(long = "grammar-path")]
         grammar_path: Option<PathBuf>,
+        /// Reject benchmark configurations that violate selected candidate requirements.
+        #[arg(long = "enforce-candidate-requirements")]
+        enforce_candidate_requirements: bool,
         /// JSONL path to append a benchmark baseline record.
         #[arg(long = "baseline-path")]
         baseline_path: PathBuf,
@@ -420,6 +424,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             arguments,
             candidate_defaults,
             grammar_path,
+            enforce_candidate_requirements,
             baseline_path,
             dry_run,
             compare_baseline,
@@ -432,6 +437,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 arguments: &arguments,
                 candidate_defaults,
                 grammar_path: grammar_path.as_deref(),
+                enforce_candidate_requirements,
                 baseline_path: &baseline_path,
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
@@ -612,6 +618,15 @@ fn benchmark_local_model_json(
     options: LocalModelBenchmarkOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let candidate = local_model_candidate(options.candidate_id)?;
+    if options.enforce_candidate_requirements
+        && candidate.requires_grammar()
+        && options.grammar_path.is_none()
+    {
+        return Err(std::io::Error::other(
+            "selected local model candidate requires grammar-constrained output; missing --grammar-path",
+        )
+        .into());
+    }
     let mut config = if options.candidate_defaults {
         candidate.recommended_runner_config(
             options.executable.to_path_buf(),

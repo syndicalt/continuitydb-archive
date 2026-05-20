@@ -87,6 +87,7 @@ The first milestone builds:
 - Small local Steward model benchmark argument templates.
 - CLI local model benchmark candidate defaults.
 - CLI local model benchmark grammar path support.
+- CLI local model candidate requirement enforcement.
 - CLI local model benchmark dry-run preflight output.
 - CLI local model contract fingerprints.
 - Durable local model contract fingerprints.

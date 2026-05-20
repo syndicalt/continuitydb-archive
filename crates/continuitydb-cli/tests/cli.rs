@@ -474,6 +474,33 @@ fn cli_benchmark_local_model_dry_run_includes_grammar_path(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_enforces_candidate_grammar_requirement(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-enforced-baseline");
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--candidate-defaults")
+        .arg("--enforce-candidate-requirements")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("missing --grammar-path"));
+
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_evaluation_suite_outputs_case_contracts(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::cargo_bin("continuitydb")?
