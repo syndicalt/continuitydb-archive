@@ -22,7 +22,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add test imports**
+- [x] **Step 1: Add test imports**
 
 Update the existing query import in `crates/continuitydb-api/src/lib.rs` to include envelope helpers:
 
@@ -33,7 +33,7 @@ use continuitydb_query::{
 };
 ```
 
-- [ ] **Step 2: Add successful envelope execution test**
+- [x] **Step 2: Add successful envelope execution test**
 
 Add this test near the existing typed query API tests:
 
@@ -59,7 +59,7 @@ fn api_checkout_query_json_materializes_slice() -> Result<(), Box<dyn std::error
 }
 ```
 
-- [ ] **Step 3: Add unsupported query semantics test**
+- [x] **Step 3: Add unsupported query semantics test**
 
 Add this test after the successful envelope test:
 
@@ -86,7 +86,7 @@ fn api_checkout_query_json_preserves_query_compilation_errors(
 }
 ```
 
-- [ ] **Step 4: Add malformed JSON test**
+- [x] **Step 4: Add malformed JSON test**
 
 Add this test after the unsupported query semantics test:
 
@@ -106,7 +106,7 @@ fn api_checkout_query_json_reports_invalid_json() {
 }
 ```
 
-- [ ] **Step 5: Add invalid envelope test**
+- [x] **Step 5: Add invalid envelope test**
 
 Add this test after the malformed JSON test:
 
@@ -137,7 +137,7 @@ fn api_checkout_query_json_reports_invalid_envelope(
 }
 ```
 
-- [ ] **Step 6: Verify RED**
+- [x] **Step 6: Verify RED**
 
 Run:
 
@@ -152,7 +152,7 @@ Expected: FAIL because `checkout_query_json` and `ContinuityError::QueryEnvelope
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add production imports**
+- [x] **Step 1: Add production imports**
 
 Update the production query import near the top of `crates/continuitydb-api/src/lib.rs` to:
 
@@ -162,7 +162,7 @@ use continuitydb_query::{decode_query_json, CheckoutQuery, ContinuityQuery, Quer
 
 If test-only imports are needed, keep them inside the test module instead of production imports.
 
-- [ ] **Step 2: Add native error variant**
+- [x] **Step 2: Add native error variant**
 
 Add this variant to `ContinuityError` after `Query`:
 
@@ -172,7 +172,7 @@ Add this variant to `ContinuityError` after `Query`:
     QueryEnvelope(#[from] QueryEnvelopeError),
 ```
 
-- [ ] **Step 3: Add execution helper**
+- [x] **Step 3: Add execution helper**
 
 Add this method near the existing typed query execution methods in `impl<K: StorageKernel> ContinuityDb<K>`:
 
@@ -183,7 +183,7 @@ Add this method near the existing typed query execution methods in `impl<K: Stor
     }
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -194,7 +194,7 @@ cargo test -p continuitydb-api --all-features
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit implementation**
+- [x] **Step 5: Commit implementation**
 
 ```bash
 git add crates/continuitydb-api/src/lib.rs docs/superpowers/plans/2026-05-20-native-query-envelope-execution.md

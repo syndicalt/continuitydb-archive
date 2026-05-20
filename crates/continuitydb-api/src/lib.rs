@@ -9,7 +9,9 @@ use continuitydb_kernel::{
     CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelStatus,
     KernelCapabilities, KernelError, KernelRequirements, StorageKernel,
 };
-use continuitydb_query::{CheckoutQuery, ContinuityQuery, QueryError};
+use continuitydb_query::{
+    decode_query_json, CheckoutQuery, ContinuityQuery, QueryEnvelopeError, QueryError,
+};
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
@@ -36,6 +38,9 @@ pub enum ContinuityError {
     /// Query compilation failure.
     #[error(transparent)]
     Query(#[from] QueryError),
+    /// Query envelope decoding or validation failure.
+    #[error(transparent)]
+    QueryEnvelope(#[from] QueryEnvelopeError),
     /// Requested StateCell was not found in the backing kernel.
     #[error("state cell not found")]
     CellNotFound {
@@ -311,6 +316,11 @@ impl<K: StorageKernel> ContinuityDb<K> {
         query: ContinuityQuery,
     ) -> Result<CheckoutSlice, ContinuityError> {
         self.checkout(query.compile_checkout()?)
+    }
+
+    /// Materializes a deterministic continuity slice from a versioned typed query JSON envelope.
+    pub fn checkout_query_json(&self, bytes: &[u8]) -> Result<CheckoutSlice, ContinuityError> {
+        self.checkout_continuity_query(decode_query_json(bytes)?)
     }
 
     /// Returns the manifest for a database commit boundary when it exists.
@@ -690,8 +700,9 @@ mod tests {
     };
     use continuitydb_memory::MemoryKernel;
     use continuitydb_query::{
-        CheckoutQuery, ContinuityQuery, QueryError, QueryOptimization, QueryRequirements,
-        QueryReturnShape, QueryTask,
+        encode_query_json, CheckoutQuery, ContinuityQuery, QueryEnvelope, QueryEnvelopeError,
+        QueryError, QueryOptimization, QueryRequirements, QueryReturnShape, QueryTask,
+        QUERY_ENVELOPE_FORMAT, QUERY_ENVELOPE_FORMAT_VERSION,
     };
     use std::{fs, path::Path};
 
@@ -1040,6 +1051,89 @@ mod tests {
 
         assert_eq!(slice.cells.len(), 1);
         assert_eq!(slice.cells[0].id, cell_id);
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_json_materializes_slice() -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell("project:continuitydb:query-json", 0.91, 12)?)?;
+        let query = ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+            "stored-facts",
+            "what should the agent know?",
+        )));
+        let encoded = encode_query_json(query)?;
+
+        let slice = db.checkout_query_json(&encoded)?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(
+            slice.cells[0].payload,
+            CellPayload::Text("project:continuitydb:query-json".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_json_preserves_query_compilation_errors(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let query = ContinuityQuery::Checkout(
+            CheckoutQuery::new(QueryTask::new(
+                "stored-facts",
+                "what should the agent know?",
+            ))
+            .with_return_shape(QueryReturnShape::CellsOnly),
+        );
+        let encoded = encode_query_json(query)?;
+
+        let result = db.checkout_query_json(&encoded);
+
+        assert_eq!(
+            result.err(),
+            Some(ContinuityError::Query(QueryError::UnsupportedReturnShape(
+                QueryReturnShape::CellsOnly
+            )))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_json_reports_invalid_json() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let result = db.checkout_query_json(b"{not valid json}\n");
+
+        assert_eq!(
+            result.err(),
+            Some(ContinuityError::QueryEnvelope(
+                QueryEnvelopeError::InvalidJson
+            ))
+        );
+    }
+
+    #[test]
+    fn api_checkout_query_json_reports_invalid_envelope() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let envelope = QueryEnvelope {
+            format: QUERY_ENVELOPE_FORMAT.to_string(),
+            version: QUERY_ENVELOPE_FORMAT_VERSION + 1,
+            query: ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+                "stored-facts",
+                "what should the agent know?",
+            ))),
+        };
+        let encoded = serde_json::to_vec(&envelope)?;
+
+        let result = db.checkout_query_json(&encoded);
+
+        assert_eq!(
+            result.err(),
+            Some(ContinuityError::QueryEnvelope(
+                QueryEnvelopeError::InvalidEnvelope
+            ))
+        );
         Ok(())
     }
 
