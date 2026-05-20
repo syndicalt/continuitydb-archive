@@ -816,6 +816,7 @@ impl LocalModelBenchmark {
         let steward = LocalModelSteward::new(identity, self.runner.clone());
         LocalModelBenchmarkReport {
             candidate: self.candidate,
+            response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
             runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
             evaluation: self.suite.evaluate(&steward),
         }
@@ -826,6 +827,7 @@ impl LocalModelBenchmark {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalModelBenchmarkReport {
     candidate: SmallModelCandidate,
+    response_schema_version: u32,
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
 }
@@ -834,6 +836,11 @@ impl LocalModelBenchmarkReport {
     /// Returns the evaluated model candidate metadata.
     pub fn candidate(&self) -> SmallModelCandidate {
         self.candidate
+    }
+
+    /// Returns the local model response schema version used for decoding.
+    pub fn response_schema_version(&self) -> u32 {
+        self.response_schema_version
     }
 
     /// Returns the runtime manifest for the evaluated local model invocation.
@@ -858,6 +865,8 @@ pub struct LocalModelBenchmarkBaseline {
     candidate_model_id: String,
     candidate_role: String,
     #[serde(default)]
+    response_schema_version: u32,
+    #[serde(default)]
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
     recorded_at: DateTime<Utc>,
@@ -869,6 +878,7 @@ impl LocalModelBenchmarkBaseline {
         Self {
             candidate_model_id: report.candidate.model_id().to_string(),
             candidate_role: report.candidate.role().to_string(),
+            response_schema_version: report.response_schema_version,
             runtime: report.runtime,
             evaluation: report.evaluation,
             recorded_at,
@@ -883,6 +893,11 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the evaluated model role.
     pub fn candidate_role(&self) -> &str {
         &self.candidate_role
+    }
+
+    /// Returns the local model response schema version used for this baseline.
+    pub fn response_schema_version(&self) -> u32 {
+        self.response_schema_version
     }
 
     /// Returns the runtime manifest that produced this baseline.

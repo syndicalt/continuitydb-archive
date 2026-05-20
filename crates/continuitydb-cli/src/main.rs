@@ -503,6 +503,7 @@ fn local_model_benchmark_json(
         "passed": baseline.passed(),
         "passed_cases": passed_cases,
         "total_cases": total_cases,
+        "response_schema_version": baseline.response_schema_version(),
         "runtime": {
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),

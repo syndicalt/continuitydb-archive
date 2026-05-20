@@ -241,6 +241,7 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert_eq!(json["passed"].as_bool(), Some(true));
     assert_eq!(json["passed_cases"].as_u64(), Some(1));
     assert_eq!(json["total_cases"].as_u64(), Some(1));
+    assert_eq!(json["response_schema_version"].as_u64(), Some(1));
     assert_eq!(
         json["baseline_path"].as_str(),
         Some(baseline_path.display().to_string().as_str())
@@ -263,6 +264,7 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         Some(executable_path.display().to_string().as_str())
     );
     assert_eq!(records[0]["runtime"]["arguments"][3].as_str(), Some("0"));
+    assert_eq!(records[0]["response_schema_version"].as_u64(), Some(1));
 
     fs::remove_file(executable_path)?;
     fs::remove_file(baseline_path)?;

@@ -236,6 +236,7 @@ Storage kernel
 24. Add local model runtime manifests. Implemented `LocalModelRuntimeManifest` so benchmark reports and durable baselines preserve the executable path and deterministic arguments used for a local model evaluation, while legacy baseline JSON remains readable.
 25. Add CLI local-model benchmark recording. Implemented a feature-gated `benchmark-local-model` command that runs the fixed Steward evaluation suite against a configured local executable, appends a JSONL baseline, and prints structured candidate, runtime, pass-count, and regression metadata.
 26. Add CLI local-model contract export. Implemented a feature-gated `local-model-contract` command that writes the Steward response JSON Schema and GBNF grammar to operator-selected files for grammar-constrained local model runs.
+27. Add local-model benchmark contract versioning. Implemented response schema version metadata on benchmark reports, durable baselines, legacy baseline decoding, and CLI benchmark summaries so future contract evolution remains auditable.
 
 ## Small Embeddable Model Track
 

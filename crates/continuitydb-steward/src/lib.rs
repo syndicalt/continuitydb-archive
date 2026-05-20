@@ -1181,6 +1181,25 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn local_model_benchmark_report_preserves_response_schema_version(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let benchmark = LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("llama-cli")),
+            StewardEvaluationSuite::new(Vec::new()),
+        );
+
+        let report = benchmark.run(steward()?);
+
+        assert_eq!(
+            report.response_schema_version(),
+            LOCAL_MODEL_RESPONSE_SCHEMA_VERSION
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_benchmark_baseline_preserves_runtime_manifest(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let runner = LocalExecutableRunner::new(
@@ -1204,6 +1223,26 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn local_model_benchmark_baseline_preserves_response_schema_version(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let benchmark = LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("llama-cli")),
+            StewardEvaluationSuite::new(Vec::new()),
+        );
+        let report = benchmark.run(steward()?);
+
+        let baseline = LocalModelBenchmarkBaseline::from_report(report, created_at());
+
+        assert_eq!(
+            baseline.response_schema_version(),
+            LOCAL_MODEL_RESPONSE_SCHEMA_VERSION
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_benchmark_baseline_decodes_legacy_json_without_runtime_manifest(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let encoded = serde_json::json!({
@@ -1217,6 +1256,7 @@ mod tests {
 
         assert_eq!(baseline.runtime().executable(), "");
         assert!(baseline.runtime().arguments().is_empty());
+        assert_eq!(baseline.response_schema_version(), 0);
         Ok(())
     }
 
