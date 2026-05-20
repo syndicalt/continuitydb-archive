@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
     ActivationState, CellDependencyKind, Confidence, CoreError, Scope, SemanticAnchor, StateCell,
-    StateCellId,
+    StateCellId, TrustSignal,
 };
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use serde::{Deserialize, Serialize};
@@ -99,14 +99,29 @@ pub struct CheckoutAlternative {
 }
 
 /// Audit trace for a StateCell.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AuditTrace {
     /// Audited cell identifier.
     pub cell_id: StateCellId,
     /// Citation locators supporting the cell.
     pub citations: Vec<String>,
+    /// Structured evidence provenance supporting the cell.
+    pub evidence: Vec<AuditEvidence>,
     /// Dependency and causality links referenced by the cell.
     pub dependencies: Vec<AuditDependency>,
+}
+
+/// Evidence metadata included in an audit trace.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AuditEvidence {
+    /// Stable evidence source identifier.
+    pub source: String,
+    /// Source-local citation URI, path, or durable locator.
+    pub locator: String,
+    /// Confidence assigned to this evidence.
+    pub confidence: Confidence,
+    /// Trust signals associated with this evidence.
+    pub trust: Vec<TrustSignal>,
 }
 
 /// Dependency metadata included in an audit trace.
@@ -203,6 +218,16 @@ pub fn audit(cell: &StateCell) -> AuditTrace {
     AuditTrace {
         cell_id: cell.id,
         citations: citations(cell),
+        evidence: cell
+            .evidence
+            .iter()
+            .map(|evidence| AuditEvidence {
+                source: evidence.source.as_str().to_string(),
+                locator: evidence.citation.locator.clone(),
+                confidence: evidence.confidence,
+                trust: evidence.trust.clone(),
+            })
+            .collect(),
         dependencies: cell
             .dependencies
             .iter()
@@ -777,6 +802,25 @@ mod tests {
             vec!["test://project:continuitydb:audit".to_string()]
         );
         assert!(trace.dependencies.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn audit_includes_structured_evidence() -> Result<(), Box<dyn std::error::Error>> {
+        let cell = sample_cell("project:continuitydb:audit-evidence", 0.95, 10)?;
+        let trace = audit(&cell);
+
+        assert_eq!(trace.evidence.len(), 1);
+        assert_eq!(trace.evidence[0].source, "test");
+        assert_eq!(
+            trace.evidence[0].locator,
+            "test://project:continuitydb:audit-evidence"
+        );
+        assert_eq!(trace.evidence[0].confidence, Confidence::new(0.95)?);
+        assert_eq!(
+            trace.evidence[0].trust,
+            vec![TrustSignal::DirectObservation]
+        );
         Ok(())
     }
 
