@@ -54,9 +54,9 @@ Storage kernel
 
 ## Steward Milestones
 
-1. Define `StewardProposal` types without invoking any model.
-2. Add policy validation for accepting and rejecting proposals.
-3. Persist accepted and rejected proposals for audit.
+1. Define `StewardProposal` types without invoking any model. Implemented in `continuitydb-steward`.
+2. Add policy validation for accepting and rejecting proposals. Implemented in `continuitydb-steward`.
+3. Persist accepted and rejected proposals for audit. Implemented as an in-memory append-only ledger in `continuitydb-steward`; storage-backed persistence remains future work.
 4. Build a deterministic mock steward for test-first development.
 5. Add local model inference behind a feature flag.
 6. Evaluate small open-source steward models against fixed proposal-quality tests.

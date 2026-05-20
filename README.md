@@ -14,6 +14,7 @@ The first milestone builds:
 - Basic revision links.
 - Deterministic checkout.
 - Audit traces.
+- Deterministic Steward proposal substrate.
 - A thin CLI over library APIs.
 
 ## Roadmap
