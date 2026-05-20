@@ -206,6 +206,7 @@ Storage kernel
 31. Add CLI workload replay manifest fixture byte-count validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `workload-cells.json` or `checkout-request.json` byte counts do not match the archived fixture files, preserving manifest metadata integrity alongside fingerprint validation.
 32. Add CLI workload replay manifest report-content validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose manifest-owned report fields no longer match the archived `workload-report.json`, preserving the bundle report and manifest as one self-consistent replay contract.
 33. Add CLI workload replay manifest report-content mismatch keys. Extended manifest report-content validation errors with the mismatched manifest-owned report key, so lookup-plan drift and other archived report mismatches are diagnosable without manually diffing artifacts.
+34. Add CLI workload bundle validation command. Added `validate-workload-bundle --artifact-dir` so archived workload measurement bundles can validate manifest, report, and fixture integrity directly without executing replay.
 
 ## Native API Milestones
 

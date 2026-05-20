@@ -104,6 +104,12 @@ struct WorkloadBundleManifest {
     manifest_bytes: usize,
 }
 
+struct WorkloadBundleValidation {
+    manifest: WorkloadBundleManifest,
+    workload_report: serde_json::Value,
+    workload_artifacts: serde_json::Value,
+}
+
 struct WorkloadFixtureArtifacts {
     cells_path: PathBuf,
     cells_fingerprint: String,
@@ -292,6 +298,12 @@ enum Command {
         /// Exit non-zero when --compare-report detects mismatched deterministic counts.
         #[arg(long = "fail-on-mismatch")]
         fail_on_mismatch: bool,
+    },
+    /// Validate a workload artifact bundle without replaying it.
+    ValidateWorkloadBundle {
+        /// Directory containing workload-report.json and continuitydb-workload.manifest.json.
+        #[arg(long = "artifact-dir")]
+        artifact_dir: PathBuf,
     },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
@@ -530,6 +542,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 compare_report: compare_report || fail_on_mismatch,
                 fail_on_mismatch,
             })?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        Some(Command::ValidateWorkloadBundle { artifact_dir }) => {
+            let validation = validate_workload_bundle_manifest(&artifact_dir)?;
+            let output = serde_json::json!({
+                "artifact_dir": artifact_dir.display().to_string(),
+                "manifest": workload_bundle_manifest_json(&validation.manifest),
+                "workload_report": validation.workload_report,
+                "workload_artifacts": validation.workload_artifacts,
+            });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
@@ -2712,6 +2734,31 @@ fn validate_workload_artifact_manifest(
         manifest_path,
         manifest_fingerprint: fnv1a64_fingerprint(&manifest_text),
         manifest_bytes: manifest_text.len(),
+    })
+}
+
+fn validate_workload_bundle_manifest(
+    artifact_dir: &Path,
+) -> Result<WorkloadBundleValidation, Box<dyn std::error::Error>> {
+    let cells_text = std::fs::read_to_string(artifact_dir.join("workload-cells.json"))?;
+    let request_text = std::fs::read_to_string(artifact_dir.join("checkout-request.json"))?;
+    let manifest = validate_workload_artifact_manifest(artifact_dir, &cells_text, &request_text)?;
+
+    let report_path = artifact_dir.join("workload-report.json");
+    let report_text = std::fs::read_to_string(&report_path)?;
+    let report: serde_json::Value = serde_json::from_str(&report_text)?;
+    let manifest_report_payload_text = workload_report_manifest_payload_text(&report)?;
+    let report_fingerprint = fnv1a64_fingerprint(&manifest_report_payload_text);
+    let workload_artifacts = report["workload_artifacts"].clone();
+
+    Ok(WorkloadBundleValidation {
+        manifest,
+        workload_report: serde_json::json!({
+            "report_path": report_path.display().to_string(),
+            "report_fingerprint": report_fingerprint,
+            "report_bytes": manifest_report_payload_text.len(),
+        }),
+        workload_artifacts,
     })
 }
 

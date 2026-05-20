@@ -2365,6 +2365,131 @@ fn cli_benchmark_local_model_artifact_dir_writes_dry_run_bundle(
     Ok(())
 }
 
+#[test]
+fn cli_validate_workload_bundle_accepts_manifest_metadata() -> Result<(), Box<dyn std::error::Error>>
+{
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-validate-workload-bundle-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("validate-workload-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        json["artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        json["manifest"]["manifest_path"].as_str(),
+        Some(
+            artifact_dir
+                .join("continuitydb-workload.manifest.json")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+    assert_eq!(
+        json["workload_report"]["report_path"].as_str(),
+        Some(
+            artifact_dir
+                .join("workload-report.json")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+    assert_eq!(
+        json["workload_artifacts"]["cells_path"].as_str(),
+        Some(
+            artifact_dir
+                .join("workload-cells.json")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+    assert_eq!(
+        json["workload_artifacts"]["checkout_request_path"].as_str(),
+        Some(
+            artifact_dir
+                .join("checkout-request.json")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[test]
+fn cli_validate_workload_bundle_rejects_tampered_fixture() -> Result<(), Box<dyn std::error::Error>>
+{
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-validate-workload-bundle-tampered-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let mut cells_artifact: Value = serde_json::from_str(&fs::read_to_string(&cells_path)?)?;
+    cells_artifact["summary"]["cell_count"] = Value::from(7);
+    fs::write(&cells_path, serde_json::to_string_pretty(&cells_artifact)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-workload-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest fingerprint mismatch"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_validate_local_model_bundle_accepts_report_metadata(

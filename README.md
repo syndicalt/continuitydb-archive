@@ -37,6 +37,7 @@ The first milestone builds:
 - CLI workload replay manifest fixture byte-count validation.
 - CLI workload replay manifest report-content validation.
 - CLI workload replay manifest report-content mismatch diagnostics.
+- CLI workload bundle validation command.
 - CLI workload measurement report artifact output.
 - CLI workload regression failure report artifact output.
 - CLI workload measurement baseline recording.
