@@ -100,6 +100,7 @@ Storage kernel
 2. Execute typed queries through the native API. Implemented `ContinuityDb::checkout_query` and `checkout_continuity_query` so embedders can materialize typed Continuity queries without manually compiling them into checkout requests.
 3. Add portable typed query serialization. Implemented serde support for `continuitydb-query` AST values with stable snake-case enum tags so future CLI query files, bindings, and agent APIs can exchange typed queries without a text parser.
 4. Execute serialized typed query files from the CLI. Implemented `continuitydb checkout-query <store-path> <query-path>` so saved `ContinuityQuery` JSON can materialize file-backed checkout slices through the native typed API before text query syntax exists.
+5. Add a versioned typed query JSON envelope. Implemented `QueryEnvelope`, `encode_query_json`, and `decode_query_json` in `continuitydb-query` so saved query files and bindings can validate format and version before executing raw typed query content.
 
 ## Utility Feedback Milestones
 

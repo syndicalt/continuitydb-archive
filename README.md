@@ -15,6 +15,7 @@ The first milestone builds:
 - Deterministic checkout.
 - Typed Continuity Query AST compiling checkout semantics into native requests.
 - Portable typed query serialization for bindings and future query files.
+- Versioned JSON envelopes for portable typed query files.
 - Native typed query execution through the embeddable API.
 - CLI execution for serialized typed query files.
 - Commit-scoped checkout.

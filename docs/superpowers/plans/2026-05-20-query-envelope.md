@@ -224,7 +224,7 @@ git commit -m "feat: add query json envelope"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-query-envelope.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add this current-scope bullet near the existing query bullets:
 
@@ -232,7 +232,7 @@ Add this current-scope bullet near the existing query bullets:
 - Versioned JSON envelopes for portable typed query files.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add this Query Language milestone after CLI query-file execution:
 
@@ -240,7 +240,7 @@ Add this Query Language milestone after CLI query-file execution:
 5. Add a versioned typed query JSON envelope. Implemented `QueryEnvelope`, `encode_query_json`, and `decode_query_json` in `continuitydb-query` so saved query files and bindings can validate format and version before executing raw typed query content.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -254,7 +254,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-query-envelope.md
