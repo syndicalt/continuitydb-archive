@@ -828,7 +828,7 @@ fn benchmark_local_model_json(
             .as_ref()
             .is_some_and(|stability| !stability.stable())
     {
-        if let Some(artifact_dir) = options.artifact_dir {
+        if options.artifact_dir.is_some() || options.failure_report_path.is_some() {
             let (report, responses) = if effective_response_dir.is_some() {
                 benchmark.run_with_responses(identity)
             } else {
@@ -847,7 +847,7 @@ fn benchmark_local_model_json(
                 None
             };
             let current_baseline = LocalModelBenchmarkBaseline::from_report(report, Utc::now());
-            let report = local_model_benchmark_json(
+            let mut report = local_model_benchmark_json(
                 options.baseline_path,
                 options.compare_baseline,
                 &current_baseline,
@@ -860,7 +860,12 @@ fn benchmark_local_model_json(
                 },
                 stability.as_ref(),
             );
-            write_local_model_artifact_bundle_report(artifact_dir, report)?;
+            if let Some(artifact_dir) = options.artifact_dir {
+                report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
+            }
+            if let Some(report_path) = options.failure_report_path {
+                write_pretty_json_file(report_path, &report)?;
+            }
         }
         return Err(std::io::Error::other("local model benchmark stability check failed").into());
     }
