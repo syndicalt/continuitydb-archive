@@ -2809,12 +2809,13 @@ fn write_workload_bundle_validation_failure_report(
     failure_report_path: &Path,
     message: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest = workload_validation_failure_manifest_json(artifact_dir);
     let workload_artifacts = workload_validation_failure_artifacts_json(artifact_dir);
     let output = serde_json::json!({
         "artifact_dir": artifact_dir.display().to_string(),
         "report_path": report_path.map(|path| path.display().to_string()),
         "failure_report_path": failure_report_path.display().to_string(),
-        "manifest": serde_json::Value::Null,
+        "manifest": manifest,
         "workload_report": serde_json::Value::Null,
         "workload_artifacts": workload_artifacts,
         "failure": {
@@ -2824,6 +2825,19 @@ fn write_workload_bundle_validation_failure_report(
     });
     write_pretty_json_file(failure_report_path, &output)?;
     Ok(())
+}
+
+fn workload_validation_failure_manifest_json(artifact_dir: &Path) -> serde_json::Value {
+    let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let Ok(manifest_text) = std::fs::read_to_string(&manifest_path) else {
+        return serde_json::Value::Null;
+    };
+
+    serde_json::json!({
+        "manifest_path": manifest_path.display().to_string(),
+        "manifest_fingerprint": fnv1a64_fingerprint(&manifest_text),
+        "manifest_bytes": manifest_text.len(),
+    })
 }
 
 fn workload_validation_failure_artifacts_json(artifact_dir: &Path) -> serde_json::Value {

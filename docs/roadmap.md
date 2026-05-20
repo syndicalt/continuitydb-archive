@@ -209,6 +209,7 @@ Storage kernel
 34. Add CLI workload bundle validation command. Added `validate-workload-bundle --artifact-dir` so archived workload measurement bundles can validate manifest, report, and fixture integrity directly without executing replay.
 35. Add CLI workload bundle validation report artifacts. Extended `validate-workload-bundle` with `--report-path` and `--failure-report-path` so success and validation-failure evidence can be archived directly in CI.
 36. Add CLI workload bundle validation failure evidence metadata. Extended `validate-workload-bundle --failure-report-path` with best-effort fixture paths, byte counts, and fingerprints so rejected archived bundles carry diagnosable evidence.
+37. Add CLI workload bundle validation manifest failure metadata. Extended `validate-workload-bundle --failure-report-path` with best-effort manifest path, byte count, and fingerprint evidence so invalid manifest failures identify the inspected manifest bytes.
 
 ## Native API Milestones
 

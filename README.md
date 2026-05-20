@@ -40,6 +40,7 @@ The first milestone builds:
 - CLI workload bundle validation command.
 - CLI workload bundle validation report artifacts.
 - CLI workload bundle validation failure evidence metadata.
+- CLI workload bundle validation manifest failure metadata.
 - CLI workload measurement report artifact output.
 - CLI workload regression failure report artifact output.
 - CLI workload measurement baseline recording.
