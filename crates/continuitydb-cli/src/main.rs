@@ -76,6 +76,19 @@ enum Command {
         #[arg(long = "limit")]
         limit: Option<usize>,
     },
+    /// Copy file-backed commit slices directly between two stores.
+    CopyCommits {
+        /// Path to the source JSONL file-backed store.
+        source_path: PathBuf,
+        /// Path to the target JSONL file-backed store.
+        target_path: PathBuf,
+        /// Exclusive commit cursor to start after.
+        #[arg(long = "after")]
+        after: Option<CommitId>,
+        /// Maximum number of commits to copy.
+        #[arg(long = "limit")]
+        limit: Option<usize>,
+    },
     /// Import a versioned JSON commit backup envelope into a file-backed store.
     ImportCommits {
         /// Path to the JSONL file-backed store.
@@ -168,6 +181,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "path": store_path.display().to_string(),
                 "output": output_path.display().to_string(),
                 "exported_commits": summary.exported_commits,
+                "next_after": summary.next_after,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        Some(Command::CopyCommits {
+            source_path,
+            target_path,
+            after,
+            limit,
+        }) => {
+            let source = open_file_database(&source_path)?;
+            let mut target = open_file_database(&target_path)?;
+            let summary =
+                target.copy_commits_from(&source, CommitManifestLookup { after, limit })?;
+            let output = serde_json::json!({
+                "source": source_path.display().to_string(),
+                "target": target_path.display().to_string(),
+                "copied_commits": summary.imported_commits,
                 "next_after": summary.next_after,
             });
             println!("{}", serde_json::to_string_pretty(&output)?);

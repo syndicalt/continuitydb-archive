@@ -524,6 +524,161 @@ fn cli_export_commits_rejects_invalid_after_cursor() -> Result<(), Box<dyn std::
 }
 
 #[test]
+fn cli_copy_commits_limit_copies_first_page() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-copy-limit-source");
+    let target_path = temp_store_path("continuitydb-cli-copy-limit-target");
+    let commits = write_two_commit_store(&source_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("copy-commits")
+        .arg(&source_path)
+        .arg(&target_path)
+        .arg("--limit")
+        .arg("1")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let target_batch = ContinuityDb::new(FileKernel::open(&target_path)?)
+        .export_commits(CommitManifestLookup::default())?;
+
+    assert_eq!(json["source"].as_str(), source_path.to_str());
+    assert_eq!(json["target"].as_str(), target_path.to_str());
+    assert_eq!(json["copied_commits"].as_u64(), Some(1));
+    assert_eq!(
+        json["next_after"].as_str(),
+        Some(commits[0].to_string().as_str())
+    );
+    assert_eq!(target_batch.slices.len(), 1);
+    assert_eq!(target_batch.slices[0].manifest.commit_id, commits[0]);
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(target_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_copy_commits_after_cursor_copies_next_page() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-copy-after-source");
+    let target_path = temp_store_path("continuitydb-cli-copy-after-target");
+    let commits = write_two_commit_store(&source_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("copy-commits")
+        .arg(&source_path)
+        .arg(&target_path)
+        .arg("--after")
+        .arg(commits[0].to_string())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let target_batch = ContinuityDb::new(FileKernel::open(&target_path)?)
+        .export_commits(CommitManifestLookup::default())?;
+
+    assert_eq!(json["copied_commits"].as_u64(), Some(1));
+    assert_eq!(
+        json["next_after"].as_str(),
+        Some(commits[1].to_string().as_str())
+    );
+    assert_eq!(target_batch.slices.len(), 1);
+    assert_eq!(target_batch.slices[0].manifest.commit_id, commits[1]);
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(target_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_copy_commits_empty_source_reports_zero() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-copy-empty-source");
+    let target_path = temp_store_path("continuitydb-cli-copy-empty-target");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("copy-commits")
+        .arg(&source_path)
+        .arg(&target_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let target_batch = ContinuityDb::new(FileKernel::open(&target_path)?)
+        .export_commits(CommitManifestLookup::default())?;
+
+    assert_eq!(json["copied_commits"].as_u64(), Some(0));
+    assert!(json["next_after"].is_null());
+    assert!(target_batch.slices.is_empty());
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(target_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_copy_commits_rejects_duplicate_target_commit() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-copy-duplicate-source");
+    let target_path = temp_store_path("continuitydb-cli-copy-duplicate-target");
+    let committed_at = Utc
+        .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let commit_id = CommitId::new();
+    let mut source = ContinuityDb::new(FileKernel::open(&source_path)?);
+    source.ingest_cells_at_with_commit_id(
+        vec![test_cell("project:continuitydb:cli-copy-duplicate-source")?],
+        committed_at,
+        commit_id,
+    )?;
+    let mut target = ContinuityDb::new(FileKernel::open(&target_path)?);
+    target.ingest_cells_at_with_commit_id(
+        vec![test_cell("project:continuitydb:cli-copy-duplicate-target")?],
+        committed_at,
+        commit_id,
+    )?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("copy-commits")
+        .arg(&source_path)
+        .arg(&target_path)
+        .assert()
+        .failure();
+    let target_batch = ContinuityDb::new(FileKernel::open(&target_path)?)
+        .export_commits(CommitManifestLookup::default())?;
+
+    assert_eq!(target_batch.slices.len(), 1);
+    assert_eq!(target_batch.slices[0].manifest.commit_id, commit_id);
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(target_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_copy_commits_rejects_invalid_after_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-copy-invalid-source");
+    let target_path = temp_store_path("continuitydb-cli-copy-invalid-target");
+
+    Command::cargo_bin("continuitydb")?
+        .arg("copy-commits")
+        .arg(&source_path)
+        .arg(&target_path)
+        .arg("--after")
+        .arg("not-a-uuid")
+        .assert()
+        .failure();
+
+    let _ = fs::remove_file(source_path);
+    let _ = fs::remove_file(target_path);
+    Ok(())
+}
+
+#[test]
 fn cli_import_commits_dry_run_validates_without_mutation() -> Result<(), Box<dyn std::error::Error>>
 {
     let source_path = temp_store_path("continuitydb-cli-dry-run-source");
