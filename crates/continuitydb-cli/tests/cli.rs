@@ -3389,6 +3389,19 @@ WHERE scope = project("continuitydb")"#,
         json["lookup_plan"]["indexed_constraints"],
         serde_json::json!(["scope", "answerability_question"])
     );
+    assert_eq!(
+        json["lookup_plan"]["indexed_constraint_plans"],
+        serde_json::json!([
+            {
+                "name": "scope",
+                "candidate_count": 2
+            },
+            {
+                "name": "answerability_question",
+                "candidate_count": 2
+            }
+        ])
+    );
     assert_eq!(json["lookup_plan"]["candidate_count"].as_u64(), Some(2));
     assert_eq!(json["lookup_plan"]["full_scan"].as_bool(), Some(false));
 

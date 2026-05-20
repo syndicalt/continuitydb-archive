@@ -153,6 +153,7 @@ The first milestone builds:
 - File-kernel indexed candidate-set intersection.
 - File-kernel lookup-plan introspection.
 - File-kernel explainable lookup-plan constraint labels.
+- File-kernel per-constraint lookup-plan cardinalities.
 - File-kernel secondary indexes for revision-link lookups.
 - Typed storage-kernel capability introspection for embedders.
 - Typed storage-kernel requirement checks for production readiness gates.

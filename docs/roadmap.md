@@ -92,6 +92,7 @@ Storage kernel
 36. Add file-kernel indexed candidate-set intersection. Extended candidate selection to intersect all available indexed lookup constraints, preserving exact final filtering while reducing over-selection when the narrowest single index still contains cells excluded by other indexed constraints.
 37. Add file-kernel lookup-plan introspection. Implemented `FileKernel::lookup_plan` and `FileKernelLookupPlan` so embedders can inspect indexed constraint counts, pre-filter candidate counts, and full-scan fallback behavior before executing a lookup.
 38. Add explainable file-kernel lookup-plan constraints. Extended `FileKernelLookupPlan` with deterministic indexed constraint labels and exposed them through the native API and CLI JSON so planner diagnostics explain which indexes shaped a candidate set, not only how many.
+39. Add per-constraint file lookup-plan cardinalities. Extended lookup-plan diagnostics with ordered per-index candidate counts so embedders and operators can see each indexed constraint's selectivity alongside the final intersected candidate count.
 
 ## Checkout Milestones
 

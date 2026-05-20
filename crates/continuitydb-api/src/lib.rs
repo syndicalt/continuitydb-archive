@@ -1767,6 +1767,13 @@ mod tests {
             plan.indexed_constraints,
             vec!["scope", "answerability_question"]
         );
+        assert_eq!(
+            plan.indexed_constraint_plans
+                .iter()
+                .map(|constraint| (constraint.name, constraint.candidate_count))
+                .collect::<Vec<_>>(),
+            vec![("scope", 2), ("answerability_question", 2)]
+        );
         assert_eq!(plan.candidate_count, 1);
         assert!(!plan.full_scan);
 

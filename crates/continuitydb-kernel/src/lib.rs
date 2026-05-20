@@ -668,16 +668,24 @@ impl FileKernelIndex {
     }
 
     fn lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
-        let indexed_constraints = self
-            .indexed_candidate_constraints(lookup)
-            .into_iter()
+        let indexed_candidate_constraints = self.indexed_candidate_constraints(lookup);
+        let indexed_constraints = indexed_candidate_constraints
+            .iter()
             .map(|constraint| constraint.name)
             .collect::<Vec<_>>();
-        let indexed_constraint_count = indexed_constraints.len();
+        let indexed_constraint_plans = indexed_candidate_constraints
+            .iter()
+            .map(|constraint| FileKernelIndexedConstraintPlan {
+                name: constraint.name,
+                candidate_count: constraint.positions.len(),
+            })
+            .collect::<Vec<_>>();
+        let indexed_constraint_count = indexed_candidate_constraints.len();
         let candidate_count = self.candidate_positions(lookup).len();
         FileKernelLookupPlan {
             indexed_constraint_count,
             indexed_constraints,
+            indexed_constraint_plans,
             candidate_count,
             full_scan: indexed_constraint_count == 0,
         }
@@ -933,10 +941,21 @@ pub struct FileKernelLookupPlan {
     pub indexed_constraint_count: usize,
     /// Ordered names of indexed lookup constraints present in the request.
     pub indexed_constraints: Vec<&'static str>,
+    /// Ordered per-constraint indexed candidate details.
+    pub indexed_constraint_plans: Vec<FileKernelIndexedConstraintPlan>,
     /// Number of StateCell candidates selected before exact predicate filtering.
     pub candidate_count: usize,
     /// Whether lookup must inspect all visible StateCells.
     pub full_scan: bool,
+}
+
+/// Candidate-set contribution for one indexed file-kernel lookup constraint.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileKernelIndexedConstraintPlan {
+    /// Stable indexed lookup constraint name.
+    pub name: &'static str,
+    /// Number of StateCell positions selected by this single index before intersection.
+    pub candidate_count: usize,
 }
 
 /// Operational health report for a file-backed storage kernel.
@@ -1512,8 +1531,8 @@ impl StorageKernel for FileKernel {
 mod tests {
     use super::{
         sync_parent_directory, write_all_durable, CellLookup, CommitManifestLookup, FileKernel,
-        KernelCapabilities, KernelDurability, KernelError, KernelRequirements, RevisionLinkLookup,
-        StorageKernel,
+        FileKernelIndexedConstraintPlan, KernelCapabilities, KernelDurability, KernelError,
+        KernelRequirements, RevisionLinkLookup, StorageKernel,
     };
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
@@ -3985,6 +4004,19 @@ mod tests {
         assert_eq!(
             plan.indexed_constraints,
             vec!["scope", "answerability_question"]
+        );
+        assert_eq!(
+            plan.indexed_constraint_plans,
+            vec![
+                FileKernelIndexedConstraintPlan {
+                    name: "scope",
+                    candidate_count: 2,
+                },
+                FileKernelIndexedConstraintPlan {
+                    name: "answerability_question",
+                    candidate_count: 2,
+                },
+            ]
         );
         assert_eq!(plan.candidate_count, 1);
         assert!(!plan.full_scan);

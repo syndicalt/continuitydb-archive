@@ -1789,6 +1789,10 @@ fn file_lookup_plan_json(plan: continuitydb_kernel::FileKernelLookupPlan) -> ser
     serde_json::json!({
         "indexed_constraint_count": plan.indexed_constraint_count,
         "indexed_constraints": plan.indexed_constraints,
+        "indexed_constraint_plans": plan.indexed_constraint_plans.into_iter().map(|constraint| serde_json::json!({
+            "name": constraint.name,
+            "candidate_count": constraint.candidate_count,
+        })).collect::<Vec<_>>(),
         "candidate_count": plan.candidate_count,
         "full_scan": plan.full_scan,
     })
