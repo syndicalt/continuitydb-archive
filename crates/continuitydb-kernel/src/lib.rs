@@ -396,6 +396,7 @@ struct FileKernelIndex {
     answerability_questions: HashMap<String, Vec<usize>>,
     evidence_sources: HashMap<String, Vec<usize>>,
     max_evidence_confidences: Vec<(f32, usize)>,
+    valid_times: Vec<(DateTime<Utc>, usize)>,
     system_times: Vec<(DateTime<Utc>, usize)>,
     activations: HashMap<ActivationState, Vec<usize>>,
     dependency_targets: HashMap<StateCellId, Vec<usize>>,
@@ -473,6 +474,7 @@ impl FileKernelIndex {
         }
         self.max_evidence_confidences
             .push((max_evidence_confidence(&cell), position));
+        self.valid_times.push((cell.valid_time.from(), position));
         self.system_times.push((cell.system_time.from(), position));
         self.activations
             .entry(cell.activation)
@@ -518,6 +520,14 @@ impl FileKernelIndex {
             .iter()
             .filter(|(system_from, _position)| *system_from <= system_at)
             .map(|(_system_from, position)| *position)
+            .collect()
+    }
+
+    fn positions_at_valid_time(&self, valid_at: DateTime<Utc>) -> Vec<usize> {
+        self.valid_times
+            .iter()
+            .filter(|(valid_from, _position)| *valid_from <= valid_at)
+            .map(|(_valid_from, position)| *position)
             .collect()
     }
 
@@ -1295,6 +1305,12 @@ impl StorageKernel for FileKernel {
         } else if let Some(system_at) = lookup.system_at {
             self.index
                 .positions_at_system_time(system_at)
+                .iter()
+                .map(|position| &self.index.cells[*position])
+                .collect()
+        } else if let Some(valid_at) = lookup.valid_at {
+            self.index
+                .positions_at_valid_time(valid_at)
                 .iter()
                 .map(|position| &self.index.cells[*position])
                 .collect()
@@ -3693,6 +3709,73 @@ mod tests {
 
         assert_eq!(indexed.len(), 1);
         assert_eq!(indexed[0].id, cell.id);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rebuilds_valid_time_index() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-valid-time-index-reopen");
+        let first_valid = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let second_valid = Utc
+            .with_ymd_and_hms(2026, 5, 21, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut first = sample_cell("project:continuitydb:valid-time-index-first", 0.91, 12)?;
+        let mut second = sample_cell("project:continuitydb:valid-time-index-second", 0.83, 15)?;
+        first.valid_time = ValidTimeRange::new(first_valid, None)?;
+        second.valid_time = ValidTimeRange::new(second_valid, None)?;
+        let expected_first;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            expected_first = append_committed(&mut kernel, first)?;
+            append_committed(&mut kernel, second)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let indexed = reopened
+            .index
+            .valid_times
+            .iter()
+            .filter(|(valid_from, _position)| *valid_from <= first_valid)
+            .map(|(_valid_from, position)| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+        let lookup_results = reopened.lookup_cells(CellLookup {
+            valid_at: Some(first_valid),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(indexed, vec![expected_first.clone()]);
+        assert_eq!(lookup_results, vec![expected_first]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_valid_time_index_after_append() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-valid-time-index-append");
+        let valid_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut cell = sample_cell("project:continuitydb:valid-time-index-append", 0.91, 12)?;
+        cell.valid_time = ValidTimeRange::new(valid_at, None)?;
+        let mut kernel = FileKernel::open(&path)?;
+
+        let expected = append_committed(&mut kernel, cell)?;
+        let indexed = kernel
+            .index
+            .valid_times
+            .iter()
+            .filter(|(valid_from, _position)| *valid_from <= valid_at)
+            .map(|(_valid_from, position)| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![expected]);
         fs::remove_file(path)?;
         Ok(())
     }

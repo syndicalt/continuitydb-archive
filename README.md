@@ -147,6 +147,7 @@ The first milestone builds:
 - File-kernel secondary indexes for activation states and dependency filters.
 - File-kernel secondary indexes for scope lookups.
 - File-kernel secondary indexes for minimum-confidence lookups.
+- File-kernel secondary indexes for valid-time lookups.
 - File-kernel secondary indexes for system-time lookups.
 - File-kernel secondary indexes for revision-link lookups.
 - Typed storage-kernel capability introspection for embedders.

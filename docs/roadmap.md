@@ -87,6 +87,7 @@ Storage kernel
 31. Add file-kernel secondary indexes for scope lookups. Implemented a derived scope-to-cell-position index rebuilt from the JSONL log and maintained after append so scope-constrained checkout can start from indexed candidates while preserving append-order results.
 32. Add file-kernel secondary indexes for minimum-confidence lookups. Implemented a derived max-evidence-confidence index rebuilt from the JSONL log and maintained after append so confidence-constrained checkout can start from indexed candidates while preserving exact final filtering.
 33. Add file-kernel secondary indexes for system-time lookups. Implemented a derived system-start-time index rebuilt from the JSONL log and maintained after append so transaction-time checkout can start from indexed candidates while preserving exact final range filtering.
+34. Add file-kernel secondary indexes for valid-time lookups. Implemented a derived valid-start-time index rebuilt from the JSONL log and maintained after append so real-world as-of checkout can start from indexed candidates while preserving exact final range filtering.
 
 ## Checkout Milestones
 
