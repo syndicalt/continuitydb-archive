@@ -767,6 +767,62 @@ fn cli_replay_workload_require_manifest_rejects_report_content_mismatch(
 }
 
 #[test]
+fn cli_replay_workload_require_manifest_reports_lookup_plan_content_mismatch_key(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-manifest-lookup-plan-content-dir-{}",
+        std::process::id()
+    ));
+    let store_path = temp_store_path("continuitydb-cli-replay-workload-manifest-lookup-plan-store");
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if store_path.exists() {
+        fs::remove_file(&store_path)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("file")
+        .arg("--store-path")
+        .arg(&store_path)
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let report_path = artifact_dir.join("workload-report.json");
+    let mut report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    report["lookup_plan"]["candidate_selectivity_basis_points"] = Value::from(1);
+    fs::write(&report_path, serde_json::to_string_pretty(&report)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("file")
+        .arg("--store-path")
+        .arg(&store_path)
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "workload artifact manifest report content mismatch",
+        ))
+        .stderr(contains("lookup_plan"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(store_path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_replay_workload_require_manifest_failure_report_records_validation_failure(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let artifact_dir = std::env::temp_dir().join(format!(

@@ -2385,9 +2385,9 @@ fn validate_workload_manifest_report_content(
         "workload",
     ] {
         if manifest[key] != report[key] {
-            return Err(std::io::Error::other(
-                "workload artifact manifest report content mismatch",
-            )
+            return Err(std::io::Error::other(format!(
+                "workload artifact manifest report content mismatch: {key}"
+            ))
             .into());
         }
     }
