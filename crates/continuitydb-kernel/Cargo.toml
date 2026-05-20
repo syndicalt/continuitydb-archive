@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 chrono.workspace = true
 continuitydb-core = { path = "../continuitydb-core" }
+serde_json.workspace = true
 thiserror.workspace = true
 
 [lints]

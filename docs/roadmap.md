@@ -52,6 +52,12 @@ Storage kernel
   append log, graph, temporal, text, vector, payload storage
 ```
 
+## Storage Kernel Milestones
+
+1. Define the minimal `StorageKernel` append and lookup contract. Implemented in `continuitydb-kernel`.
+2. Provide an in-memory correctness kernel for deterministic tests. Implemented in `continuitydb-memory`.
+3. Add the first durable embedded kernel. Implemented as an append-only JSONL `FileKernel` in `continuitydb-kernel`; indexed production storage remains future work.
+
 ## Steward Milestones
 
 1. Define `StewardProposal` types without invoking any model. Implemented in `continuitydb-steward`.
