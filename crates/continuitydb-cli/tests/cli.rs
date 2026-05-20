@@ -440,6 +440,50 @@ fn cli_replay_workload_replays_artifact_bundle() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn cli_replay_workload_require_manifest_rejects_tampered_fixture(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-require-manifest-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let mut cells_artifact: Value = serde_json::from_str(&fs::read_to_string(&cells_path)?)?;
+    cells_artifact["summary"]["cell_count"] = Value::from(7);
+    fs::write(&cells_path, serde_json::to_string_pretty(&cells_artifact)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest fingerprint mismatch"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[test]
 fn cli_replay_workload_compares_archived_report() -> Result<(), Box<dyn std::error::Error>> {
     let artifact_dir = std::env::temp_dir().join(format!(
         "continuitydb-cli-replay-workload-compare-dir-{}",

@@ -69,6 +69,7 @@ struct WorkloadReplayOptions<'a> {
     report_path: Option<&'a PathBuf>,
     failure_report_path: Option<&'a PathBuf>,
     replay_artifact_dir: Option<&'a PathBuf>,
+    require_manifest: bool,
     compare_report: bool,
     fail_on_mismatch: bool,
 }
@@ -274,6 +275,9 @@ enum Command {
         /// Directory where a workload replay artifact bundle is written.
         #[arg(long = "replay-artifact-dir")]
         replay_artifact_dir: Option<PathBuf>,
+        /// Require continuitydb-workload.manifest.json to match replay fixture files.
+        #[arg(long = "require-manifest")]
+        require_manifest: bool,
         /// Compare replay counts against workload-report.json in the artifact directory.
         #[arg(long = "compare-report")]
         compare_report: bool,
@@ -496,6 +500,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             report_path,
             failure_report_path,
             replay_artifact_dir,
+            require_manifest,
             compare_report,
             fail_on_mismatch,
         }) => {
@@ -506,6 +511,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 report_path: report_path.as_ref(),
                 failure_report_path: failure_report_path.as_ref(),
                 replay_artifact_dir: replay_artifact_dir.as_ref(),
+                require_manifest,
                 compare_report: compare_report || fail_on_mismatch,
                 fail_on_mismatch,
             })?;
@@ -2089,6 +2095,9 @@ fn replay_workload_json(
     let checkout_request_path = options.artifact_dir.join("checkout-request.json");
     let cells_text = std::fs::read_to_string(&cells_path)?;
     let request_text = std::fs::read_to_string(&checkout_request_path)?;
+    if options.require_manifest {
+        validate_workload_artifact_manifest(options.artifact_dir, &cells_text, &request_text)?;
+    }
     let cells_artifact: serde_json::Value = serde_json::from_str(&cells_text)?;
     let request_artifact: serde_json::Value = serde_json::from_str(&request_text)?;
     let workload = workload_from_cells_artifact(&cells_artifact)?;
@@ -2189,6 +2198,46 @@ fn replay_workload_json(
     }
 
     Ok(output)
+}
+
+fn validate_workload_artifact_manifest(
+    artifact_dir: &Path,
+    cells_text: &str,
+    request_text: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path).map_err(|error| {
+        std::io::Error::other(format!("workload artifact manifest is required: {error}"))
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_text)?;
+
+    if manifest["format"].as_str() != Some("continuitydb.workload.bundle")
+        || manifest["format_version"].as_u64() != Some(1)
+    {
+        return Err(std::io::Error::other("unsupported workload artifact manifest").into());
+    }
+
+    let manifest_cells_fingerprint =
+        required_json_string(&manifest["workload_artifacts"], "cells_fingerprint")?;
+    let current_cells_fingerprint = fnv1a64_fingerprint(cells_text);
+    if manifest_cells_fingerprint != current_cells_fingerprint {
+        return Err(
+            std::io::Error::other("workload artifact manifest fingerprint mismatch").into(),
+        );
+    }
+
+    let manifest_request_fingerprint = required_json_string(
+        &manifest["workload_artifacts"],
+        "checkout_request_fingerprint",
+    )?;
+    let current_request_fingerprint = fnv1a64_fingerprint(request_text);
+    if manifest_request_fingerprint != current_request_fingerprint {
+        return Err(
+            std::io::Error::other("workload artifact manifest fingerprint mismatch").into(),
+        );
+    }
+
+    Ok(())
 }
 
 fn write_workload_replay_artifact_bundle_report(
@@ -2353,6 +2402,15 @@ fn json_i64(value: &serde_json::Value, key: &str) -> Result<i64, Box<dyn std::er
     value[key]
         .as_i64()
         .ok_or_else(|| std::io::Error::other(format!("missing replay comparison {key}")).into())
+}
+
+fn required_json_string<'a>(
+    value: &'a serde_json::Value,
+    key: &str,
+) -> Result<&'a str, Box<dyn std::error::Error>> {
+    value[key]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other(format!("missing manifest field {key}")).into())
 }
 
 fn workload_from_cells_artifact(

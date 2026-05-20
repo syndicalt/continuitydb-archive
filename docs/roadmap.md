@@ -184,6 +184,7 @@ Storage kernel
 17. Add CLI workload replay report artifacts. Added `replay-workload --report-path` and `--failure-report-path` so successful replay evidence and mismatch-gate failures can be written as durable JSON artifacts for CI and storage-engine trials.
 18. Add CLI workload replay artifact bundles. Added `replay-workload --replay-artifact-dir` so replay success and mismatch-gate evidence can be archived as `replay-report.json` plus a versioned `continuitydb-workload-replay.manifest.json` without mutating the input workload bundle.
 19. Add CLI workload replay artifact bundle separation. Rejected `replay-workload --replay-artifact-dir` values that equal the input `--artifact-dir`, preserving the source workload bundle as an immutable replay fixture.
+20. Add CLI workload replay input manifest validation. Added `replay-workload --require-manifest` so reproducible storage-engine trials can reject tampered `workload-cells.json` or `checkout-request.json` fixture files before replaying archived workload bundles.
 
 ## Native API Milestones
 
