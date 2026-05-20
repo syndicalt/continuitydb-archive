@@ -756,8 +756,8 @@ mod tests {
     }
 
     #[test]
-    fn api_open_canonical_file_rejects_legacy_file_store(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn api_open_canonical_file_rejects_legacy_file_store() -> Result<(), Box<dyn std::error::Error>>
+    {
         let path = temp_file_kernel_path("api-open-canonical-file-legacy");
         write_legacy_file_store(&path)?;
 

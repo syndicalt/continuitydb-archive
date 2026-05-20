@@ -56,6 +56,9 @@ enum Command {
         /// Required storage profile.
         #[arg(long = "require")]
         require: Option<RequirementProfile>,
+        /// Require the store to already be in canonical durable file format.
+        #[arg(long = "require-canonical")]
+        require_canonical: bool,
     },
     /// Export all file-backed commit slices to a versioned JSON backup envelope.
     ExportCommits {
@@ -94,12 +97,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::InspectKernel {
             store_path,
             require,
+            require_canonical,
         }) => {
             let db = if let Some(profile) = require {
                 open_file_database_with_profile(&store_path, profile)?
             } else {
                 open_file_database(&store_path)?
             };
+            if require_canonical {
+                db.ensure_file_store_canonical()?;
+            }
             let capabilities = db.kernel_capabilities();
             let status = file_status_json(&db)?;
             let health = file_health_json(&db);

@@ -188,6 +188,48 @@ fn cli_inspect_kernel_reports_legacy_health() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
+fn cli_inspect_kernel_accepts_canonical_requirement() -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-require-canonical");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--require-canonical")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        json["health"]["compaction_recommended"].as_bool(),
+        Some(false)
+    );
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_inspect_kernel_rejects_legacy_when_canonical_required(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-require-canonical-legacy");
+    write_legacy_store(&path)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--require-canonical")
+        .assert()
+        .failure()
+        .stderr(contains("file store compaction is recommended"));
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_inspect_kernel_accepts_durable_append_log_requirement(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-inspect-require-durable");
