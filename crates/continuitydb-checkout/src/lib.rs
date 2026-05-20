@@ -21,6 +21,10 @@ pub struct CheckoutRequest {
     pub scope: Option<Scope>,
     /// Optional valid-time filter.
     pub valid_at: Option<DateTime<Utc>>,
+    /// Optional exact answerability question filter.
+    pub answerability_question: Option<String>,
+    /// Optional exact evidence-source filter.
+    pub evidence_source: Option<String>,
     /// Minimum evidence confidence for included cells.
     pub minimum_confidence: Confidence,
     /// Maximum token budget for the returned slice.
@@ -54,6 +58,9 @@ pub fn checkout<K: StorageKernel>(
         semantic_anchor: None,
         scope: request.scope,
         valid_at: request.valid_at,
+        answerability_question: request.answerability_question,
+        evidence_source: request.evidence_source,
+        minimum_confidence: Some(request.minimum_confidence),
         ..CellLookup::default()
     })?;
 
@@ -108,18 +115,36 @@ fn max_confidence(cell: &StateCell) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
         Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
     };
-    use continuitydb_kernel::StorageKernel;
+    use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
 
     use super::{audit, checkout, CheckoutRequest};
 
     fn sample_cell(
         anchor: &str,
+        confidence: f32,
+        tokens: i64,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        sample_cell_with_question_and_source(
+            anchor,
+            "what should the agent know?",
+            "test",
+            confidence,
+            tokens,
+        )
+    }
+
+    fn sample_cell_with_question_and_source(
+        anchor: &str,
+        question: &str,
+        source: &str,
         confidence: f32,
         tokens: i64,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
@@ -132,9 +157,9 @@ mod tests {
             vec![SemanticAnchor::new(anchor)],
             ValidTimeRange::new(valid_from, None)?,
             Scope::Project("continuitydb".to_string()),
-            Answerability::new(vec!["what should the agent know?".to_string()])?,
+            Answerability::new(vec![question.to_string()])?,
             vec![Evidence {
-                source: SourceId::new("test"),
+                source: SourceId::new(source),
                 citation: Citation {
                     locator: format!("test://{anchor}"),
                 },
@@ -145,6 +170,55 @@ mod tests {
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
+    }
+
+    #[derive(Default)]
+    struct RecordingKernel {
+        lookup: RefCell<Option<CellLookup>>,
+    }
+
+    impl StorageKernel for RecordingKernel {
+        fn append_cell(&mut self, _cell: StateCell) -> Result<(), KernelError> {
+            Ok(())
+        }
+
+        fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError> {
+            *self.lookup.borrow_mut() = Some(lookup);
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn checkout_pushes_semantic_constraints_to_kernel() -> Result<(), Box<dyn std::error::Error>> {
+        let kernel = RecordingKernel::default();
+        checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                answerability_question: Some("what is frontier?".to_string()),
+                evidence_source: Some("human".to_string()),
+                minimum_confidence: Confidence::new(0.8)?,
+                token_budget: 10,
+            },
+        )?;
+
+        let lookup = kernel
+            .lookup
+            .borrow()
+            .clone()
+            .ok_or_else(|| std::io::Error::other("lookup was not captured"))?;
+        assert_eq!(
+            lookup.scope,
+            Some(Scope::Project("continuitydb".to_string()))
+        );
+        assert_eq!(
+            lookup.answerability_question,
+            Some("what is frontier?".to_string())
+        );
+        assert_eq!(lookup.evidence_source, Some("human".to_string()));
+        assert_eq!(lookup.minimum_confidence, Some(Confidence::new(0.8)?));
+        Ok(())
     }
 
     #[test]
@@ -160,12 +234,88 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                answerability_question: None,
+                evidence_source: None,
                 minimum_confidence: Confidence::new(0.7)?,
                 token_budget: 10,
             },
         )?;
 
         assert_eq!(slice.cells, vec![high]);
+        assert_eq!(slice.total_tokens, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_filters_by_answerability_question() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let status = sample_cell_with_question_and_source(
+            "project:continuitydb:status",
+            "what is status?",
+            "test",
+            0.95,
+            10,
+        )?;
+        let frontier = sample_cell_with_question_and_source(
+            "project:continuitydb:frontier",
+            "what is frontier?",
+            "test",
+            0.90,
+            10,
+        )?;
+        kernel.append_cell(status)?;
+        kernel.append_cell(frontier.clone())?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                answerability_question: Some("what is frontier?".to_string()),
+                evidence_source: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 20,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![frontier]);
+        assert_eq!(slice.total_tokens, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_filters_by_evidence_source() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let observed = sample_cell_with_question_and_source(
+            "project:continuitydb:observed",
+            "what is status?",
+            "sensor",
+            0.95,
+            10,
+        )?;
+        let reviewed = sample_cell_with_question_and_source(
+            "project:continuitydb:reviewed",
+            "what is status?",
+            "human",
+            0.90,
+            10,
+        )?;
+        kernel.append_cell(observed)?;
+        kernel.append_cell(reviewed.clone())?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                answerability_question: None,
+                evidence_source: Some("human".to_string()),
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 20,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![reviewed]);
         assert_eq!(slice.total_tokens, 10);
         Ok(())
     }

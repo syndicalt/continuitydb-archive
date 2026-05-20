@@ -61,6 +61,10 @@ Storage kernel
 5. Add first-class StateCell answerability filtering. Implemented in `CellLookup` across memory and file kernels.
 6. Add first-class evidence-source and minimum-confidence filtering. Implemented in `CellLookup` across memory and file kernels.
 
+## Checkout Milestones
+
+1. Push deterministic checkout constraints into storage lookup. Implemented for scope, valid time, answerability question, evidence source, and minimum confidence in `continuitydb-checkout`.
+
 ## Steward Milestones
 
 1. Define `StewardProposal` types without invoking any model. Implemented in `continuitydb-steward`.
