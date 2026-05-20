@@ -1100,6 +1100,155 @@ impl LocalModelBenchmark {
             evaluation: self.suite.evaluate(&steward),
         }
     }
+
+    /// Re-runs each benchmark case and reports whether decoded proposal output is stable.
+    pub fn run_stability(
+        &self,
+        identity: StewardIdentity,
+        trials: usize,
+    ) -> LocalModelStabilityReport {
+        let trial_count = trials.max(1);
+        let mut proposal_fingerprints_by_case: Vec<Vec<String>> =
+            vec![Vec::new(); self.suite.cases().len()];
+
+        for _trial in 0..trial_count {
+            let steward = LocalModelSteward::new(identity.clone(), self.runner.clone());
+            for (case_index, case) in self.suite.cases().iter().enumerate() {
+                proposal_fingerprints_by_case[case_index]
+                    .push(stability_fingerprint_for_case(case, &steward));
+            }
+        }
+
+        let case_reports = self
+            .suite
+            .cases()
+            .iter()
+            .zip(proposal_fingerprints_by_case)
+            .map(|(case, proposal_fingerprints)| {
+                LocalModelStabilityCaseReport::new(case.name().to_string(), proposal_fingerprints)
+            })
+            .collect();
+
+        LocalModelStabilityReport::new(trial_count, case_reports)
+    }
+}
+
+/// Stability report for repeated local model benchmark outputs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelStabilityReport {
+    trials: usize,
+    stable: bool,
+    case_reports: Vec<LocalModelStabilityCaseReport>,
+}
+
+impl LocalModelStabilityReport {
+    fn new(trials: usize, case_reports: Vec<LocalModelStabilityCaseReport>) -> Self {
+        let stable = case_reports
+            .iter()
+            .all(LocalModelStabilityCaseReport::stable);
+
+        Self {
+            trials,
+            stable,
+            case_reports,
+        }
+    }
+
+    /// Returns the number of repeated trials.
+    pub fn trials(&self) -> usize {
+        self.trials
+    }
+
+    /// Returns whether every case emitted stable decoded proposals.
+    pub fn stable(&self) -> bool {
+        self.stable
+    }
+
+    /// Returns per-case stability reports.
+    pub fn case_reports(&self) -> &[LocalModelStabilityCaseReport] {
+        &self.case_reports
+    }
+}
+
+/// Per-case stability report for repeated local model benchmark outputs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelStabilityCaseReport {
+    name: String,
+    stable: bool,
+    proposal_fingerprints: Vec<String>,
+    changed_trials: Vec<usize>,
+}
+
+impl LocalModelStabilityCaseReport {
+    fn new(name: String, proposal_fingerprints: Vec<String>) -> Self {
+        let first = proposal_fingerprints.first();
+        let changed_trials: Vec<usize> = proposal_fingerprints
+            .iter()
+            .enumerate()
+            .filter_map(|(index, fingerprint)| {
+                first
+                    .is_some_and(|first| first != fingerprint)
+                    .then_some(index + 1)
+            })
+            .collect();
+        let stable = changed_trials.is_empty();
+
+        Self {
+            name,
+            stable,
+            proposal_fingerprints,
+            changed_trials,
+        }
+    }
+
+    /// Returns the evaluated case name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns whether this case emitted stable decoded proposals.
+    pub fn stable(&self) -> bool {
+        self.stable
+    }
+
+    /// Returns the decoded proposal fingerprints for each trial.
+    pub fn proposal_fingerprints(&self) -> &[String] {
+        &self.proposal_fingerprints
+    }
+
+    /// Returns one-based trial numbers whose proposal fingerprint changed.
+    pub fn changed_trials(&self) -> &[usize] {
+        &self.changed_trials
+    }
+}
+
+fn stability_fingerprint_for_case<B>(
+    case: &StewardEvaluationCase,
+    steward: &LocalModelSteward<B>,
+) -> String
+where
+    B: LocalModelBackend,
+{
+    match steward.propose(case.input().clone()) {
+        Ok(proposals) => {
+            let mut fields = vec!["ok".to_string()];
+            for proposal in proposals {
+                fields.push(stability_field_for_proposal(&proposal));
+            }
+            fingerprint_fields(&fields)
+        }
+        Err(error) => fingerprint_fields(&["error".to_string(), format!("{error:?}")]),
+    }
+}
+
+fn stability_field_for_proposal(proposal: &StewardProposal) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "action": proposal.action(),
+        "rationale": proposal.rationale(),
+        "citations": proposal.citations(),
+        "created_at": proposal.created_at(),
+    }))
+    .unwrap_or_else(|_error| format!("{proposal:?}"))
 }
 
 /// Report emitted by an executable local model benchmark run.

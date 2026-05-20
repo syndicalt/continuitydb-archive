@@ -32,11 +32,11 @@ pub use local_model::{
     LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
     LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
-    LocalModelRuntimeManifest, LocalModelSteward, LocalModelStewardInput,
-    MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
-    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
-    StewardEvaluationReport, StewardEvaluationSuite, StewardEvaluationSummary,
-    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    LocalModelRuntimeManifest, LocalModelStabilityCaseReport, LocalModelStabilityReport,
+    LocalModelSteward, LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore,
+    MistralRsRuntimeProfile, SmallModelCandidate, StewardEvaluationCase,
+    StewardEvaluationCaseReport, StewardEvaluationFailure, StewardEvaluationReport,
+    StewardEvaluationSuite, StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -1778,6 +1778,123 @@ mod tests {
         assert!(report.passed());
         assert_eq!(report.candidate().model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
         assert_eq!(report.evaluation().case_reports().len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_stability_passes_for_repeated_identical_outputs(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let script = write_local_model_script(
+            "continuitydb-local-model-stability-ok",
+            &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+
+        let report = benchmark.run_stability(steward()?, 2);
+
+        assert_eq!(report.trials(), 2);
+        assert!(report.stable());
+        assert_eq!(report.case_reports()[0].name(), "frontier");
+        assert!(report.case_reports()[0].stable());
+        assert!(report.case_reports()[0].changed_trials().is_empty());
+        assert_eq!(report.case_reports()[0].proposal_fingerprints().len(), 2);
+        assert_eq!(
+            report.case_reports()[0].proposal_fingerprints()[0],
+            report.case_reports()[0].proposal_fingerprints()[1]
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_stability_detects_drift_between_passing_outputs(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let count_path = std::env::temp_dir().join(format!(
+            "continuitydb-local-model-stability-count-{:?}",
+            ProposalId::new()
+        ));
+        let first_response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let second_response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence remains stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let script = write_local_model_script(
+            "continuitydb-local-model-stability-drift",
+            &format!(
+                "cat >/dev/null\nif [ -f '{count}' ]; then printf '%s\\n' '{second}'; else touch '{count}'; printf '%s\\n' '{first}'; fi\n",
+                count = count_path.display(),
+                first = first_response,
+                second = second_response,
+            ),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+
+        let report = benchmark.run_stability(steward()?, 2);
+
+        assert_eq!(report.trials(), 2);
+        assert!(!report.stable());
+        assert_eq!(report.case_reports()[0].name(), "frontier");
+        assert!(!report.case_reports()[0].stable());
+        assert_eq!(report.case_reports()[0].changed_trials(), &[2]);
+        assert_ne!(
+            report.case_reports()[0].proposal_fingerprints()[0],
+            report.case_reports()[0].proposal_fingerprints()[1]
+        );
+
+        let _ = fs::remove_file(count_path);
         Ok(())
     }
 
