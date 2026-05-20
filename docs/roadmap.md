@@ -73,6 +73,7 @@ Storage kernel
 17. Add JSONL file-kernel compaction. Implemented `FileKernel::compact` to rewrite stored cells and commit manifests into the latest header plus checksummed cell and commit record format while preserving lookup and manifest listing behavior.
 18. Add line-addressed JSONL file-kernel corruption diagnostics. Implemented `KernelError::StoreCorruptRecord { line }` for decode-time header, checksum, and malformed JSONL failures so operators can locate damaged durable records.
 19. Add headered JSONL file-kernel partial-commit detection. Implemented explicit-manifest enforcement for current-format headered logs so crash-truncated cell records are rejected instead of reconstructed as committed truth, while headerless legacy raw logs remain readable.
+20. Add durable filesystem flush boundaries for JSONL file-kernel writes. Implemented internal durable write helpers using flush plus `sync_all` for headers, append batches, and compaction temp files, with parent-directory sync after compaction rename.
 
 ## Checkout Milestones
 

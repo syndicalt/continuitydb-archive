@@ -21,7 +21,7 @@
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add durable write helper test**
+- [x] **Step 1: Add durable write helper test**
 
 Add near the test helper functions:
 
@@ -43,7 +43,7 @@ fn file_kernel_durable_write_helper_persists_bytes() -> Result<(), Box<dyn std::
 }
 ```
 
-- [ ] **Step 2: Add parent-directory sync helper test**
+- [x] **Step 2: Add parent-directory sync helper test**
 
 Add:
 
@@ -61,7 +61,7 @@ fn file_kernel_parent_directory_sync_accepts_existing_parent(
 }
 ```
 
-- [ ] **Step 3: Run targeted tests and verify RED**
+- [x] **Step 3: Run targeted tests and verify RED**
 
 Run:
 
@@ -83,7 +83,7 @@ Expected: compilation fails because `write_all_durable` and `sync_parent_directo
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add durable write helper**
+- [x] **Step 1: Add durable write helper**
 
 Add near `ensure_file_header`:
 
@@ -96,7 +96,7 @@ fn write_all_durable(file: &mut File, bytes: &[u8]) -> Result<(), KernelError> {
 }
 ```
 
-- [ ] **Step 2: Add parent directory sync helper**
+- [x] **Step 2: Add parent directory sync helper**
 
 Add:
 
@@ -111,7 +111,7 @@ fn sync_parent_directory(path: &Path) -> Result<(), KernelError> {
 }
 ```
 
-- [ ] **Step 3: Use durable write for new headers**
+- [x] **Step 3: Use durable write for new headers**
 
 In `ensure_file_header`, replace:
 
@@ -126,7 +126,7 @@ let record = format!("{encoded}\n");
 write_all_durable(&mut file, record.as_bytes())
 ```
 
-- [ ] **Step 4: Use durable write for append batches**
+- [x] **Step 4: Use durable write for append batches**
 
 In `append_cells_at_with_commit_id`, replace:
 
@@ -141,7 +141,7 @@ with:
 write_all_durable(&mut file, encoded.as_bytes())?;
 ```
 
-- [ ] **Step 5: Use durable write and directory sync for compaction**
+- [x] **Step 5: Use durable write and directory sync for compaction**
 
 In `FileKernel::compact`, replace the temp-file `write_all` and `flush` calls with:
 
@@ -155,13 +155,13 @@ After `fs::rename(&temp_path, &self.path)?`, add:
 sync_parent_directory(&self.path)?;
 ```
 
-- [ ] **Step 6: Run targeted tests and verify GREEN**
+- [x] **Step 6: Run targeted tests and verify GREEN**
 
 Run:
 
 ```bash
 cargo test -p continuitydb-kernel durable_write
-cargo test -p continuitydb-kernel sync_parent
+cargo test -p continuitydb-kernel parent_directory_sync
 cargo test -p continuitydb-kernel file_kernel_persists_cells_across_reopen
 ```
 
@@ -174,7 +174,7 @@ Expected: all targeted tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-file-kernel-durable-flush.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope:
 
@@ -182,7 +182,7 @@ Add to Current Scope:
 - Durable filesystem flush boundaries for JSONL file-kernel writes.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add Storage Kernel milestone:
 
@@ -190,7 +190,7 @@ Add Storage Kernel milestone:
 20. Add durable filesystem flush boundaries for JSONL file-kernel writes. Implemented internal durable write helpers using flush plus `sync_all` for headers, append batches, and compaction temp files, with parent-directory sync after compaction rename.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -204,7 +204,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 

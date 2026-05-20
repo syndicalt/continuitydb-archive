@@ -410,15 +410,13 @@ impl FileKernel {
                 .write(true)
                 .open(&temp_path)
                 .map_err(|_error| KernelError::StoreIo)?;
-            temp_file
-                .write_all(encoded.as_bytes())
-                .map_err(|_error| KernelError::StoreIo)?;
-            temp_file.flush().map_err(|_error| KernelError::StoreIo)?;
+            write_all_durable(&mut temp_file, encoded.as_bytes())?;
         }
 
         let compacted_log = read_log_from_path(&temp_path)?;
         let compacted_index = FileKernelIndex::rebuild(compacted_log)?;
         fs::rename(&temp_path, &self.path).map_err(|_error| KernelError::StoreIo)?;
+        sync_parent_directory(&self.path)?;
         self.index = compacted_index;
         Ok(())
     }
@@ -452,7 +450,27 @@ fn ensure_file_header(path: &Path) -> Result<(), KernelError> {
         .append(true)
         .open(path)
         .map_err(|_error| KernelError::StoreIo)?;
-    writeln!(file, "{encoded}").map_err(|_error| KernelError::StoreIo)
+    let record = format!("{encoded}\n");
+    write_all_durable(&mut file, record.as_bytes())
+}
+
+fn write_all_durable(file: &mut File, bytes: &[u8]) -> Result<(), KernelError> {
+    file.write_all(bytes)
+        .map_err(|_error| KernelError::StoreIo)?;
+    file.flush().map_err(|_error| KernelError::StoreIo)?;
+    file.sync_all().map_err(|_error| KernelError::StoreIo)
+}
+
+fn sync_parent_directory(path: &Path) -> Result<(), KernelError> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_error| KernelError::StoreIo)
 }
 
 fn file_record_checksum<T: serde::Serialize>(payload: &T) -> Result<String, KernelError> {
@@ -641,8 +659,7 @@ impl StorageKernel for FileKernel {
             .append(true)
             .open(&self.path)
             .map_err(|_error| KernelError::StoreIo)?;
-        file.write_all(encoded.as_bytes())
-            .map_err(|_error| KernelError::StoreIo)?;
+        write_all_durable(&mut file, encoded.as_bytes())?;
 
         for cell in stamped {
             self.index.insert(cell)?;
@@ -783,7 +800,10 @@ impl StorageKernel for FileKernel {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellLookup, CommitManifestLookup, FileKernel, KernelError, StorageKernel};
+    use super::{
+        sync_parent_directory, write_all_durable, CellLookup, CommitManifestLookup, FileKernel,
+        KernelError, StorageKernel,
+    };
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
@@ -850,6 +870,34 @@ mod tests {
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
+    }
+
+    #[test]
+    fn file_kernel_durable_write_helper_persists_bytes() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-durable-write");
+        {
+            let mut file = std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)?;
+            write_all_durable(&mut file, b"{\"type\":\"test\"}\n")?;
+        }
+
+        assert_eq!(fs::read_to_string(&path)?, "{\"type\":\"test\"}\n");
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_parent_directory_sync_accepts_existing_parent(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-sync-parent");
+        fs::write(&path, "")?;
+
+        sync_parent_directory(&path)?;
+
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     #[test]

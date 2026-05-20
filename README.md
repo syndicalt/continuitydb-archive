@@ -40,6 +40,7 @@ The first milestone builds:
 - Per-record JSONL file-kernel checksums for cell and commit records.
 - Line-addressed JSONL file-kernel corruption diagnostics.
 - Headered JSONL file-kernel partial-commit detection.
+- Durable filesystem flush boundaries for JSONL file-kernel writes.
 - JSONL file-kernel compaction into the canonical durable record format.
 - Native file-backed compaction API.
 - CLI file-backed compaction command.
