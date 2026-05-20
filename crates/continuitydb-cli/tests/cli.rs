@@ -1233,6 +1233,82 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_benchmark_local_model_failure_report_path_records_regression_gate(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-regression-report-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-regression-report-baseline");
+    let report_path = temp_store_path("continuitydb-cli-local-model-regression-report");
+    fs::write(&executable_path, passing_local_model_runner_script())?;
+    let regressed_script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]}]}'
+"#;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+    fs::write(&executable_path, regressed_script)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--fail-on-regression")
+        .arg("--failure-report-path")
+        .arg(&report_path)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("local model benchmark regression detected"));
+
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    assert_eq!(baseline_text.lines().count(), 1);
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+
+    assert_eq!(report["passed"].as_bool(), Some(false));
+    assert_eq!(
+        report["baseline_comparison"]["regressed"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["previous_passed_cases"].as_u64(),
+        Some(9)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["current_passed_cases"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["pass_count_delta"].as_i64(),
+        Some(-8)
+    );
+    assert!(report["bundle_manifest"].is_null());
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_file(report_path)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-passing-gate-runner");

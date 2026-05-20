@@ -926,21 +926,24 @@ fn benchmark_local_model_json(
             .as_ref()
             .is_some_and(LocalModelBenchmarkRegression::regressed)
     {
+        let mut report = local_model_benchmark_json(
+            options.baseline_path,
+            options.compare_baseline,
+            &current_baseline,
+            regression.as_ref(),
+            LocalModelBenchmarkArtifacts {
+                contract: contract_artifacts.as_ref(),
+                prompts: &prompt_artifacts,
+                responses: &response_artifacts,
+                response_manifest: response_manifest.as_ref(),
+            },
+            stability.as_ref(),
+        );
         if let Some(artifact_dir) = options.artifact_dir {
-            let report = local_model_benchmark_json(
-                options.baseline_path,
-                options.compare_baseline,
-                &current_baseline,
-                regression.as_ref(),
-                LocalModelBenchmarkArtifacts {
-                    contract: contract_artifacts.as_ref(),
-                    prompts: &prompt_artifacts,
-                    responses: &response_artifacts,
-                    response_manifest: response_manifest.as_ref(),
-                },
-                stability.as_ref(),
-            );
-            write_local_model_artifact_bundle_report(artifact_dir, report)?;
+            report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
+        }
+        if let Some(report_path) = options.failure_report_path {
+            write_pretty_json_file(report_path, &report)?;
         }
         return Err(std::io::Error::other("local model benchmark regression detected").into());
     }
