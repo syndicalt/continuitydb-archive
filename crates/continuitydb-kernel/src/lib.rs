@@ -541,6 +541,17 @@ pub struct FileKernel {
     index: FileKernelIndex,
 }
 
+/// Observable status for a file-backed storage kernel.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileKernelStatus {
+    /// Number of visible StateCells.
+    pub cell_count: usize,
+    /// Number of visible commit manifests.
+    pub commit_count: usize,
+    /// Current durable file size in bytes.
+    pub file_size_bytes: u64,
+}
+
 impl PartialEq for FileKernel {
     fn eq(&self, other: &Self) -> bool {
         self.path == other.path
@@ -576,6 +587,18 @@ impl FileKernel {
     /// Returns the backing file path.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Returns observable status for the backing file store.
+    pub fn status(&self) -> Result<FileKernelStatus, KernelError> {
+        let file_size_bytes = fs::metadata(&self.path)
+            .map_err(|_error| KernelError::StoreIo)?
+            .len();
+        Ok(FileKernelStatus {
+            cell_count: self.index.cells.len(),
+            commit_count: self.index.manifest_order.len(),
+            file_size_bytes,
+        })
     }
 
     /// Rewrites the backing JSONL log into the current canonical record format.
@@ -1141,6 +1164,42 @@ mod tests {
         assert!(capabilities.compaction);
 
         let _ = std::fs::remove_file(path);
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_status_reports_empty_store() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-status-empty");
+        let kernel = FileKernel::open(&path)?;
+
+        let status = kernel.status()?;
+
+        assert_eq!(status.cell_count, 0);
+        assert_eq!(status.commit_count, 0);
+        assert!(status.file_size_bytes > 0);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_status_reports_visible_cells_and_commits(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-status-populated");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:status-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:status-second", 0.83, 15)?;
+        let mut kernel = FileKernel::open(&path)?;
+        kernel.append_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+
+        let status = kernel.status()?;
+
+        assert_eq!(status.cell_count, 2);
+        assert_eq!(status.commit_count, 1);
+        assert!(status.file_size_bytes > 0);
+
+        fs::remove_file(path)?;
         Ok(())
     }
 
