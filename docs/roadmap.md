@@ -136,7 +136,7 @@ Storage kernel
 11. Add incremental commit export. Implemented `continuitydb export-commits --after --limit` so operators can page commit backups through the same cursor semantics exposed by the native API.
 12. Report commit import cursors. Extended `continuitydb import-commits` output with `next_after` so operators can checkpoint imported backup pages.
 13. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
-14. Execute versioned typed query envelopes from the CLI. Extended `continuitydb checkout-query` to accept `continuitydb.query` envelope files while preserving raw typed query JSON compatibility, routed through the native query-file API.
+14. Execute saved query files from the CLI. Extended `continuitydb checkout-query` to accept raw typed query JSON, versioned `continuitydb.query` envelopes, and strict text `CHECKOUT` query files through the native query-file API.
 
 ## Native API Milestones
 
@@ -144,25 +144,26 @@ Storage kernel
 2. Add native typed query execution. Implemented checkout execution for `continuitydb-query` AST values through `ContinuityDb<K>`, preserving typed query errors and delegating materialization to the existing checkout engine.
 3. Add native versioned query-envelope execution. Implemented `ContinuityDb::checkout_query_json` so embedders can execute `continuitydb.query` envelope bytes directly while preserving distinct query compilation and envelope validation errors.
 4. Add native saved query-file execution. Implemented `ContinuityDb::checkout_query_file` so embedders can execute either raw `ContinuityQuery` JSON files or versioned `continuitydb.query` envelope files while preserving native query, envelope, JSON, and file I/O error boundaries.
-5. Add typed utility feedback revision operations. Implemented `ContinuityDb::record_utility_feedback` and `record_utility_feedback_at` so applications can record outcome feedback as append-only successor StateCells through the native API.
-6. Add typed read-only conflict analysis operations. Implemented `ContinuityDb::detect_conflict` and `recommend_conflict_resolution` so applications can inspect deterministic StateCell conflicts and non-mutating resolution recommendations through the native API.
-7. Add typed read-only batch conflict analysis operations. Implemented `ContinuityDb::detect_conflicts` and `recommend_conflict_resolutions` so applications can analyze deterministic conflict frontiers across ordered stored cell sets through the native API.
-8. Add ordered commit cell materialization. Implemented `ContinuityDb::commit_cells` so callers can hydrate the StateCells written by one commit in manifest order, with unknown commits reported as `CommitNotFound`.
-9. Add cursor-based commit slice materialization. Implemented `CommitSlice` and `ContinuityDb::commit_slices` so callers can materialize cursor-selected commit manifests with their ordered StateCells for audit, backup, sync, and replay flows.
-10. Add native file-backed compaction API. Implemented `ContinuityDb<FileKernel>::compact_file_store` so embedders can run JSONL store compaction through the native API without expanding the generic storage-kernel trait.
-11. Add native commit export batches. Implemented `CommitExportBatch` and `ContinuityDb::export_commits` so embedders can page commit slices with a deterministic next cursor for backup, sync, and replay flows.
-12. Add native validated commit import batches. Implemented `ContinuityDb::import_commit_batch` so exported commit batches can be validated and replayed into another store while preserving commit IDs, commit times, cell IDs, and manifest ordering.
-13. Add versioned JSON commit export envelopes. Implemented `CommitExportEnvelope` plus JSON encode/decode helpers so native commit export batches can be written to files or sync channels with explicit format/version validation.
-14. Add native commit backup and restore file helpers. Implemented `ContinuityDb<FileKernel>::export_commits_json_file` and `import_commits_json_file` so embedders can write and read versioned commit export envelope files without duplicating CLI file I/O orchestration.
-15. Add native kernel requirement enforcement. Implemented `ContinuityDb::kernel_satisfies` and `ensure_kernel_requirements` with a typed `KernelRequirementsNotMet` error so embedders can fail early when a backing kernel lacks required production guarantees.
-16. Add file-backed open helpers with requirement enforcement. Implemented `ContinuityDb<FileKernel>::open_file` and `open_file_with_requirements` so embedders can enforce storage profiles before receiving a usable file-backed database handle.
-17. Add native file-store status. Implemented `ContinuityDb<FileKernel>::file_store_status` so embedders can inspect file-backed store shape without depending on kernel internals.
-18. Add native file-store health reporting. Implemented `ContinuityDb<FileKernel>::file_store_health` so embedders can inspect file format health without depending on kernel internals.
-19. Add canonical file-store requirement gate. Implemented `ensure_file_store_canonical` and `open_canonical_file` so embedders can reject readable but compaction-worthy file stores without automatic mutation.
-20. Add conditional file-store compaction. Implemented `compact_file_store_if_needed` with before/after health summaries so embedders can automate explicit maintenance without rewriting canonical stores.
-21. Add commit import dry-run validation. Implemented `validate_commit_import` and `validate_commits_json_file` so embedders can validate replay batches and backup files without mutating target stores.
-22. Add commit import summaries. Implemented summary-returning import APIs so embedders can retrieve imported counts and backup cursors without decoding envelopes separately.
-23. Add native direct commit copy. Implemented `copy_commits_from` so embedders can replay cursor-selected commit pages between open databases without JSON file envelopes.
+5. Add native saved text query-file execution. Extended `ContinuityDb::checkout_query_file` to recognize strict text `CHECKOUT` query files and route them through `parse_query_text` before normal typed query execution.
+6. Add typed utility feedback revision operations. Implemented `ContinuityDb::record_utility_feedback` and `record_utility_feedback_at` so applications can record outcome feedback as append-only successor StateCells through the native API.
+7. Add typed read-only conflict analysis operations. Implemented `ContinuityDb::detect_conflict` and `recommend_conflict_resolution` so applications can inspect deterministic StateCell conflicts and non-mutating resolution recommendations through the native API.
+8. Add typed read-only batch conflict analysis operations. Implemented `ContinuityDb::detect_conflicts` and `recommend_conflict_resolutions` so applications can analyze deterministic conflict frontiers across ordered stored cell sets through the native API.
+9. Add ordered commit cell materialization. Implemented `ContinuityDb::commit_cells` so callers can hydrate the StateCells written by one commit in manifest order, with unknown commits reported as `CommitNotFound`.
+10. Add cursor-based commit slice materialization. Implemented `CommitSlice` and `ContinuityDb::commit_slices` so callers can materialize cursor-selected commit manifests with their ordered StateCells for audit, backup, sync, and replay flows.
+11. Add native file-backed compaction API. Implemented `ContinuityDb<FileKernel>::compact_file_store` so embedders can run JSONL store compaction through the native API without expanding the generic storage-kernel trait.
+12. Add native commit export batches. Implemented `CommitExportBatch` and `ContinuityDb::export_commits` so embedders can page commit slices with a deterministic next cursor for backup, sync, and replay flows.
+13. Add native validated commit import batches. Implemented `ContinuityDb::import_commit_batch` so exported commit batches can be validated and replayed into another store while preserving commit IDs, commit times, cell IDs, and manifest ordering.
+14. Add versioned JSON commit export envelopes. Implemented `CommitExportEnvelope` plus JSON encode/decode helpers so native commit export batches can be written to files or sync channels with explicit format/version validation.
+15. Add native commit backup and restore file helpers. Implemented `ContinuityDb<FileKernel>::export_commits_json_file` and `import_commits_json_file` so embedders can write and read versioned commit export envelope files without duplicating CLI file I/O orchestration.
+16. Add native kernel requirement enforcement. Implemented `ContinuityDb::kernel_satisfies` and `ensure_kernel_requirements` with a typed `KernelRequirementsNotMet` error so embedders can fail early when a backing kernel lacks required production guarantees.
+17. Add file-backed open helpers with requirement enforcement. Implemented `ContinuityDb<FileKernel>::open_file` and `open_file_with_requirements` so embedders can enforce storage profiles before receiving a usable file-backed database handle.
+18. Add native file-store status. Implemented `ContinuityDb<FileKernel>::file_store_status` so embedders can inspect file-backed store shape without depending on kernel internals.
+19. Add native file-store health reporting. Implemented `ContinuityDb<FileKernel>::file_store_health` so embedders can inspect file format health without depending on kernel internals.
+20. Add canonical file-store requirement gate. Implemented `ensure_file_store_canonical` and `open_canonical_file` so embedders can reject readable but compaction-worthy file stores without automatic mutation.
+21. Add conditional file-store compaction. Implemented `compact_file_store_if_needed` with before/after health summaries so embedders can automate explicit maintenance without rewriting canonical stores.
+22. Add commit import dry-run validation. Implemented `validate_commit_import` and `validate_commits_json_file` so embedders can validate replay batches and backup files without mutating target stores.
+23. Add commit import summaries. Implemented summary-returning import APIs so embedders can retrieve imported counts and backup cursors without decoding envelopes separately.
+24. Add native direct commit copy. Implemented `copy_commits_from` so embedders can replay cursor-selected commit pages between open databases without JSON file envelopes.
 
 ## Steward Milestones
 

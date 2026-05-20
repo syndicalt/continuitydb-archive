@@ -21,6 +21,7 @@ The first milestone builds:
 - Native typed query execution through the embeddable API.
 - Native API execution for versioned typed query envelopes.
 - Native API execution for saved typed query files.
+- Native and CLI execution for saved text `CHECKOUT` query files.
 - CLI execution for serialized typed query files.
 - CLI execution for versioned typed query envelopes.
 - Commit-scoped checkout.
