@@ -86,6 +86,7 @@ Storage kernel
 30. Add duplicate revision-link append rejection. Implemented exact duplicate `RevisionLinkRecord` rejection across memory and file kernels, including pre-write file append checks and duplicate durable-log detection during file-kernel reopen.
 31. Add file-kernel secondary indexes for scope lookups. Implemented a derived scope-to-cell-position index rebuilt from the JSONL log and maintained after append so scope-constrained checkout can start from indexed candidates while preserving append-order results.
 32. Add file-kernel secondary indexes for minimum-confidence lookups. Implemented a derived max-evidence-confidence index rebuilt from the JSONL log and maintained after append so confidence-constrained checkout can start from indexed candidates while preserving exact final filtering.
+33. Add file-kernel secondary indexes for system-time lookups. Implemented a derived system-start-time index rebuilt from the JSONL log and maintained after append so transaction-time checkout can start from indexed candidates while preserving exact final range filtering.
 
 ## Checkout Milestones
 
