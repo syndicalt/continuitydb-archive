@@ -234,6 +234,7 @@ dependencies = [
  "continuitydb-core",
  "continuitydb-kernel",
  "continuitydb-memory",
+ "continuitydb-query",
  "predicates",
  "serde_json",
 ]

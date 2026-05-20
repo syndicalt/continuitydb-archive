@@ -18,6 +18,7 @@ continuitydb-checkout = { path = "../continuitydb-checkout" }
 continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-kernel = { path = "../continuitydb-kernel" }
 continuitydb-memory = { path = "../continuitydb-memory" }
+continuitydb-query = { path = "../continuitydb-query" }
 serde_json.workspace = true
 
 [dev-dependencies]

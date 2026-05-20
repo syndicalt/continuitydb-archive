@@ -12,6 +12,7 @@ use continuitydb_kernel::{
     CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements, StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
+use continuitydb_query::ContinuityQuery;
 use std::path::PathBuf;
 
 /// ContinuityDB command-line interface.
@@ -44,6 +45,13 @@ enum Command {
     Scope,
     /// Print deterministic demo checkout JSON.
     DemoCheckout,
+    /// Execute a serialized typed Continuity query JSON file against a file-backed store.
+    CheckoutQuery {
+        /// Path to the JSONL file-backed store.
+        store_path: PathBuf,
+        /// Path to a serialized ContinuityQuery JSON file.
+        query_path: PathBuf,
+    },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
         /// Path to the JSONL file-backed store.
@@ -117,6 +125,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::DemoCheckout) => {
             let slice = demo_checkout()?;
+            println!("{}", serde_json::to_string_pretty(&slice)?);
+        }
+        Some(Command::CheckoutQuery {
+            store_path,
+            query_path,
+        }) => {
+            let slice = checkout_query_file(&store_path, &query_path)?;
             println!("{}", serde_json::to_string_pretty(&slice)?);
         }
         Some(Command::InspectKernel {
@@ -306,6 +321,16 @@ fn open_file_database_with_profile(
 ) -> Result<ContinuityDb<continuitydb_kernel::FileKernel>, Box<dyn std::error::Error>> {
     ContinuityDb::open_file_with_requirements(path, requirements_for_profile(profile))
         .map_err(Into::into)
+}
+
+fn checkout_query_file(
+    store_path: &PathBuf,
+    query_path: &PathBuf,
+) -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::error::Error>> {
+    let db = open_file_database(store_path)?;
+    let encoded = std::fs::read(query_path)?;
+    let query = serde_json::from_slice::<ContinuityQuery>(&encoded)?;
+    db.checkout_continuity_query(query).map_err(Into::into)
 }
 
 fn demo_checkout() -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::error::Error>> {

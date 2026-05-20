@@ -8,6 +8,10 @@ use continuitydb_core::{
     SemanticAnchor, SourceId, StateCell, StateCellId, SystemTimeRange, TrustSignal, ValidTimeRange,
 };
 use continuitydb_kernel::{CommitManifestLookup, FileKernel};
+use continuitydb_query::{
+    CheckoutQuery, ContinuityQuery, QueryOptimization, QueryRequirements, QueryReturnShape,
+    QueryTask,
+};
 use predicates::str::contains;
 use serde_json::Value;
 use std::{fs, path::PathBuf};
@@ -54,6 +58,76 @@ fn cli_demo_checkout_outputs_metadata_json() -> Result<(), Box<dyn std::error::E
         json["alternatives"][0]["reason"].as_str(),
         Some("TokenBudgetExceeded")
     );
+    Ok(())
+}
+
+#[test]
+fn cli_checkout_query_executes_serialized_typed_query() -> Result<(), Box<dyn std::error::Error>> {
+    let store_path = temp_store_path("continuitydb-cli-checkout-query-store");
+    let query_path = temp_store_path("continuitydb-cli-checkout-query-query");
+    write_committed_store(&store_path, "project:continuitydb:cli-query")?;
+    let query = ContinuityQuery::Checkout(
+        CheckoutQuery::new(QueryTask::new("stored-facts", "what is stored?")).with_requirements(
+            QueryRequirements {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 1200,
+                ..QueryRequirements::default()
+            },
+        ),
+    );
+    fs::write(&query_path, serde_json::to_vec(&query)?)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("checkout-query")
+        .arg(&store_path)
+        .arg(&query_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["cells"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        json["cells"][0]["payload"]["Text"].as_str(),
+        Some("project:continuitydb:cli-query")
+    );
+    assert_eq!(json["audit_traces"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        json["audit_traces"][0]["evidence"].as_array().map(Vec::len),
+        Some(1)
+    );
+
+    fs::remove_file(store_path)?;
+    fs::remove_file(query_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_checkout_query_rejects_unsupported_query_semantics() -> Result<(), Box<dyn std::error::Error>>
+{
+    let store_path = temp_store_path("continuitydb-cli-checkout-query-unsupported-store");
+    let query_path = temp_store_path("continuitydb-cli-checkout-query-unsupported-query");
+    write_committed_store(&store_path, "project:continuitydb:cli-query-unsupported")?;
+    let query = ContinuityQuery::Checkout(
+        CheckoutQuery::new(QueryTask::new("stored-facts", "what is stored?"))
+            .with_return_shape(QueryReturnShape::CellsOnly)
+            .with_optimization(QueryOptimization::TokenCostOnly),
+    );
+    fs::write(&query_path, serde_json::to_vec(&query)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("checkout-query")
+        .arg(&store_path)
+        .arg(&query_path)
+        .assert()
+        .failure()
+        .stderr(contains("unsupported return shape"));
+
+    fs::remove_file(store_path)?;
+    fs::remove_file(query_path)?;
     Ok(())
 }
 

@@ -25,7 +25,7 @@
 - Modify: `crates/continuitydb-cli/Cargo.toml`
 - Modify: `crates/continuitydb-cli/tests/cli.rs`
 
-- [ ] **Step 1: Add query crate test imports**
+- [x] **Step 1: Add query crate test imports**
 
 In `crates/continuitydb-cli/Cargo.toml`, add this under `[dev-dependencies]`:
 
@@ -42,7 +42,7 @@ use continuitydb_query::{
 };
 ```
 
-- [ ] **Step 2: Add successful checkout-query test**
+- [x] **Step 2: Add successful checkout-query test**
 
 Add this test near the other CLI command tests:
 
@@ -92,7 +92,7 @@ fn cli_checkout_query_executes_serialized_typed_query() -> Result<(), Box<dyn st
 }
 ```
 
-- [ ] **Step 3: Add unsupported semantics failure test**
+- [x] **Step 3: Add unsupported semantics failure test**
 
 Add this test after the successful checkout-query test:
 
@@ -124,7 +124,7 @@ fn cli_checkout_query_rejects_unsupported_query_semantics(
 }
 ```
 
-- [ ] **Step 4: Verify RED**
+- [x] **Step 4: Verify RED**
 
 Run:
 
@@ -140,7 +140,7 @@ Expected: FAIL because `checkout-query` is not a known command.
 - Modify: `crates/continuitydb-cli/Cargo.toml`
 - Modify: `crates/continuitydb-cli/src/main.rs`
 
-- [ ] **Step 1: Add production dependency**
+- [x] **Step 1: Add production dependency**
 
 In `crates/continuitydb-cli/Cargo.toml`, add this under `[dependencies]`:
 
@@ -150,7 +150,7 @@ continuitydb-query = { path = "../continuitydb-query" }
 
 If `continuitydb-query` was added under `[dev-dependencies]` in Task 1, remove the dev-only entry because the CLI now uses the crate in production code.
 
-- [ ] **Step 2: Add query import**
+- [x] **Step 2: Add query import**
 
 In `crates/continuitydb-cli/src/main.rs`, add this import near the existing crate imports:
 
@@ -158,7 +158,7 @@ In `crates/continuitydb-cli/src/main.rs`, add this import near the existing crat
 use continuitydb_query::ContinuityQuery;
 ```
 
-- [ ] **Step 3: Add command variant**
+- [x] **Step 3: Add command variant**
 
 Add this variant to the `Command` enum after `DemoCheckout`:
 
@@ -172,7 +172,7 @@ Add this variant to the `Command` enum after `DemoCheckout`:
     },
 ```
 
-- [ ] **Step 4: Add run branch**
+- [x] **Step 4: Add run branch**
 
 Add this `match` branch after `DemoCheckout`:
 
@@ -186,7 +186,7 @@ Add this `match` branch after `DemoCheckout`:
         }
 ```
 
-- [ ] **Step 5: Add helper function**
+- [x] **Step 5: Add helper function**
 
 Add this helper near the file database helpers:
 
@@ -202,7 +202,7 @@ fn checkout_query_file(
 }
 ```
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run:
 
@@ -212,7 +212,7 @@ cargo test -p continuitydb-cli cli_checkout_query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit implementation**
+- [x] **Step 7: Commit implementation**
 
 ```bash
 git add crates/continuitydb-cli/Cargo.toml crates/continuitydb-cli/src/main.rs crates/continuitydb-cli/tests/cli.rs docs/superpowers/plans/2026-05-20-cli-query-files.md
