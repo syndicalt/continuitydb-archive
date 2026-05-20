@@ -1034,6 +1034,15 @@ mod tests {
                     },
                     "rationale": "The cited evidence directly contradicts the target claim.",
                     "citations": ["continuitydb://evaluation/conflict-evidence"]
+                },
+                {
+                    "action": {
+                        "type": "request_verification",
+                        "cell_id": null,
+                        "request": "Verify deployment status before treating the release as shipped."
+                    },
+                    "rationale": "The evidence does not support deployment, so the shipped claim remains unsupported.",
+                    "citations": ["continuitydb://evaluation/unsupported-release-claim"]
                 }
             ]
         })
@@ -1043,9 +1052,14 @@ mod tests {
         let report = default_steward_evaluation_suite().evaluate(&steward);
 
         assert!(report.passed());
-        assert_eq!(report.case_reports().len(), 2);
+        assert_eq!(report.case_reports().len(), 3);
         assert!(report.case_reports()[1].passed());
         assert_eq!(report.case_reports()[1].name(), "conflict classification");
+        assert!(report.case_reports()[2].passed());
+        assert_eq!(
+            report.case_reports()[2].name(),
+            "unsupported claim boundary"
+        );
         Ok(())
     }
 
@@ -1054,7 +1068,7 @@ mod tests {
     fn default_steward_evaluation_suite_exposes_case_contracts() {
         let suite = default_steward_evaluation_suite();
 
-        assert_eq!(suite.len(), 2);
+        assert_eq!(suite.len(), 3);
         assert!(!suite.is_empty());
         let cases = suite.cases();
 
@@ -1100,6 +1114,33 @@ mod tests {
                 kind: RevisionLinkKind::ConflictsWith,
                 ..
             }
+        ));
+
+        assert_eq!(cases[2].name(), "unsupported claim boundary");
+        assert_eq!(
+            cases[2].input().task(),
+            "Check whether release evidence supports a shipped deployment claim."
+        );
+        assert_eq!(
+            cases[2].input().evidence()[0].locator(),
+            "continuitydb://evaluation/unsupported-release-claim"
+        );
+        assert_eq!(
+            cases[2].required_citations(),
+            ["continuitydb://evaluation/unsupported-release-claim".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[2].required_rationale_terms(),
+            ["unsupported".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[2].forbidden_rationale_terms(),
+            ["deployed to all customers".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[2].expected_actions()[0],
+            StewardAction::RequestVerification { cell_id: None, request }
+                if request == "Verify deployment status before treating the release as shipped."
         ));
     }
 

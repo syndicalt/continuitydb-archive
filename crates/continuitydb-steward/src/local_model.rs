@@ -989,6 +989,22 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         })
         .require_citation("continuitydb://evaluation/conflict-evidence")
         .forbid_rationale_term("verified in production"),
+        StewardEvaluationCase::new(
+            "unsupported claim boundary",
+            created_at,
+            "Check whether release evidence supports a shipped deployment claim.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/unsupported-release-claim",
+            "The release notes say the package was built locally; no production deployment evidence is available.",
+        )
+        .expect_action(StewardAction::RequestVerification {
+            cell_id: None,
+            request: "Verify deployment status before treating the release as shipped.".to_string(),
+        })
+        .require_citation("continuitydb://evaluation/unsupported-release-claim")
+        .require_rationale_term("unsupported")
+        .forbid_rationale_term("deployed to all customers"),
     ])
 }
 
