@@ -1,7 +1,9 @@
 //! Storage kernel interface for ContinuityDB backends.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{ActivationState, Confidence, Scope, StateCell};
+use continuitydb_core::{
+    ActivationState, CellDependencyKind, Confidence, Scope, StateCell, StateCellId,
+};
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
@@ -40,6 +42,10 @@ pub struct CellLookup {
     pub evidence_source: Option<String>,
     /// Optional minimum evidence confidence filter.
     pub minimum_confidence: Option<Confidence>,
+    /// Optional dependency target filter.
+    pub dependency_target: Option<StateCellId>,
+    /// Optional dependency kind filter, applied with dependency target when present.
+    pub dependency_kind: Option<CellDependencyKind>,
 }
 
 /// Minimal append and lookup contract required by the first ContinuityDB milestone.
@@ -171,6 +177,16 @@ impl StorageKernel for FileKernel {
                         })
                     })
             })
+            .filter(|cell| {
+                lookup.dependency_target.map_or(true, |target| {
+                    cell.dependencies.iter().any(|dependency| {
+                        dependency.target == target
+                            && lookup
+                                .dependency_kind
+                                .map_or(true, |kind| dependency.kind == kind)
+                    })
+                })
+            })
             .collect();
 
         Ok(cells)
@@ -182,8 +198,9 @@ mod tests {
     use super::{CellLookup, FileKernel, KernelError, StorageKernel};
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
-        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+        ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
+        Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
+        TrustSignal, ValidTimeRange,
     };
     use std::{fs, path::PathBuf};
 
@@ -390,6 +407,49 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![strong]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_dependency_target_and_kind() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-dependency");
+        let target = StateCellId::new();
+        let other_target = StateCellId::new();
+        let mut dependent = sample_cell("project:continuitydb:dependent", 0.9, 12)?;
+        dependent.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut unrelated = sample_cell("project:continuitydb:unrelated", 0.9, 12)?;
+        unrelated.dependencies.push(CellDependency::new(
+            other_target,
+            CellDependencyKind::DependsOn,
+            "depends on different target",
+        ));
+        let mut support = sample_cell("project:continuitydb:support", 0.9, 12)?;
+        support.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::Supports,
+            "supports target",
+        ));
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell(dependent.clone())?;
+            kernel.append_cell(unrelated)?;
+            kernel.append_cell(support)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            dependency_target: Some(target),
+            dependency_kind: Some(CellDependencyKind::DependsOn),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![dependent]);
         fs::remove_file(path)?;
         Ok(())
     }

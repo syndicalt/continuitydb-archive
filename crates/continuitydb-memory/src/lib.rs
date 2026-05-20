@@ -73,6 +73,16 @@ impl StorageKernel for MemoryKernel {
                         })
                     })
             })
+            .filter(|cell| {
+                lookup.dependency_target.map_or(true, |target| {
+                    cell.dependencies.iter().any(|dependency| {
+                        dependency.target == target
+                            && lookup
+                                .dependency_kind
+                                .map_or(true, |kind| dependency.kind == kind)
+                    })
+                })
+            })
             .cloned()
             .collect();
 
@@ -84,8 +94,9 @@ impl StorageKernel for MemoryKernel {
 mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
-        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+        ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
+        Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
+        TrustSignal, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, StorageKernel};
 
@@ -213,6 +224,44 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![strong]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_dependency_target_and_kind(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let target = StateCellId::new();
+        let other_target = StateCellId::new();
+        let mut dependent = sample_cell("project:continuitydb:dependent", 0.9, 12)?;
+        dependent.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut unrelated = sample_cell("project:continuitydb:unrelated", 0.9, 12)?;
+        unrelated.dependencies.push(CellDependency::new(
+            other_target,
+            CellDependencyKind::DependsOn,
+            "depends on different target",
+        ));
+        let mut support = sample_cell("project:continuitydb:support", 0.9, 12)?;
+        support.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::Supports,
+            "supports target",
+        ));
+        kernel.append_cell(dependent.clone())?;
+        kernel.append_cell(unrelated)?;
+        kernel.append_cell(support)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            dependency_target: Some(target),
+            dependency_kind: Some(CellDependencyKind::DependsOn),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![dependent]);
         Ok(())
     }
 }

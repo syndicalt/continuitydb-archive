@@ -76,6 +76,7 @@ Storage kernel
 ## Dependency and Causality Milestones
 
 1. Add first-class StateCell dependency references. Implemented in `continuitydb-core` as typed links to target `StateCellId` values with dependency kind and rationale, defaulting to an empty list for new and previously serialized cells.
+2. Add dependency-aware storage lookup. Implemented target and kind filters in `CellLookup` across memory and file kernels.
 
 ## CLI Milestones
 
