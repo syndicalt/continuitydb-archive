@@ -1,14 +1,15 @@
 //! In-memory StorageKernel implementation for correctness tests.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{CommitId, StateCell, SystemTimeRange};
+use continuitydb_core::{CommitId, CommitManifest, StateCell, SystemTimeRange};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Append-only in-memory storage kernel.
 #[derive(Default)]
 pub struct MemoryKernel {
     cells: Vec<StateCell>,
+    manifests: HashMap<CommitId, CommitManifest>,
 }
 
 impl StorageKernel for MemoryKernel {
@@ -44,7 +45,20 @@ impl StorageKernel for MemoryKernel {
             stamped.push(cell);
         }
 
+        if stamped.is_empty() {
+            return Ok(());
+        }
+
+        if self.manifests.contains_key(&commit_id) {
+            return Err(KernelError::DuplicateCommit);
+        }
+
+        let cell_ids = stamped.iter().map(|cell| cell.id).collect::<Vec<_>>();
         self.cells.extend(stamped);
+        self.manifests.insert(
+            commit_id,
+            CommitManifest::new(commit_id, committed_at, cell_ids),
+        );
         Ok(())
     }
 
@@ -127,6 +141,13 @@ impl StorageKernel for MemoryKernel {
             .collect();
 
         Ok(cells)
+    }
+
+    fn lookup_commit_manifest(
+        &self,
+        commit_id: CommitId,
+    ) -> Result<Option<CommitManifest>, KernelError> {
+        Ok(self.manifests.get(&commit_id).cloned())
     }
 }
 
@@ -274,6 +295,54 @@ mod tests {
         assert!(results
             .iter()
             .all(|cell| cell.system_time.from() == committed_at));
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_records_commit_manifest_for_batch() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:manifest-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:manifest-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+
+        kernel.append_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+
+        let manifest = kernel
+            .lookup_commit_manifest(commit_id)?
+            .ok_or_else(|| std::io::Error::other("missing manifest"))?;
+        assert_eq!(manifest.commit_id, commit_id);
+        assert_eq!(manifest.committed_at, committed_at);
+        assert_eq!(manifest.cell_ids, expected_ids);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_rejects_duplicate_commit_id_without_partial_visibility(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:manifest-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:manifest-second", 0.83, 15)?;
+
+        kernel.append_cells_at_with_commit_id(vec![first.clone()], committed_at, commit_id)?;
+        let result = kernel.append_cells_at_with_commit_id(vec![second], committed_at, commit_id);
+
+        assert!(matches!(result, Err(KernelError::DuplicateCommit)));
+        let stored = kernel.lookup_cells(CellLookup::default())?;
+        assert_eq!(
+            stored.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            vec![first.id]
+        );
+        assert_eq!(
+            kernel
+                .lookup_commit_manifest(commit_id)?
+                .ok_or_else(|| std::io::Error::other("missing manifest"))?
+                .cell_ids,
+            vec![first.id]
+        );
         Ok(())
     }
 

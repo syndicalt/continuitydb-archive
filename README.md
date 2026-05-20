@@ -32,6 +32,7 @@ The first milestone builds:
 - Deterministic frontier subscription runner.
 - Atomic kernel-level StateCell write batches.
 - First-class commit identifiers for transaction-scoped lookup.
+- First-class commit manifests for transaction-boundary inspection.
 - Native typed operation API for ingest, checkout, and audit.
 - Native typed utility feedback revision API.
 - Native read-only conflict analysis API.

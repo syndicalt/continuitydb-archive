@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
-use continuitydb_core::{CommitId, StateCell, StateCellId, UtilityFeedback};
+use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
@@ -133,6 +133,16 @@ impl<K: StorageKernel> ContinuityDb<K> {
     /// Materializes a deterministic continuity slice.
     pub fn checkout(&self, request: CheckoutRequest) -> Result<CheckoutSlice, ContinuityError> {
         checkout(&self.kernel, request).map_err(Into::into)
+    }
+
+    /// Returns the manifest for a database commit boundary when it exists.
+    pub fn commit_manifest(
+        &self,
+        commit_id: CommitId,
+    ) -> Result<Option<CommitManifest>, ContinuityError> {
+        self.kernel
+            .lookup_commit_manifest(commit_id)
+            .map_err(Into::into)
     }
 
     /// Records utility feedback as an append-only successor StateCell.
@@ -385,6 +395,37 @@ mod tests {
             expected_ids
         );
         assert!(stored.iter().all(|cell| cell.commit_id == commit_id));
+        Ok(())
+    }
+
+    #[test]
+    fn api_returns_commit_manifest_for_committed_batch() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:manifest-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:manifest-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+
+        db.ingest_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+
+        let manifest = db
+            .commit_manifest(commit_id)?
+            .ok_or_else(|| std::io::Error::other("missing manifest"))?;
+        assert_eq!(manifest.commit_id, commit_id);
+        assert_eq!(manifest.committed_at, committed_at);
+        assert_eq!(manifest.cell_ids, expected_ids);
+        Ok(())
+    }
+
+    #[test]
+    fn api_returns_none_for_unknown_commit_manifest() -> Result<(), Box<dyn std::error::Error>> {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        assert!(db.commit_manifest(CommitId::new())?.is_none());
         Ok(())
     }
 

@@ -64,6 +64,7 @@ Storage kernel
 8. Add first-class system transaction-time stamping and lookup. Implemented `StateCell.system_time`, deterministic `StorageKernel::append_cell_at`, default append-time stamping, and `CellLookup.system_at` filtering across memory and file kernels.
 9. Add atomic StateCell write batches. Implemented `StorageKernel::append_cells` and `append_cells_at` across memory and file kernels so related cells can commit with one shared system transaction time and duplicate batches reject without partial visibility.
 10. Add first-class commit identifiers. Implemented `CommitId`, `StateCell.commit_id`, explicit commit-stamped append APIs, and `CellLookup.commit_id` filtering across memory and file kernels so transaction-scoped continuity slices have stable audit IDs.
+11. Add first-class commit manifests. Implemented `CommitManifest` and kernel/API manifest lookup so a commit boundary can expose its commit time and ordered StateCell IDs without reconstructing from checkout results.
 
 ## Checkout Milestones
 

@@ -353,6 +353,13 @@ mod tests {
             *self.lookup.borrow_mut() = Some(lookup);
             Ok(Vec::new())
         }
+
+        fn lookup_commit_manifest(
+            &self,
+            _commit_id: CommitId,
+        ) -> Result<Option<continuitydb_core::CommitManifest>, KernelError> {
+            Ok(None)
+        }
     }
 
     fn test_commit_time() -> Result<DateTime<Utc>, Box<dyn std::error::Error>> {

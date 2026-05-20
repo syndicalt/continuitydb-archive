@@ -7,7 +7,7 @@ mod time;
 
 pub use cell::{
     ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-    CommitId, Scope, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
+    CommitId, CommitManifest, Scope, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
 };
 pub use error::CoreError;
 pub use evidence::{Citation, Confidence, Evidence, SourceId, TrustSignal};
@@ -72,6 +72,25 @@ mod tests {
             Confidence::new(1.1),
             Err(CoreError::ConfidenceOutOfRange { value }) if value == 1.1
         ));
+    }
+
+    #[test]
+    fn commit_manifest_records_commit_boundary_and_ordered_cells(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let first = StateCellId::new();
+        let second = StateCellId::new();
+
+        let manifest = CommitManifest::new(commit_id, committed_at, vec![first, second]);
+
+        assert_eq!(manifest.commit_id, commit_id);
+        assert_eq!(manifest.committed_at, committed_at);
+        assert_eq!(manifest.cell_ids, vec![first, second]);
+        Ok(())
     }
 
     #[test]

@@ -27,7 +27,7 @@
 - Modify: `crates/continuitydb-core/src/cell.rs`
 - Modify: `crates/continuitydb-core/src/lib.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add this test in `crates/continuitydb-core/src/cell.rs` tests:
 
@@ -52,13 +52,13 @@ fn commit_manifest_records_commit_boundary_and_ordered_cells(
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p continuitydb-core commit_manifest_records_commit_boundary_and_ordered_cells`
 
 Expected: FAIL because `CommitManifest` is not defined.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Add near `CommitId` in `crates/continuitydb-core/src/cell.rs`:
 
@@ -92,7 +92,7 @@ impl CommitManifest {
 
 Export it from `crates/continuitydb-core/src/lib.rs` in the existing `pub use cell::{ ... }` list.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p continuitydb-core commit_manifest_records_commit_boundary_and_ordered_cells`
 
@@ -104,7 +104,7 @@ Expected: PASS.
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 - Modify: `crates/continuitydb-memory/src/lib.rs`
 
-- [ ] **Step 1: Write failing memory-kernel tests**
+- [x] **Step 1: Write failing memory-kernel tests**
 
 Add tests in `crates/continuitydb-memory/src/lib.rs`:
 
@@ -155,13 +155,13 @@ fn memory_kernel_rejects_duplicate_commit_id_without_partial_visibility(
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p continuitydb-memory commit_manifest`
 
 Expected: FAIL because `lookup_commit_manifest` and `DuplicateCommit` do not exist.
 
-- [ ] **Step 3: Extend kernel trait and memory implementation**
+- [x] **Step 3: Extend kernel trait and memory implementation**
 
 In `crates/continuitydb-kernel/src/lib.rs`, import `CommitManifest`, add `DuplicateCommit`, and add the trait method:
 
@@ -216,7 +216,7 @@ fn lookup_commit_manifest(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p continuitydb-memory commit_manifest`
 
@@ -227,7 +227,7 @@ Expected: PASS.
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Write failing file-kernel tests**
+- [x] **Step 1: Write failing file-kernel tests**
 
 Add tests in `crates/continuitydb-kernel/src/lib.rs`:
 
@@ -288,13 +288,13 @@ fn file_kernel_rejects_duplicate_commit_id_without_writing_records(
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p continuitydb-kernel commit_manifest`
 
 Expected: FAIL because file kernel does not store manifests.
 
-- [ ] **Step 3: Implement file-kernel manifest index**
+- [x] **Step 3: Implement file-kernel manifest index**
 
 Add `manifests: HashMap<CommitId, CommitManifest>` to `FileKernelIndex`. In `insert`, create or extend the manifest for the cell's `commit_id` using `cell.system_time.from()` and append order. Before writing a new non-empty batch, reject `commit_id` if a manifest already exists. After writing, insert stamped cells as today.
 
@@ -308,7 +308,7 @@ fn manifest_by_id(&self, commit_id: CommitId) -> Option<CommitManifest> {
 
 Implement `StorageKernel::lookup_commit_manifest` for `FileKernel` by returning `self.index.manifest_by_id(commit_id)`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p continuitydb-kernel commit_manifest`
 
@@ -319,7 +319,7 @@ Expected: PASS.
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Add tests in `crates/continuitydb-api/src/lib.rs`:
 
@@ -356,13 +356,13 @@ fn api_returns_none_for_unknown_commit_manifest() -> Result<(), Box<dyn std::err
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p continuitydb-api commit_manifest`
 
 Expected: FAIL because `ContinuityDb::commit_manifest` does not exist.
 
-- [ ] **Step 3: Implement API method**
+- [x] **Step 3: Implement API method**
 
 Import `CommitManifest` from `continuitydb_core` and add:
 
@@ -378,7 +378,7 @@ pub fn commit_manifest(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p continuitydb-api commit_manifest`
 
@@ -391,7 +391,7 @@ Expected: PASS.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-commit-manifests.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 In `README.md`, add:
 
@@ -405,7 +405,7 @@ In `docs/roadmap.md`, add Storage Kernel milestone 11:
 11. Add first-class commit manifests. Implemented `CommitManifest` and kernel/API manifest lookup so a commit boundary can expose its commit time and ordered StateCell IDs without reconstructing from checkout results.
 ```
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run:
 
@@ -418,7 +418,7 @@ cargo test -p continuitydb-api commit_manifest
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -432,7 +432,7 @@ git diff --check
 
 Expected: all PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 

@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
-    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCell, StateCellId,
-    SystemTimeRange,
+    ActivationState, CellDependencyKind, CommitId, CommitManifest, Confidence, Scope, StateCell,
+    StateCellId, SystemTimeRange,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -19,6 +19,9 @@ pub enum KernelError {
     /// A duplicate immutable StateCell version was appended.
     #[error("state cell already exists")]
     DuplicateCell,
+    /// A commit identifier already has a visible manifest.
+    #[error("commit already exists")]
+    DuplicateCommit,
     /// Storage kernel I/O failed.
     #[error("storage kernel I/O failed")]
     StoreIo,
@@ -114,6 +117,12 @@ pub trait StorageKernel {
 
     /// Looks up StateCells matching deterministic constraints.
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError>;
+
+    /// Looks up a commit manifest by commit ID.
+    fn lookup_commit_manifest(
+        &self,
+        commit_id: CommitId,
+    ) -> Result<Option<CommitManifest>, KernelError>;
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -122,6 +131,7 @@ struct FileKernelIndex {
     ids: HashMap<StateCellId, usize>,
     anchors: HashMap<String, Vec<usize>>,
     commits: HashMap<CommitId, Vec<usize>>,
+    manifests: HashMap<CommitId, CommitManifest>,
 }
 
 impl FileKernelIndex {
@@ -150,6 +160,12 @@ impl FileKernelIndex {
             .entry(cell.commit_id)
             .or_default()
             .push(position);
+        self.manifests
+            .entry(cell.commit_id)
+            .and_modify(|manifest| manifest.cell_ids.push(cell.id))
+            .or_insert_with(|| {
+                CommitManifest::new(cell.commit_id, cell.system_time.from(), vec![cell.id])
+            });
         self.cells.push(cell);
         Ok(())
     }
@@ -160,6 +176,14 @@ impl FileKernelIndex {
 
     fn position_by_id(&self, id: StateCellId) -> Option<usize> {
         self.ids.get(&id).copied()
+    }
+
+    fn contains_commit(&self, commit_id: CommitId) -> bool {
+        self.manifests.contains_key(&commit_id)
+    }
+
+    fn manifest_by_id(&self, commit_id: CommitId) -> Option<CommitManifest> {
+        self.manifests.get(&commit_id).cloned()
     }
 }
 
@@ -259,6 +283,10 @@ impl StorageKernel for FileKernel {
 
         if stamped.is_empty() {
             return Ok(());
+        }
+
+        if self.index.contains_commit(commit_id) {
+            return Err(KernelError::DuplicateCommit);
         }
 
         let mut encoded = String::new();
@@ -391,6 +419,13 @@ impl StorageKernel for FileKernel {
             .collect();
 
         Ok(cells)
+    }
+
+    fn lookup_commit_manifest(
+        &self,
+        commit_id: CommitId,
+    ) -> Result<Option<CommitManifest>, KernelError> {
+        Ok(self.index.manifest_by_id(commit_id))
     }
 }
 
@@ -559,6 +594,65 @@ mod tests {
         assert!(results
             .iter()
             .all(|cell| cell.system_time.from() == committed_at));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_reconstructs_commit_manifest_after_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-manifest");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:manifest-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:manifest-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let manifest = reopened
+            .lookup_commit_manifest(commit_id)?
+            .ok_or_else(|| std::io::Error::other("missing manifest"))?;
+
+        assert_eq!(manifest.commit_id, commit_id);
+        assert_eq!(manifest.committed_at, committed_at);
+        assert_eq!(manifest.cell_ids, expected_ids);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_duplicate_commit_id_without_writing_records(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-duplicate-manifest");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:manifest-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:manifest-second", 0.83, 15)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at_with_commit_id(vec![first.clone()], committed_at, commit_id)?;
+            let result =
+                kernel.append_cells_at_with_commit_id(vec![second], committed_at, commit_id);
+            assert!(matches!(result, Err(KernelError::DuplicateCommit)));
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let stored = reopened.lookup_cells(CellLookup::default())?;
+        assert_eq!(
+            stored.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            vec![first.id]
+        );
+        assert_eq!(
+            reopened
+                .lookup_commit_manifest(commit_id)?
+                .ok_or_else(|| std::io::Error::other("missing manifest"))?
+                .cell_ids,
+            vec![first.id]
+        );
         fs::remove_file(path)?;
         Ok(())
     }

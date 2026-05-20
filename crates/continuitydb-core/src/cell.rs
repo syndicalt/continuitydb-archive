@@ -49,6 +49,32 @@ impl Default for CommitId {
     }
 }
 
+/// Immutable record of a database commit boundary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CommitManifest {
+    /// Commit identifier shared by all cells written in this boundary.
+    pub commit_id: CommitId,
+    /// System transaction time assigned to the commit.
+    pub committed_at: chrono::DateTime<chrono::Utc>,
+    /// StateCell identifiers written by this commit in append order.
+    pub cell_ids: Vec<StateCellId>,
+}
+
+impl CommitManifest {
+    /// Creates a commit manifest.
+    pub fn new(
+        commit_id: CommitId,
+        committed_at: chrono::DateTime<chrono::Utc>,
+        cell_ids: Vec<StateCellId>,
+    ) -> Self {
+        Self {
+            commit_id,
+            committed_at,
+            cell_ids,
+        }
+    }
+}
+
 /// Semantic anchor used to address a StateCell by meaning.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SemanticAnchor(String);
