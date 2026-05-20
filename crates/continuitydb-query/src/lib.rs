@@ -667,6 +667,27 @@ WHERE valid_at = "2026-05-20T12:00:00Z"
     }
 
     #[test]
+    fn text_query_parses_dependency_constraints() -> Result<(), Box<dyn std::error::Error>> {
+        let dependency_target = StateCellId::new();
+        let query = parse_query_text(&format!(
+            r#"CHECKOUT "release" ANSWER "what should ship?"
+WHERE dependency_target = "{dependency_target}"
+  AND dependency_kind = derived_from"#
+        ))?;
+
+        let ContinuityQuery::Checkout(checkout) = query;
+        assert_eq!(
+            checkout.requirements().dependency_target,
+            Some(dependency_target)
+        );
+        assert_eq!(
+            checkout.requirements().dependency_kind,
+            Some(CellDependencyKind::DerivedFrom)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn text_query_keywords_are_case_insensitive() -> Result<(), Box<dyn std::error::Error>> {
         let query = parse_query_text(
             r#"checkout "release" answer "what should ship?" where scope = global"#,
@@ -708,6 +729,18 @@ WHERE valid_at = "2026-05-20T12:00:00Z"
         assert_eq!(
             parse_query_text(
                 r#"CHECKOUT "release" ANSWER "what should ship?" WHERE commit_id = "not-a-uuid""#
+            ),
+            Err(QueryTextError::InvalidValue)
+        );
+        assert_eq!(
+            parse_query_text(
+                r#"CHECKOUT "release" ANSWER "what should ship?" WHERE dependency_target = "not-a-uuid""#
+            ),
+            Err(QueryTextError::InvalidValue)
+        );
+        assert_eq!(
+            parse_query_text(
+                r#"CHECKOUT "release" ANSWER "what should ship?" WHERE dependency_kind = unknown_kind"#
             ),
             Err(QueryTextError::InvalidValue)
         );

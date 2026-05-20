@@ -95,7 +95,7 @@ cargo test -p continuitydb-core --all-features
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit core implementation**
+- [x] **Step 3: Commit core implementation**
 
 ```bash
 git add crates/continuitydb-core/src/cell.rs crates/continuitydb-core/src/lib.rs docs/superpowers/plans/2026-05-20-text-query-dependency-constraints.md
@@ -107,7 +107,7 @@ git commit -m "feat: add state cell id text parsing"
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add dependency constraint parser test**
+- [x] **Step 1: Add dependency constraint parser test**
 
 Add this test after `text_query_parses_temporal_and_commit_constraints`:
 
@@ -134,7 +134,7 @@ WHERE dependency_target = "{dependency_target}"
 }
 ```
 
-- [ ] **Step 2: Add invalid dependency value tests**
+- [x] **Step 2: Add invalid dependency value tests**
 
 Extend `text_query_rejects_invalid_values` with:
 
@@ -153,7 +153,7 @@ assert_eq!(
 );
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -168,7 +168,7 @@ Expected: FAIL because dependency constraints are not supported in text queries.
 **Files:**
 - Modify: `crates/continuitydb-query/src/text.rs`
 
-- [ ] **Step 1: Add imports**
+- [x] **Step 1: Add imports**
 
 Change the core import at the top of `text.rs` to:
 
@@ -176,7 +176,7 @@ Change the core import at the top of `text.rs` to:
 use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCellId};
 ```
 
-- [ ] **Step 2: Add constraint branches**
+- [x] **Step 2: Add constraint branches**
 
 Add these branches after `commit_id`:
 
@@ -191,7 +191,7 @@ Add these branches after `commit_id`:
 }
 ```
 
-- [ ] **Step 3: Add parse helpers**
+- [x] **Step 3: Add parse helpers**
 
 Add these methods after `parse_commit_id`:
 
@@ -214,7 +214,7 @@ fn parse_dependency_kind(&mut self) -> Result<CellDependencyKind, QueryTextError
 }
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 

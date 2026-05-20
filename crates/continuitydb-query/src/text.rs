@@ -1,7 +1,7 @@
 //! Text parser for ContinuityDB queries.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{CommitId, Confidence, Scope};
+use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCellId};
 use thiserror::Error;
 
 use crate::{CheckoutQuery, ContinuityQuery, QueryRequirements, QueryTask};
@@ -215,6 +215,14 @@ impl Parser {
                 self.expect_token(Token::Eq)?;
                 requirements.commit_id = Some(self.parse_commit_id()?);
             }
+            "dependency_target" => {
+                self.expect_token(Token::Eq)?;
+                requirements.dependency_target = Some(self.parse_state_cell_id()?);
+            }
+            "dependency_kind" => {
+                self.expect_token(Token::Eq)?;
+                requirements.dependency_kind = Some(self.parse_dependency_kind()?);
+            }
             "min_confidence" => {
                 self.expect_token(Token::Gte)?;
                 let value = self
@@ -254,6 +262,23 @@ impl Parser {
         self.expect_string()?
             .parse::<CommitId>()
             .map_err(|_error| QueryTextError::InvalidValue)
+    }
+
+    fn parse_state_cell_id(&mut self) -> Result<StateCellId, QueryTextError> {
+        self.expect_string()?
+            .parse::<StateCellId>()
+            .map_err(|_error| QueryTextError::InvalidValue)
+    }
+
+    fn parse_dependency_kind(&mut self) -> Result<CellDependencyKind, QueryTextError> {
+        let ident = self.expect_ident()?;
+        match ident.to_ascii_lowercase().as_str() {
+            "depends_on" => Ok(CellDependencyKind::DependsOn),
+            "caused_by" => Ok(CellDependencyKind::CausedBy),
+            "supports" => Ok(CellDependencyKind::Supports),
+            "derived_from" => Ok(CellDependencyKind::DerivedFrom),
+            _ => Err(QueryTextError::InvalidValue),
+        }
     }
 
     fn parse_scope(&mut self) -> Result<Scope, QueryTextError> {
