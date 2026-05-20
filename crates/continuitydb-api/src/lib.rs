@@ -41,6 +41,12 @@ pub enum ContinuityError {
     /// Query envelope decoding or validation failure.
     #[error(transparent)]
     QueryEnvelope(#[from] QueryEnvelopeError),
+    /// Raw typed query JSON could not be decoded.
+    #[error("query JSON is invalid")]
+    QueryJson,
+    /// Query file could not be read.
+    #[error("query file I/O failed")]
+    QueryFileIo,
     /// Requested StateCell was not found in the backing kernel.
     #[error("state cell not found")]
     CellNotFound {
@@ -323,6 +329,15 @@ impl<K: StorageKernel> ContinuityDb<K> {
         self.checkout_continuity_query(decode_query_json(bytes)?)
     }
 
+    /// Materializes a deterministic continuity slice from a saved typed query file.
+    pub fn checkout_query_file<P: AsRef<Path>>(
+        &self,
+        query_path: P,
+    ) -> Result<CheckoutSlice, ContinuityError> {
+        let encoded = fs::read(query_path).map_err(|_error| ContinuityError::QueryFileIo)?;
+        self.checkout_continuity_query(decode_query_file(&encoded)?)
+    }
+
     /// Returns the manifest for a database commit boundary when it exists.
     pub fn commit_manifest(
         &self,
@@ -567,6 +582,21 @@ impl<K: StorageKernel> ContinuityDb<K> {
         }
         Ok(())
     }
+}
+
+fn decode_query_file(bytes: &[u8]) -> Result<ContinuityQuery, ContinuityError> {
+    if is_query_envelope_shape(bytes)? {
+        return decode_query_json(bytes).map_err(Into::into);
+    }
+    serde_json::from_slice::<ContinuityQuery>(bytes).map_err(|_error| ContinuityError::QueryJson)
+}
+
+fn is_query_envelope_shape(bytes: &[u8]) -> Result<bool, ContinuityError> {
+    let value = serde_json::from_slice::<serde_json::Value>(bytes)
+        .map_err(|_error| ContinuityError::QueryJson)?;
+    Ok(value.get("format").is_some()
+        && value.get("version").is_some()
+        && value.get("query").is_some())
 }
 
 impl ContinuityDb<FileKernel> {
@@ -1134,6 +1164,107 @@ mod tests {
                 QueryEnvelopeError::InvalidEnvelope
             ))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_file_executes_query_envelope() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-file-envelope",
+            0.91,
+            12,
+        )?)?;
+        let query = ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+            "stored-facts",
+            "what should the agent know?",
+        )));
+        let path = temp_file_kernel_path("query-file-envelope");
+        fs::write(&path, encode_query_json(query)?)?;
+
+        let slice = db.checkout_query_file(&path)?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(
+            slice.cells[0].payload,
+            CellPayload::Text("project:continuitydb:query-file-envelope".to_string())
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_file_executes_raw_query_json() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell("project:continuitydb:query-file-raw", 0.91, 12)?)?;
+        let query = ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+            "stored-facts",
+            "what should the agent know?",
+        )));
+        let path = temp_file_kernel_path("query-file-raw");
+        fs::write(&path, serde_json::to_vec(&query)?)?;
+
+        let slice = db.checkout_query_file(&path)?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(
+            slice.cells[0].payload,
+            CellPayload::Text("project:continuitydb:query-file-raw".to_string())
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_file_reports_missing_file() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let path = temp_file_kernel_path("missing-query-file");
+
+        let result = db.checkout_query_file(&path);
+
+        assert_eq!(result.err(), Some(ContinuityError::QueryFileIo));
+    }
+
+    #[test]
+    fn api_checkout_query_file_reports_invalid_raw_json(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let path = temp_file_kernel_path("invalid-query-file-json");
+        fs::write(&path, b"{not valid json}\n")?;
+
+        let result = db.checkout_query_file(&path);
+
+        assert_eq!(result.err(), Some(ContinuityError::QueryJson));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_file_reports_invalid_envelope() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let envelope = QueryEnvelope {
+            format: QUERY_ENVELOPE_FORMAT.to_string(),
+            version: QUERY_ENVELOPE_FORMAT_VERSION + 1,
+            query: ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+                "stored-facts",
+                "what should the agent know?",
+            ))),
+        };
+        let path = temp_file_kernel_path("invalid-query-file-envelope");
+        fs::write(&path, serde_json::to_vec(&envelope)?)?;
+
+        let result = db.checkout_query_file(&path);
+
+        assert_eq!(
+            result.err(),
+            Some(ContinuityError::QueryEnvelope(
+                QueryEnvelopeError::InvalidEnvelope
+            ))
+        );
+        fs::remove_file(path)?;
         Ok(())
     }
 

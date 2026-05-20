@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add query-file success tests**
+- [x] **Step 1: Add query-file success tests**
 
 Add these tests after `api_checkout_query_json_reports_invalid_envelope`:
 
@@ -73,7 +73,7 @@ fn api_checkout_query_file_executes_raw_query_json() -> Result<(), Box<dyn std::
 }
 ```
 
-- [ ] **Step 2: Add query-file error tests**
+- [x] **Step 2: Add query-file error tests**
 
 Add these tests after the success tests:
 
@@ -128,7 +128,7 @@ fn api_checkout_query_file_reports_invalid_envelope() -> Result<(), Box<dyn std:
 }
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -143,7 +143,7 @@ Expected: FAIL because `checkout_query_file`, `ContinuityError::QueryFileIo`, an
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add native error variants**
+- [x] **Step 1: Add native error variants**
 
 Add these variants after `QueryEnvelope` in `ContinuityError`:
 
@@ -156,7 +156,7 @@ Add these variants after `QueryEnvelope` in `ContinuityError`:
     QueryFileIo,
 ```
 
-- [ ] **Step 2: Add file execution helper**
+- [x] **Step 2: Add file execution helper**
 
 Add this method after `checkout_query_json`:
 
@@ -171,7 +171,7 @@ Add this method after `checkout_query_json`:
     }
 ```
 
-- [ ] **Step 3: Add private query-file decode helpers**
+- [x] **Step 3: Add private query-file decode helpers**
 
 Add these private helpers after the `impl<K: StorageKernel> ContinuityDb<K>` block:
 
@@ -192,7 +192,7 @@ fn is_query_envelope_shape(bytes: &[u8]) -> Result<bool, ContinuityError> {
 }
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -203,7 +203,7 @@ cargo test -p continuitydb-api --all-features
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit native implementation**
+- [x] **Step 5: Commit native implementation**
 
 ```bash
 git add crates/continuitydb-api/src/lib.rs docs/superpowers/plans/2026-05-20-native-query-file-execution.md
