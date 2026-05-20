@@ -3348,6 +3348,12 @@ fn cli_inspect_kernel_reports_lookup_plan() -> Result<(), Box<dyn std::error::Er
         json["lookup_plan"]["indexed_constraint_count"].as_u64(),
         Some(0)
     );
+    assert_eq!(
+        json["lookup_plan"]["indexed_constraints"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
     assert_eq!(json["lookup_plan"]["candidate_count"].as_u64(), Some(2));
     assert_eq!(json["lookup_plan"]["full_scan"].as_bool(), Some(true));
 
@@ -3378,6 +3384,10 @@ WHERE scope = project("continuitydb")"#,
     assert_eq!(
         json["lookup_plan"]["indexed_constraint_count"].as_u64(),
         Some(2)
+    );
+    assert_eq!(
+        json["lookup_plan"]["indexed_constraints"],
+        serde_json::json!(["scope", "answerability_question"])
     );
     assert_eq!(json["lookup_plan"]["candidate_count"].as_u64(), Some(2));
     assert_eq!(json["lookup_plan"]["full_scan"].as_bool(), Some(false));

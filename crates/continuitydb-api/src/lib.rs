@@ -1763,6 +1763,10 @@ mod tests {
         let plan = db.file_lookup_plan(&lookup);
 
         assert_eq!(plan.indexed_constraint_count, 2);
+        assert_eq!(
+            plan.indexed_constraints,
+            vec!["scope", "answerability_question"]
+        );
         assert_eq!(plan.candidate_count, 1);
         assert!(!plan.full_scan);
 
@@ -1793,6 +1797,10 @@ WHERE scope = project("continuitydb")"#,
         )?;
 
         assert_eq!(plan.indexed_constraint_count, 2);
+        assert_eq!(
+            plan.indexed_constraints,
+            vec!["scope", "answerability_question"]
+        );
         assert_eq!(plan.candidate_count, 1);
         assert!(!plan.full_scan);
 

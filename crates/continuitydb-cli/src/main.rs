@@ -1788,6 +1788,7 @@ fn file_health_value(health: continuitydb_kernel::FileKernelHealth) -> serde_jso
 fn file_lookup_plan_json(plan: continuitydb_kernel::FileKernelLookupPlan) -> serde_json::Value {
     serde_json::json!({
         "indexed_constraint_count": plan.indexed_constraint_count,
+        "indexed_constraints": plan.indexed_constraints,
         "candidate_count": plan.candidate_count,
         "full_scan": plan.full_scan,
     })

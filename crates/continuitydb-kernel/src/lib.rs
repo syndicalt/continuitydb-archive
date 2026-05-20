@@ -415,6 +415,11 @@ struct FileKernelIndex {
         HashMap<(StateCellId, StateCellId, RevisionLinkKind), Vec<usize>>,
 }
 
+struct IndexedCandidateConstraint {
+    name: &'static str,
+    positions: Vec<usize>,
+}
+
 impl FileKernelIndex {
     fn rebuild(log: FileKernelLog) -> Result<Self, KernelError> {
         let mut index = Self::default();
@@ -531,78 +536,117 @@ impl FileKernelIndex {
             .collect()
     }
 
-    fn candidate_position_sets(&self, lookup: &CellLookup) -> Vec<Vec<usize>> {
+    fn indexed_candidate_constraints(
+        &self,
+        lookup: &CellLookup,
+    ) -> Vec<IndexedCandidateConstraint> {
         let mut candidates = Vec::new();
 
         if let Some(cell_id) = lookup.cell_id {
-            candidates.push(
-                self.position_by_id(cell_id)
+            candidates.push(IndexedCandidateConstraint {
+                name: "cell_id",
+                positions: self
+                    .position_by_id(cell_id)
                     .map(|position| vec![position])
                     .unwrap_or_default(),
-            );
+            });
         }
         if let Some(anchor) = lookup.semantic_anchor.as_ref() {
-            candidates.push(self.anchors.get(anchor).cloned().unwrap_or_default());
+            candidates.push(IndexedCandidateConstraint {
+                name: "semantic_anchor",
+                positions: self.anchors.get(anchor).cloned().unwrap_or_default(),
+            });
         }
         if let Some(commit_id) = lookup.commit_id {
-            candidates.push(self.commits.get(&commit_id).cloned().unwrap_or_default());
+            candidates.push(IndexedCandidateConstraint {
+                name: "commit_id",
+                positions: self.commits.get(&commit_id).cloned().unwrap_or_default(),
+            });
         }
         if let Some(scope) = lookup.scope.as_ref() {
-            candidates.push(self.scopes.get(scope).cloned().unwrap_or_default());
+            candidates.push(IndexedCandidateConstraint {
+                name: "scope",
+                positions: self.scopes.get(scope).cloned().unwrap_or_default(),
+            });
         }
         if let Some(question) = lookup.answerability_question.as_ref() {
-            candidates.push(
-                self.answerability_questions
+            candidates.push(IndexedCandidateConstraint {
+                name: "answerability_question",
+                positions: self
+                    .answerability_questions
                     .get(question)
                     .cloned()
                     .unwrap_or_default(),
-            );
+            });
         }
         if let Some(source) = lookup.evidence_source.as_ref() {
-            candidates.push(
-                self.evidence_sources
+            candidates.push(IndexedCandidateConstraint {
+                name: "evidence_source",
+                positions: self
+                    .evidence_sources
                     .get(source)
                     .cloned()
                     .unwrap_or_default(),
-            );
+            });
         }
         if let Some(activation) = lookup.activation {
-            candidates.push(
-                self.activations
+            candidates.push(IndexedCandidateConstraint {
+                name: "activation",
+                positions: self
+                    .activations
                     .get(&activation)
                     .cloned()
                     .unwrap_or_default(),
-            );
+            });
         }
         if let Some(target) = lookup.dependency_target {
-            let positions = if let Some(kind) = lookup.dependency_kind {
-                self.dependency_target_kinds
-                    .get(&(target, kind))
-                    .cloned()
-                    .unwrap_or_default()
+            let (name, positions) = if let Some(kind) = lookup.dependency_kind {
+                (
+                    "dependency_target_kind",
+                    self.dependency_target_kinds
+                        .get(&(target, kind))
+                        .cloned()
+                        .unwrap_or_default(),
+                )
             } else {
-                self.dependency_targets
-                    .get(&target)
-                    .cloned()
-                    .unwrap_or_default()
+                (
+                    "dependency_target",
+                    self.dependency_targets
+                        .get(&target)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
             };
-            candidates.push(positions);
+            candidates.push(IndexedCandidateConstraint { name, positions });
         }
         if let Some(minimum_confidence) = lookup.minimum_confidence {
-            candidates.push(self.positions_with_minimum_confidence(minimum_confidence));
+            candidates.push(IndexedCandidateConstraint {
+                name: "minimum_confidence",
+                positions: self.positions_with_minimum_confidence(minimum_confidence),
+            });
         }
         if let Some(system_at) = lookup.system_at {
-            candidates.push(self.positions_at_system_time(system_at));
+            candidates.push(IndexedCandidateConstraint {
+                name: "system_at",
+                positions: self.positions_at_system_time(system_at),
+            });
         }
         if let Some(valid_at) = lookup.valid_at {
-            candidates.push(self.positions_at_valid_time(valid_at));
+            candidates.push(IndexedCandidateConstraint {
+                name: "valid_at",
+                positions: self.positions_at_valid_time(valid_at),
+            });
         }
 
         candidates
     }
 
     fn candidate_positions(&self, lookup: &CellLookup) -> Vec<usize> {
-        let mut candidates = self.candidate_position_sets(lookup);
+        let mut candidates = self
+            .indexed_candidate_constraints(lookup)
+            .into_iter()
+            .map(|constraint| constraint.positions)
+            .collect::<Vec<_>>();
         let Some((smallest_index, _positions)) = candidates
             .iter()
             .enumerate()
@@ -624,10 +668,16 @@ impl FileKernelIndex {
     }
 
     fn lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
-        let indexed_constraint_count = self.candidate_position_sets(lookup).len();
+        let indexed_constraints = self
+            .indexed_candidate_constraints(lookup)
+            .into_iter()
+            .map(|constraint| constraint.name)
+            .collect::<Vec<_>>();
+        let indexed_constraint_count = indexed_constraints.len();
         let candidate_count = self.candidate_positions(lookup).len();
         FileKernelLookupPlan {
             indexed_constraint_count,
+            indexed_constraints,
             candidate_count,
             full_scan: indexed_constraint_count == 0,
         }
@@ -877,10 +927,12 @@ pub struct FileKernelStatus {
 }
 
 /// Deterministic summary of how the file kernel will seed a cell lookup.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileKernelLookupPlan {
     /// Number of indexed lookup constraints present in the request.
     pub indexed_constraint_count: usize,
+    /// Ordered names of indexed lookup constraints present in the request.
+    pub indexed_constraints: Vec<&'static str>,
     /// Number of StateCell candidates selected before exact predicate filtering.
     pub candidate_count: usize,
     /// Whether lookup must inspect all visible StateCells.
@@ -3896,6 +3948,7 @@ mod tests {
         let plan = kernel.lookup_plan(&CellLookup::default());
 
         assert_eq!(plan.indexed_constraint_count, 0);
+        assert!(plan.indexed_constraints.is_empty());
         assert_eq!(plan.candidate_count, 2);
         assert!(plan.full_scan);
         fs::remove_file(path)?;
@@ -3929,6 +3982,10 @@ mod tests {
         let plan = kernel.lookup_plan(&lookup);
 
         assert_eq!(plan.indexed_constraint_count, 2);
+        assert_eq!(
+            plan.indexed_constraints,
+            vec!["scope", "answerability_question"]
+        );
         assert_eq!(plan.candidate_count, 1);
         assert!(!plan.full_scan);
         fs::remove_file(path)?;
