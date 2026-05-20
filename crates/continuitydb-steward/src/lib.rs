@@ -12,7 +12,10 @@ pub use error::StewardError;
 pub use ledger::{ProposalAuditRecord, ProposalLedger};
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    LocalModelBackend, LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
+    small_model_candidates, LocalModelBackend, LocalModelRequest, LocalModelSteward,
+    LocalModelStewardInput, SmallModelCandidate, StewardEvaluationCase,
+    StewardEvaluationCaseReport, StewardEvaluationFailure, StewardEvaluationReport,
+    StewardEvaluationSuite,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -26,6 +29,11 @@ mod tests {
     #[cfg(feature = "local-model")]
     use std::cell::RefCell;
 
+    #[cfg(feature = "local-model")]
+    use super::{
+        small_model_candidates, StewardEvaluationCase, StewardEvaluationFailure,
+        StewardEvaluationSuite,
+    };
     #[cfg(feature = "local-model")]
     use super::{LocalModelBackend, LocalModelRequest, LocalModelSteward, LocalModelStewardInput};
     use super::{
@@ -598,5 +606,143 @@ mod tests {
 
         assert!(matches!(result, Err(StewardError::InvalidModelResponse)));
         Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_passes_fixed_quality_case() -> Result<(), Box<dyn std::error::Error>> {
+        let source = StateCellId::new();
+        let target = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "link_revision",
+                    "source": source,
+                    "kind": "conflicts_with",
+                    "target": target,
+                },
+                "rationale": "The evidence directly contradicts the target claim.",
+                "citations": ["test://conflict-evidence"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "conflict classification",
+            created_at(),
+            "classify relation",
+        )
+        .with_evidence(
+            "test://conflict-evidence",
+            "Source says shipped; target says blocked.",
+        )
+        .expect_action(StewardAction::LinkRevision {
+            source,
+            kind: RevisionLinkKind::ConflictsWith,
+            target,
+        })
+        .require_citation("test://conflict-evidence")
+        .forbid_rationale_term("verified in production")]);
+
+        let report = suite.evaluate(&steward);
+
+        assert!(report.passed());
+        assert_eq!(report.case_reports().len(), 1);
+        assert!(report.case_reports()[0].passed());
+        assert!(report.case_reports()[0].failures().is_empty());
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_reports_deterministic_failures() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "This was verified in production by an operator.",
+                "citations": ["test://other-evidence"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "unsupported claim",
+            created_at(),
+            "find uncertainty",
+        )
+        .with_evidence("test://frontier-evidence", "The cell has stale evidence.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier-evidence")
+        .forbid_rationale_term("verified in production")]);
+
+        let report = suite.evaluate(&steward);
+
+        assert!(!report.passed());
+        assert_eq!(
+            report.case_reports()[0].failures(),
+            &[
+                StewardEvaluationFailure::MissingCitation {
+                    locator: "test://frontier-evidence".to_string(),
+                },
+                StewardEvaluationFailure::UnsupportedRationaleTerm {
+                    term: "verified in production".to_string(),
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_reports_policy_rejection() -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "adjust_confidence",
+                    "cell_id": cell_id,
+                    "proposed_confidence": 1.4
+                },
+                "rationale": "The confidence should increase.",
+                "citations": ["test://confidence"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "invalid confidence",
+            created_at(),
+            "score confidence",
+        )
+        .with_evidence("test://confidence", "Evidence is weak.")
+        .require_citation("test://confidence")]);
+
+        let report = suite.evaluate(&steward);
+
+        assert_eq!(
+            report.case_reports()[0].failures(),
+            &[StewardEvaluationFailure::PolicyRejected {
+                reasons: vec!["policy:invalid-confidence".to_string()],
+            }]
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn small_model_candidates_include_default_feasibility_model() {
+        let candidates = small_model_candidates();
+
+        assert_eq!(candidates[0].model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
+        assert_eq!(candidates[0].role(), "default-feasibility");
+        assert!(candidates.iter().any(|candidate| {
+            candidate.model_id() == "HuggingFaceTB/SmolLM2-360M-Instruct"
+                && candidate.role() == "ultra-small-experimental"
+        }));
     }
 }

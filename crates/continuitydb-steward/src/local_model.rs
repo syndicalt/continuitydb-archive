@@ -5,7 +5,10 @@ use continuitydb_core::{SemanticAnchor, StateCellId};
 use continuitydb_revision::RevisionLinkKind;
 use serde::Deserialize;
 
-use crate::{ProposalId, StewardAction, StewardError, StewardIdentity, StewardProposal};
+use crate::{
+    ProposalId, ProposalOutcome, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
+    StewardProposal,
+};
 
 /// Backend that runs local model inference for the database Steward.
 pub trait LocalModelBackend {
@@ -125,6 +128,196 @@ impl LocalModelStewardInput {
         });
         self
     }
+}
+
+/// Fixed proposal-quality case for local Steward model evaluation.
+#[derive(Clone, Debug)]
+pub struct StewardEvaluationCase {
+    name: String,
+    input: LocalModelStewardInput,
+    expected_actions: Vec<StewardAction>,
+    required_citations: Vec<String>,
+    forbidden_rationale_terms: Vec<String>,
+}
+
+impl StewardEvaluationCase {
+    /// Creates an evaluation case.
+    pub fn new(
+        name: impl Into<String>,
+        created_at: DateTime<Utc>,
+        task: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            input: LocalModelStewardInput::new(created_at, task),
+            expected_actions: Vec::new(),
+            required_citations: Vec::new(),
+            forbidden_rationale_terms: Vec::new(),
+        }
+    }
+
+    /// Adds an evidence snippet to this case's local model input.
+    pub fn with_evidence(mut self, locator: impl Into<String>, text: impl Into<String>) -> Self {
+        self.input = self.input.with_evidence(locator, text);
+        self
+    }
+
+    /// Requires at least one emitted proposal to match the expected action.
+    pub fn expect_action(mut self, action: StewardAction) -> Self {
+        self.expected_actions.push(action);
+        self
+    }
+
+    /// Requires emitted proposals to include this citation locator.
+    pub fn require_citation(mut self, locator: impl Into<String>) -> Self {
+        self.required_citations.push(locator.into());
+        self
+    }
+
+    /// Rejects emitted proposal rationales containing this unsupported term.
+    pub fn forbid_rationale_term(mut self, term: impl Into<String>) -> Self {
+        self.forbidden_rationale_terms.push(term.into());
+        self
+    }
+}
+
+/// Deterministic suite for evaluating local Steward model proposal quality.
+#[derive(Clone, Debug)]
+pub struct StewardEvaluationSuite {
+    cases: Vec<StewardEvaluationCase>,
+}
+
+impl StewardEvaluationSuite {
+    /// Creates an evaluation suite from fixed cases.
+    pub fn new(cases: Vec<StewardEvaluationCase>) -> Self {
+        Self { cases }
+    }
+
+    /// Evaluates a local model Steward against all cases.
+    pub fn evaluate<B>(&self, steward: &LocalModelSteward<B>) -> StewardEvaluationReport
+    where
+        B: LocalModelBackend,
+    {
+        let case_reports = self
+            .cases
+            .iter()
+            .map(|case| evaluate_case(case, steward))
+            .collect();
+
+        StewardEvaluationReport { case_reports }
+    }
+}
+
+/// Deterministic evaluation report for an entire suite.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StewardEvaluationReport {
+    case_reports: Vec<StewardEvaluationCaseReport>,
+}
+
+impl StewardEvaluationReport {
+    /// Returns whether every case passed.
+    pub fn passed(&self) -> bool {
+        self.case_reports
+            .iter()
+            .all(StewardEvaluationCaseReport::passed)
+    }
+
+    /// Returns per-case evaluation reports.
+    pub fn case_reports(&self) -> &[StewardEvaluationCaseReport] {
+        &self.case_reports
+    }
+}
+
+/// Deterministic evaluation report for one case.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StewardEvaluationCaseReport {
+    name: String,
+    failures: Vec<StewardEvaluationFailure>,
+}
+
+impl StewardEvaluationCaseReport {
+    /// Returns the case name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns whether this case passed.
+    pub fn passed(&self) -> bool {
+        self.failures.is_empty()
+    }
+
+    /// Returns deterministic failure reasons.
+    pub fn failures(&self) -> &[StewardEvaluationFailure] {
+        &self.failures
+    }
+}
+
+/// Deterministic local model evaluation failure reason.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StewardEvaluationFailure {
+    /// The local model backend or decoder failed.
+    ModelError,
+    /// No emitted proposal matched an expected action.
+    MissingExpectedAction {
+        /// Expected action that was not emitted.
+        action: StewardAction,
+    },
+    /// Required evidence citation was not preserved.
+    MissingCitation {
+        /// Missing citation locator.
+        locator: String,
+    },
+    /// A proposal was rejected by deterministic policy.
+    PolicyRejected {
+        /// Rejection reasons emitted by policy.
+        reasons: Vec<String>,
+    },
+    /// A proposal rationale included an unsupported claim marker.
+    UnsupportedRationaleTerm {
+        /// Forbidden term found in rationale text.
+        term: String,
+    },
+}
+
+/// Small embeddable open-source model candidate metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SmallModelCandidate {
+    model_id: &'static str,
+    role: &'static str,
+}
+
+impl SmallModelCandidate {
+    /// Returns the model identifier.
+    pub fn model_id(&self) -> &'static str {
+        self.model_id
+    }
+
+    /// Returns the candidate evaluation role.
+    pub fn role(&self) -> &'static str {
+        self.role
+    }
+}
+
+/// Returns the fixed small model candidates for Steward evaluation.
+pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
+    &[
+        SmallModelCandidate {
+            model_id: "Qwen/Qwen2.5-0.5B-Instruct",
+            role: "default-feasibility",
+        },
+        SmallModelCandidate {
+            model_id: "Qwen/Qwen3-0.6B",
+            role: "current-reasoning",
+        },
+        SmallModelCandidate {
+            model_id: "HuggingFaceTB/SmolLM2-360M-Instruct",
+            role: "ultra-small-experimental",
+        },
+        SmallModelCandidate {
+            model_id: "HuggingFaceTB/SmolLM2-135M-Instruct",
+            role: "smoke-test-only",
+        },
+    ]
 }
 
 #[derive(Debug, Deserialize)]
@@ -267,4 +460,76 @@ fn build_prompt(task: &str, evidence: &[LocalModelEvidence]) -> String {
     }
 
     prompt
+}
+
+fn evaluate_case<B>(
+    case: &StewardEvaluationCase,
+    steward: &LocalModelSteward<B>,
+) -> StewardEvaluationCaseReport
+where
+    B: LocalModelBackend,
+{
+    let mut failures = Vec::new();
+    let proposals = match steward.propose(case.input.clone()) {
+        Ok(proposals) => proposals,
+        Err(_error) => {
+            return StewardEvaluationCaseReport {
+                name: case.name.clone(),
+                failures: vec![StewardEvaluationFailure::ModelError],
+            };
+        }
+    };
+
+    for expected in &case.expected_actions {
+        if proposals
+            .iter()
+            .all(|proposal| proposal.action() != expected)
+        {
+            failures.push(StewardEvaluationFailure::MissingExpectedAction {
+                action: expected.clone(),
+            });
+        }
+    }
+
+    for required in &case.required_citations {
+        if proposals
+            .iter()
+            .flat_map(StewardProposal::citations)
+            .all(|citation| citation != required)
+        {
+            failures.push(StewardEvaluationFailure::MissingCitation {
+                locator: required.clone(),
+            });
+        }
+    }
+
+    let policy = ProposalPolicy::strict();
+    for proposal in &proposals {
+        let decision = policy.evaluate(proposal, proposal.created_at());
+        if decision.outcome() == ProposalOutcome::Rejected {
+            failures.push(StewardEvaluationFailure::PolicyRejected {
+                reasons: decision.reasons().to_vec(),
+            });
+        }
+    }
+
+    let rationales: Vec<String> = proposals
+        .iter()
+        .map(|proposal| proposal.rationale().to_ascii_lowercase())
+        .collect();
+    for term in &case.forbidden_rationale_terms {
+        let normalized = term.to_ascii_lowercase();
+        if rationales
+            .iter()
+            .any(|rationale| rationale.contains(&normalized))
+        {
+            failures
+                .push(StewardEvaluationFailure::UnsupportedRationaleTerm { term: term.clone() });
+        }
+    }
+
+    StewardEvaluationCaseReport {
+        name: case.name.clone(),
+        failures,
+    }
 }

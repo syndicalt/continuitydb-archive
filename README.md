@@ -17,6 +17,7 @@ The first milestone builds:
 - Deterministic Steward proposal substrate.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
+- Fixed Steward proposal-quality evaluation harness.
 - A thin CLI over library APIs.
 
 ## Roadmap
