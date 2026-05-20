@@ -684,6 +684,68 @@ impl FileKernelIndex {
         selected
     }
 
+    fn cell_matches_lookup(cell: &StateCell, lookup: &CellLookup) -> bool {
+        lookup.cell_id.map_or(true, |cell_id| cell.id == cell_id)
+            && lookup.semantic_anchor.as_ref().map_or(true, |anchor| {
+                cell.anchors
+                    .iter()
+                    .any(|candidate| candidate.as_str() == anchor)
+            })
+            && lookup
+                .scope
+                .as_ref()
+                .map_or(true, |scope| &cell.scope == scope)
+            && lookup
+                .valid_at
+                .map_or(true, |valid_at| cell.valid_time.contains(valid_at))
+            && lookup
+                .system_at
+                .map_or(true, |system_at| cell.system_time.contains(system_at))
+            && lookup
+                .commit_id
+                .map_or(true, |commit_id| cell.commit_id == commit_id)
+            && lookup
+                .activation
+                .map_or(true, |activation| cell.activation == activation)
+            && lookup
+                .answerability_question
+                .as_ref()
+                .map_or(true, |question| {
+                    cell.answerability
+                        .questions()
+                        .iter()
+                        .any(|candidate| candidate == question)
+                })
+            && lookup.evidence_source.as_ref().map_or(true, |source| {
+                cell.evidence
+                    .iter()
+                    .any(|evidence| evidence.source.as_str() == source)
+            })
+            && lookup
+                .minimum_confidence
+                .map_or(true, |minimum_confidence| {
+                    cell.evidence
+                        .iter()
+                        .any(|evidence| evidence.confidence.value() >= minimum_confidence.value())
+                })
+            && Self::cell_matches_dependency_lookup(cell, lookup)
+    }
+
+    fn cell_matches_dependency_lookup(cell: &StateCell, lookup: &CellLookup) -> bool {
+        if lookup.dependency_target.is_none() && lookup.dependency_kind.is_none() {
+            return true;
+        }
+
+        cell.dependencies.iter().any(|dependency| {
+            lookup
+                .dependency_target
+                .map_or(true, |target| dependency.target == target)
+                && lookup
+                    .dependency_kind
+                    .map_or(true, |kind| dependency.kind == kind)
+        })
+    }
+
     fn lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
         let indexed_candidate_constraints = self.indexed_candidate_constraints(lookup);
         let indexed_constraints = indexed_candidate_constraints
@@ -698,12 +760,18 @@ impl FileKernelIndex {
             })
             .collect::<Vec<_>>();
         let indexed_constraint_count = indexed_candidate_constraints.len();
-        let candidate_count = self.candidate_positions(lookup).len();
+        let candidate_positions = self.candidate_positions(lookup);
+        let candidate_count = candidate_positions.len();
+        let exact_match_count = candidate_positions
+            .iter()
+            .filter(|position| Self::cell_matches_lookup(&self.cells[**position], lookup))
+            .count();
         FileKernelLookupPlan {
             indexed_constraint_count,
             indexed_constraints,
             indexed_constraint_plans,
             candidate_count,
+            exact_match_count,
             full_scan: indexed_constraint_count == 0,
         }
     }
@@ -962,6 +1030,8 @@ pub struct FileKernelLookupPlan {
     pub indexed_constraint_plans: Vec<FileKernelIndexedConstraintPlan>,
     /// Number of StateCell candidates selected before exact predicate filtering.
     pub candidate_count: usize,
+    /// Number of selected candidates that satisfy the exact lookup predicate.
+    pub exact_match_count: usize,
     /// Whether lookup must inspect all visible StateCells.
     pub full_scan: bool,
 }
@@ -1416,80 +1486,7 @@ impl StorageKernel for FileKernel {
 
         let cells = candidates
             .into_iter()
-            .filter(|cell| lookup.cell_id.map_or(true, |cell_id| cell.id == cell_id))
-            .filter(|cell| {
-                lookup.semantic_anchor.as_ref().map_or(true, |anchor| {
-                    cell.anchors
-                        .iter()
-                        .any(|candidate| candidate.as_str() == anchor)
-                })
-            })
-            .filter(|cell| {
-                lookup
-                    .scope
-                    .as_ref()
-                    .map_or(true, |scope| &cell.scope == scope)
-            })
-            .filter(|cell| {
-                lookup
-                    .valid_at
-                    .map_or(true, |valid_at| cell.valid_time.contains(valid_at))
-            })
-            .filter(|cell| {
-                lookup
-                    .system_at
-                    .map_or(true, |system_at| cell.system_time.contains(system_at))
-            })
-            .filter(|cell| {
-                lookup
-                    .commit_id
-                    .map_or(true, |commit_id| cell.commit_id == commit_id)
-            })
-            .filter(|cell| {
-                lookup
-                    .activation
-                    .map_or(true, |activation| cell.activation == activation)
-            })
-            .filter(|cell| {
-                lookup
-                    .answerability_question
-                    .as_ref()
-                    .map_or(true, |question| {
-                        cell.answerability
-                            .questions()
-                            .iter()
-                            .any(|candidate| candidate == question)
-                    })
-            })
-            .filter(|cell| {
-                lookup.evidence_source.as_ref().map_or(true, |source| {
-                    cell.evidence
-                        .iter()
-                        .any(|evidence| evidence.source.as_str() == source)
-                })
-            })
-            .filter(|cell| {
-                lookup
-                    .minimum_confidence
-                    .map_or(true, |minimum_confidence| {
-                        cell.evidence.iter().any(|evidence| {
-                            evidence.confidence.value() >= minimum_confidence.value()
-                        })
-                    })
-            })
-            .filter(|cell| {
-                if lookup.dependency_target.is_none() && lookup.dependency_kind.is_none() {
-                    return true;
-                }
-                cell.dependencies.iter().any(|dependency| {
-                    lookup
-                        .dependency_target
-                        .map_or(true, |target| dependency.target == target)
-                        && lookup
-                            .dependency_kind
-                            .map_or(true, |kind| dependency.kind == kind)
-                })
-            })
+            .filter(|cell| FileKernelIndex::cell_matches_lookup(cell, &lookup))
             .cloned()
             .collect();
 
@@ -4039,6 +4036,43 @@ mod tests {
             ]
         );
         assert_eq!(plan.candidate_count, 1);
+        assert!(!plan.full_scan);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_lookup_plan_reports_exact_match_count_after_filtering(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-lookup-plan-exact-count");
+        let first_valid = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_expired = Utc
+            .with_ymd_and_hms(2026, 5, 21, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let as_of = Utc
+            .with_ymd_and_hms(2026, 5, 22, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut expired = sample_cell("project:continuitydb:lookup-plan-expired", 0.91, 12)?;
+        expired.valid_time = ValidTimeRange::new(first_valid, Some(first_expired))?;
+        let mut current = sample_cell("project:continuitydb:lookup-plan-current", 0.83, 15)?;
+        current.valid_time = ValidTimeRange::new(first_valid, None)?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, expired)?;
+        append_committed(&mut kernel, current)?;
+
+        let plan = kernel.lookup_plan(&CellLookup {
+            valid_at: Some(as_of),
+            ..CellLookup::default()
+        });
+
+        assert_eq!(plan.indexed_constraints, vec!["valid_at"]);
+        assert_eq!(plan.candidate_count, 2);
+        assert_eq!(plan.exact_match_count, 1);
         assert!(!plan.full_scan);
         fs::remove_file(path)?;
         Ok(())
