@@ -558,6 +558,87 @@ fn cli_replay_workload_require_manifest_failure_report_records_validation_failur
 }
 
 #[test]
+fn cli_replay_workload_require_manifest_writes_validation_failure_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-manifest-failure-bundle-dir-{}",
+        std::process::id()
+    ));
+    let replay_artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-manifest-failure-replay-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if replay_artifact_dir.exists() {
+        fs::remove_dir_all(&replay_artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let mut cells_artifact: Value = serde_json::from_str(&fs::read_to_string(&cells_path)?)?;
+    cells_artifact["summary"]["cell_count"] = Value::from(7);
+    fs::write(&cells_path, serde_json::to_string_pretty(&cells_artifact)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .arg("--replay-artifact-dir")
+        .arg(&replay_artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest fingerprint mismatch"));
+
+    let replay_report_path = replay_artifact_dir.join("replay-report.json");
+    let replay_manifest_path =
+        replay_artifact_dir.join("continuitydb-workload-replay.manifest.json");
+    let replay_report: Value = serde_json::from_str(&fs::read_to_string(&replay_report_path)?)?;
+    let replay_manifest: Value = serde_json::from_str(&fs::read_to_string(&replay_manifest_path)?)?;
+
+    assert_eq!(
+        replay_report["failure"]["stage"].as_str(),
+        Some("input_manifest_validation")
+    );
+    assert_eq!(
+        replay_report["replay_bundle_manifest"]["manifest_path"].as_str(),
+        Some(replay_manifest_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        replay_manifest["failure"]["stage"].as_str(),
+        Some("input_manifest_validation")
+    );
+    assert_eq!(
+        replay_manifest["input_artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        replay_manifest["workload_artifacts"]["cells_path"].as_str(),
+        Some(cells_path.display().to_string().as_str())
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_dir_all(replay_artifact_dir)?;
+    Ok(())
+}
+
+#[test]
 fn cli_replay_workload_require_manifest_reports_validated_manifest(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let artifact_dir = std::env::temp_dir().join(format!(

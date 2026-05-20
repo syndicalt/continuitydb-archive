@@ -2227,30 +2227,43 @@ fn write_replay_input_manifest_failure_report(
     request_text: &str,
     message: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let output = serde_json::json!({
+        "kernel": workload_kernel_name(options.kernel),
+        "artifact_dir": options.artifact_dir.display().to_string(),
+        "store_path": options.store_path.map(|path| path.display().to_string()),
+        "report_path": options.report_path.map(|path| path.display().to_string()),
+        "failure_report_path": options.failure_report_path.map(|path| path.display().to_string()),
+        "replay_artifact_dir": options.replay_artifact_dir.map(|path| path.display().to_string()),
+        "replay_bundle_manifest": serde_json::Value::Null,
+        "input_bundle_manifest": serde_json::Value::Null,
+        "workload_artifacts": {
+            "cells_path": cells_path.display().to_string(),
+            "cells_fingerprint": fnv1a64_fingerprint(cells_text),
+            "cells_bytes": cells_text.len(),
+            "checkout_request_path": checkout_request_path.display().to_string(),
+            "checkout_request_fingerprint": fnv1a64_fingerprint(request_text),
+            "checkout_request_bytes": request_text.len(),
+        },
+        "lookup_plan": serde_json::Value::Null,
+        "workload": serde_json::Value::Null,
+        "ingest": serde_json::Value::Null,
+        "checkout_operation": serde_json::Value::Null,
+        "checkout": serde_json::Value::Null,
+        "replay_comparison": serde_json::Value::Null,
+        "failure": {
+            "stage": "input_manifest_validation",
+            "message": message,
+        },
+    });
     if let Some(path) = options.failure_report_path {
-        let output = serde_json::json!({
-            "kernel": workload_kernel_name(options.kernel),
-            "artifact_dir": options.artifact_dir.display().to_string(),
-            "store_path": options.store_path.map(|path| path.display().to_string()),
-            "report_path": options.report_path.map(|path| path.display().to_string()),
-            "failure_report_path": path.display().to_string(),
-            "replay_artifact_dir": options.replay_artifact_dir.map(|path| path.display().to_string()),
-            "replay_bundle_manifest": serde_json::Value::Null,
-            "input_bundle_manifest": serde_json::Value::Null,
-            "workload_artifacts": {
-                "cells_path": cells_path.display().to_string(),
-                "cells_fingerprint": fnv1a64_fingerprint(cells_text),
-                "cells_bytes": cells_text.len(),
-                "checkout_request_path": checkout_request_path.display().to_string(),
-                "checkout_request_fingerprint": fnv1a64_fingerprint(request_text),
-                "checkout_request_bytes": request_text.len(),
-            },
-            "failure": {
-                "stage": "input_manifest_validation",
-                "message": message,
-            },
-        });
         write_pretty_json_file(path, &output)?;
+    }
+    if let Some(replay_artifact_dir) = options.replay_artifact_dir {
+        write_workload_replay_artifact_bundle_report(
+            replay_artifact_dir,
+            options.artifact_dir,
+            output,
+        )?;
     }
     Ok(())
 }
@@ -2339,6 +2352,7 @@ fn write_workload_replay_bundle_manifest(
         "workload": report["workload"].clone(),
         "checkout": report["checkout"].clone(),
         "replay_comparison": report["replay_comparison"].clone(),
+        "failure": report["failure"].clone(),
     });
     let manifest_text = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, &manifest_text)?;
