@@ -204,6 +204,7 @@ enum FileKernelRecord {
 struct FileKernelLog {
     cells: Vec<StateCell>,
     explicit_manifests: Vec<CommitManifest>,
+    has_header: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -219,6 +220,7 @@ struct FileKernelIndex {
 impl FileKernelIndex {
     fn rebuild(log: FileKernelLog) -> Result<Self, KernelError> {
         let mut index = Self::default();
+        let has_header = log.has_header;
         for cell in log.cells {
             index.insert(cell)?;
         }
@@ -228,6 +230,14 @@ impl FileKernelIndex {
                 return Err(KernelError::StoreCorrupt);
             }
             index.apply_explicit_manifest(manifest)?;
+        }
+        if has_header
+            && index
+                .commits
+                .keys()
+                .any(|commit_id| !explicit_commit_ids.contains(commit_id))
+        {
+            return Err(KernelError::StoreCorrupt);
         }
         Ok(index)
     }
@@ -533,6 +543,7 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
                 FileKernelHeader { format, version }
                     .validate()
                     .map_err(|_error| corrupt_record(line_number))?;
+                log.has_header = true;
                 seen_header = true;
             }
             Ok(FileKernelRecord::Cell { cell, checksum }) => {
@@ -1025,6 +1036,70 @@ mod tests {
         assert_eq!(manifest.committed_at, committed_at);
         assert_eq!(manifest.cell_ids, expected_ids);
         assert_eq!(reopened.list_commit_manifests()?, vec![manifest]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_headered_cell_without_commit_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-headered-orphan-cell");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:orphan-cell", 0.91, 12)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 1
+                }),
+                serde_json::json!({
+                    "type": "cell",
+                    "cell": cell
+                })
+            ),
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_headered_partial_batch_without_commit_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-headered-partial-batch");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut first = sample_cell("project:continuitydb:partial-first", 0.91, 12)?;
+        first.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        first.commit_id = commit_id;
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 1
+                }),
+                serde_json::json!({
+                    "type": "cell",
+                    "cell": first
+                })
+            ),
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
         fs::remove_file(path)?;
         Ok(())
     }

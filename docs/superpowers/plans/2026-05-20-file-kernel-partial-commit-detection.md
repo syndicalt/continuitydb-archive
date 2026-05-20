@@ -21,7 +21,7 @@
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add single-cell partial current-format test**
+- [x] **Step 1: Add single-cell partial current-format test**
 
 Add this test near the explicit commit record tests:
 
@@ -59,7 +59,7 @@ fn file_kernel_rejects_headered_cell_without_commit_record(
 }
 ```
 
-- [ ] **Step 2: Add multi-cell partial current-format test**
+- [x] **Step 2: Add multi-cell partial current-format test**
 
 Add:
 
@@ -97,7 +97,7 @@ fn file_kernel_rejects_headered_partial_batch_without_commit_record(
 }
 ```
 
-- [ ] **Step 3: Run targeted tests and verify RED**
+- [x] **Step 3: Run targeted tests and verify RED**
 
 Run:
 
@@ -112,7 +112,7 @@ Expected: the new tests fail because headered logs currently reconstruct commits
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add `has_header` to `FileKernelLog`**
+- [x] **Step 1: Add `has_header` to `FileKernelLog`**
 
 Change:
 
@@ -133,7 +133,7 @@ struct FileKernelLog {
 }
 ```
 
-- [ ] **Step 2: Set `has_header` while reading**
+- [x] **Step 2: Set `has_header` while reading**
 
 In the header branch of `read_log_from_path`, after successful validation, add:
 
@@ -141,7 +141,7 @@ In the header branch of `read_log_from_path`, after successful validation, add:
 log.has_header = true;
 ```
 
-- [ ] **Step 3: Enforce explicit manifests for headered logs**
+- [x] **Step 3: Enforce explicit manifests for headered logs**
 
 In `FileKernelIndex::rebuild`, after applying all explicit manifests, add:
 
@@ -164,7 +164,7 @@ if log.has_header {
 
 When implementing this with the existing loop, preserve duplicate explicit-commit detection.
 
-- [ ] **Step 4: Run targeted tests and verify GREEN**
+- [x] **Step 4: Run targeted tests and verify GREEN**
 
 Run:
 
@@ -181,7 +181,7 @@ Expected: the new partial-commit tests pass and existing headered compatibility 
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-file-kernel-partial-commit-detection.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope:
 
@@ -189,7 +189,7 @@ Add to Current Scope:
 - Headered JSONL file-kernel partial-commit detection.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add Storage Kernel milestone:
 
@@ -197,7 +197,7 @@ Add Storage Kernel milestone:
 19. Add headered JSONL file-kernel partial-commit detection. Implemented explicit-manifest enforcement for current-format headered logs so crash-truncated cell records are rejected instead of reconstructed as committed truth, while headerless legacy raw logs remain readable.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -211,7 +211,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
