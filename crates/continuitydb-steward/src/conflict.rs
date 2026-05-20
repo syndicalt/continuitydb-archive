@@ -29,8 +29,17 @@ impl ConflictResolutionSteward {
         scan: ConflictResolutionScan,
         created_at: DateTime<Utc>,
     ) -> Result<Vec<StewardProposal>, StewardError> {
+        self.propose_from_scan(&scan, created_at)
+    }
+
+    /// Converts borrowed deterministic conflict-resolution recommendations into Steward proposals.
+    pub fn propose_from_scan(
+        &self,
+        scan: &ConflictResolutionScan,
+        created_at: DateTime<Utc>,
+    ) -> Result<Vec<StewardProposal>, StewardError> {
         scan.recommendations
-            .into_iter()
+            .iter()
             .map(|recommendation| self.proposal_for_recommendation(recommendation, created_at))
             .collect()
     }
@@ -73,7 +82,7 @@ impl ConflictResolutionSteward {
 
     fn proposal_for_recommendation(
         &self,
-        recommendation: ConflictResolutionRecommendation,
+        recommendation: &ConflictResolutionRecommendation,
         created_at: DateTime<Utc>,
     ) -> Result<StewardProposal, StewardError> {
         let citation = format!("policy://continuitydb/revision/{}", recommendation.reason);

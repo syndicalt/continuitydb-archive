@@ -40,7 +40,7 @@ where
     I: IntoIterator<Item = StateCellId>;
 ```
 
-The method loads the requested cells once, builds the deterministic conflict-resolution scan, converts a cloned scan into proposals through the supplied Steward, evaluates each proposal against the supplied policy, records each audit record through `BorrowedKernelProposalStore`, and returns the scan, proposals, and records.
+The result type intentionally does not derive serde, equality, clone, or debug traits because the underlying revision scan types do not currently expose those traits. The method loads the requested cells once, builds the deterministic conflict-resolution scan, converts the borrowed scan into proposals through the supplied Steward, evaluates each proposal against the supplied policy, records each audit record through `BorrowedKernelProposalStore`, and returns the scan, proposals, and records.
 
 The method does not apply revision links or mutate operational truth beyond appending Steward proposal audit StateCells. That preserves the database boundary: conflict analysis and Steward output remain proposals; deterministic policy decides audit acceptance; another explicit operation can later apply accepted mutations.
 

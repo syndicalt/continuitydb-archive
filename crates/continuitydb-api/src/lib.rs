@@ -20,8 +20,8 @@ use continuitydb_revision::{
 };
 #[cfg(feature = "steward")]
 use continuitydb_steward::{
-    BorrowedKernelProposalStore, ProposalAuditRecord, ProposalId, ProposalPolicy, StewardError,
-    StewardProposal, StoredProposalLedger,
+    BorrowedKernelProposalStore, ConflictResolutionSteward, ProposalAuditRecord, ProposalId,
+    ProposalPolicy, StewardError, StewardProposal, StoredProposalLedger,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::Path};
@@ -119,6 +119,17 @@ pub struct CommitExportBatch {
     pub slices: Vec<CommitSlice>,
     /// Cursor to use as `CommitManifestLookup.after` for the next export batch.
     pub next_after: Option<CommitId>,
+}
+
+/// Result of deterministic conflict-resolution stewardship recorded through the native API.
+#[cfg(feature = "steward")]
+pub struct StewardConflictAudit {
+    /// Deterministic conflict-resolution scan for the requested cells.
+    pub scan: ConflictResolutionScan,
+    /// Steward proposals emitted from the scan.
+    pub proposals: Vec<StewardProposal>,
+    /// Policy-evaluated proposal audit records appended to the backing kernel.
+    pub records: Vec<ProposalAuditRecord>,
 }
 
 /// Summary of a commit export envelope written to a file.
@@ -567,6 +578,39 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(recommend_conflict_resolutions(&cells))
     }
 
+    /// Runs deterministic conflict-resolution stewardship and records proposal audit StateCells.
+    #[cfg(feature = "steward")]
+    pub fn audit_conflict_resolutions_with_steward<I>(
+        &mut self,
+        cell_ids: I,
+        steward: &ConflictResolutionSteward,
+        policy: &ProposalPolicy,
+        decided_at: DateTime<Utc>,
+    ) -> Result<StewardConflictAudit, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCellId>,
+    {
+        let cells = self.lookup_cells_in_order(cell_ids)?;
+        let scan = recommend_conflict_resolutions(&cells);
+        let proposals = steward.propose_from_scan(&scan, decided_at)?;
+        let mut records = Vec::with_capacity(proposals.len());
+        let store = BorrowedKernelProposalStore::new(&mut self.kernel);
+        let mut ledger = StoredProposalLedger::new(store);
+
+        for proposal in proposals.iter().cloned() {
+            let decision = policy.evaluate(&proposal, decided_at);
+            let record = ProposalAuditRecord::new(proposal.clone(), decision.clone())?;
+            ledger.record(proposal, decision)?;
+            records.push(record);
+        }
+
+        Ok(StewardConflictAudit {
+            scan,
+            proposals,
+            records,
+        })
+    }
+
     /// Produces an audit trace for a stored StateCell.
     pub fn audit_cell(&self, cell_id: StateCellId) -> Result<AuditTrace, ContinuityError> {
         self.lookup_one_cell(cell_id).map(|cell| audit(&cell))
@@ -808,8 +852,8 @@ mod tests {
     use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "steward")]
     use continuitydb_steward::{
-        ProposalId, ProposalOutcome, ProposalPolicy, StewardAction, StewardIdentity,
-        StewardProposal,
+        ConflictResolutionSteward, ProposalId, ProposalOutcome, ProposalPolicy, StewardAction,
+        StewardIdentity, StewardProposal,
     };
     use std::{fs, path::Path};
 
@@ -888,6 +932,15 @@ mod tests {
             "0.1.0",
             "strict",
         )?)
+    }
+
+    #[cfg(feature = "steward")]
+    fn test_conflict_steward() -> Result<ConflictResolutionSteward, Box<dyn std::error::Error>> {
+        Ok(ConflictResolutionSteward::new(StewardIdentity::new(
+            "native-api-conflict-steward",
+            "0.1.0",
+            "deterministic-policy",
+        )?))
     }
 
     #[cfg(feature = "steward")]
@@ -3142,6 +3195,127 @@ WHERE scope = project("continuitydb")
             record.decision().reasons(),
             &["policy:invalid-confidence".to_string()]
         );
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_audits_conflict_resolutions_with_steward() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let low = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-conflict",
+            "release is blocked",
+            20,
+            0.55,
+            12,
+        )?;
+        let high = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-conflict",
+            "release is ready",
+            21,
+            0.95,
+            12,
+        )?;
+        let low_id = db.ingest_cell_at(low, committed_at)?;
+        let high_id = db.ingest_cell_at(high, committed_at)?;
+        let steward = test_conflict_steward()?;
+
+        let audit = db.audit_conflict_resolutions_with_steward(
+            [low_id, high_id],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        )?;
+
+        assert_eq!(audit.scan.recommendations.len(), 1);
+        assert_eq!(audit.proposals.len(), 1);
+        assert_eq!(audit.records.len(), 1);
+        assert_eq!(audit.records[0].proposal().id(), audit.proposals[0].id());
+        assert_eq!(
+            audit.records[0].decision().outcome(),
+            ProposalOutcome::Accepted
+        );
+        assert_eq!(
+            audit.proposals[0].action(),
+            &StewardAction::LinkRevision {
+                source: high_id,
+                kind: RevisionLinkKind::Supersedes,
+                target: low_id,
+            }
+        );
+        assert_eq!(db.steward_proposal_records()?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_steward_conflict_audit_allows_empty_and_singleton_inputs(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-singleton",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let cell_id = db.ingest_cell_at(cell, committed_at)?;
+        let steward = test_conflict_steward()?;
+
+        let empty = db.audit_conflict_resolutions_with_steward(
+            [],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        )?;
+        let singleton = db.audit_conflict_resolutions_with_steward(
+            [cell_id],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        )?;
+
+        assert!(empty.scan.recommendations.is_empty());
+        assert!(empty.proposals.is_empty());
+        assert!(empty.records.is_empty());
+        assert!(singleton.scan.recommendations.is_empty());
+        assert!(singleton.proposals.is_empty());
+        assert!(singleton.records.is_empty());
+        assert!(db.steward_proposal_records()?.is_empty());
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_steward_conflict_audit_reports_missing_id_without_audit(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-missing",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let cell_id = db.ingest_cell_at(cell, committed_at)?;
+        let missing_id = StateCellId::new();
+        let steward = test_conflict_steward()?;
+
+        let result = db.audit_conflict_resolutions_with_steward(
+            [cell_id, missing_id],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        assert!(db.steward_proposal_records()?.is_empty());
         Ok(())
     }
 }

@@ -19,9 +19,9 @@
 
 ## Task 1: RED Tests
 
-- [ ] Add feature-gated imports in `crates/continuitydb-api/src/lib.rs` tests for `ConflictResolutionSteward`, `ProposalOutcome`, `RevisionLinkKind`, and `StewardAction`.
-- [ ] Add helper `test_conflict_steward() -> Result<ConflictResolutionSteward, Box<dyn std::error::Error>>` using `StewardIdentity::new("native-api-conflict-steward", "0.1.0", "deterministic-policy")`.
-- [ ] Add test `api_audits_conflict_resolutions_with_steward`:
+- [x] Add feature-gated imports in `crates/continuitydb-api/src/lib.rs` tests for `ConflictResolutionSteward`, `ProposalOutcome`, `RevisionLinkKind`, and `StewardAction`.
+- [x] Add helper `test_conflict_steward() -> Result<ConflictResolutionSteward, Box<dyn std::error::Error>>` using `StewardIdentity::new("native-api-conflict-steward", "0.1.0", "deterministic-policy")`.
+- [x] Add test `api_audits_conflict_resolutions_with_steward`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -72,7 +72,7 @@ fn api_audits_conflict_resolutions_with_steward() -> Result<(), Box<dyn std::err
 }
 ```
 
-- [ ] Add test `api_steward_conflict_audit_allows_empty_and_singleton_inputs`:
+- [x] Add test `api_steward_conflict_audit_allows_empty_and_singleton_inputs`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -115,7 +115,7 @@ fn api_steward_conflict_audit_allows_empty_and_singleton_inputs(
 }
 ```
 
-- [ ] Add test `api_steward_conflict_audit_reports_missing_id_without_audit`:
+- [x] Add test `api_steward_conflict_audit_reports_missing_id_without_audit`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -151,12 +151,12 @@ fn api_steward_conflict_audit_reports_missing_id_without_audit(
 }
 ```
 
-- [ ] Run `cargo test -p continuitydb-api steward_conflict --features steward`.
-- [ ] Expected: FAIL because `StewardConflictAudit` and `ContinuityDb::audit_conflict_resolutions_with_steward` do not exist.
+- [x] Run `cargo test -p continuitydb-api steward_conflict --features steward`.
+- [x] Expected: FAIL because `StewardConflictAudit` and `ContinuityDb::audit_conflict_resolutions_with_steward` do not exist.
 
 ## Task 2: Implementation
 
-- [ ] Add production imports behind `#[cfg(feature = "steward")]`:
+- [x] Add production imports behind `#[cfg(feature = "steward")]`:
 
 ```rust
 use continuitydb_steward::{
@@ -165,11 +165,10 @@ use continuitydb_steward::{
 };
 ```
 
-- [ ] Add the result type after `CommitExportBatch`:
+- [x] Add the result type after `CommitExportBatch`:
 
 ```rust
 #[cfg(feature = "steward")]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StewardConflictAudit {
     pub scan: ConflictResolutionScan,
     pub proposals: Vec<StewardProposal>,
@@ -177,7 +176,7 @@ pub struct StewardConflictAudit {
 }
 ```
 
-- [ ] Add method in `impl<K: StorageKernel> ContinuityDb<K>` near conflict APIs:
+- [x] Add method in `impl<K: StorageKernel> ContinuityDb<K>` near conflict APIs:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -193,7 +192,7 @@ where
 {
     let cells = self.lookup_cells_in_order(cell_ids)?;
     let scan = recommend_conflict_resolutions(&cells);
-    let proposals = steward.propose(scan.clone(), decided_at)?;
+    let proposals = steward.propose_from_scan(&scan, decided_at)?;
     let mut records = Vec::with_capacity(proposals.len());
     let store = BorrowedKernelProposalStore::new(&mut self.kernel);
     let mut ledger = StoredProposalLedger::new(store);
@@ -213,15 +212,15 @@ where
 }
 ```
 
-- [ ] Run `cargo test -p continuitydb-api steward_conflict --features steward`.
-- [ ] Run `cargo test -p continuitydb-api --features steward`.
+- [x] Run `cargo test -p continuitydb-api steward_conflict --features steward`.
+- [x] Run `cargo test -p continuitydb-api --features steward`.
 
 ## Task 3: Docs, Gate, Commit
 
-- [ ] Add README current scope bullet: `Native feature-gated Steward conflict-resolution audit API.`
-- [ ] Add Native API roadmap item after current #26: implemented `audit_conflict_resolutions_with_steward`.
-- [ ] Add Steward roadmap item after current #12: native API conflict-resolution stewardship can emit and audit proposal decisions.
-- [ ] Run:
+- [x] Add README current scope bullet: `Native feature-gated Steward conflict-resolution audit API.`
+- [x] Add Native API roadmap item after current #26: implemented `audit_conflict_resolutions_with_steward`.
+- [x] Add Steward roadmap item after current #12: native API conflict-resolution stewardship can emit and audit proposal decisions.
+- [x] Run:
 
 ```bash
 cargo fmt --all -- --check
