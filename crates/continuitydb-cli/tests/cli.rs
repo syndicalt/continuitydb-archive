@@ -2490,6 +2490,133 @@ fn cli_validate_workload_bundle_rejects_tampered_fixture() -> Result<(), Box<dyn
     Ok(())
 }
 
+#[test]
+fn cli_validate_workload_bundle_report_path_writes_validation_artifact(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-validate-workload-bundle-report-dir-{}",
+        std::process::id()
+    ));
+    let report_path =
+        temp_store_path("continuitydb-cli-validate-workload-bundle-report").with_extension("json");
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if report_path.exists() {
+        fs::remove_file(&report_path)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("validate-workload-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--report-path")
+        .arg(&report_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout_json: Value = serde_json::from_slice(&output)?;
+    let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+
+    assert_eq!(report_json, stdout_json);
+    assert_eq!(
+        report_json["manifest"]["manifest_path"].as_str(),
+        Some(
+            artifact_dir
+                .join("continuitydb-workload.manifest.json")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(report_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_validate_workload_bundle_failure_report_path_records_validation_failure(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-validate-workload-bundle-failure-dir-{}",
+        std::process::id()
+    ));
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-validate-workload-bundle-failure").with_extension("json");
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if failure_report_path.exists() {
+        fs::remove_file(&failure_report_path)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let mut cells_artifact: Value = serde_json::from_str(&fs::read_to_string(&cells_path)?)?;
+    cells_artifact["summary"]["cell_count"] = Value::from(7);
+    fs::write(&cells_path, serde_json::to_string_pretty(&cells_artifact)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-workload-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest fingerprint mismatch"));
+
+    let failure_report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    assert_eq!(
+        failure_report["failure"]["stage"].as_str(),
+        Some("workload_bundle_validation")
+    );
+    assert_eq!(
+        failure_report["failure"]["message"].as_str(),
+        Some("workload artifact manifest fingerprint mismatch")
+    );
+    assert_eq!(
+        failure_report["artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        failure_report["failure_report_path"].as_str(),
+        Some(failure_report_path.display().to_string().as_str())
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_validate_local_model_bundle_accepts_report_metadata(

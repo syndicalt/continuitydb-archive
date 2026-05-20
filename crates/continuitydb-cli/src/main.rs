@@ -304,6 +304,12 @@ enum Command {
         /// Directory containing workload-report.json and continuitydb-workload.manifest.json.
         #[arg(long = "artifact-dir")]
         artifact_dir: PathBuf,
+        /// Optional path to write successful workload bundle validation JSON.
+        #[arg(long = "report-path")]
+        report_path: Option<PathBuf>,
+        /// Optional path to write workload bundle validation JSON when validation fails.
+        #[arg(long = "failure-report-path")]
+        failure_report_path: Option<PathBuf>,
     },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
@@ -544,14 +550,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             })?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
-        Some(Command::ValidateWorkloadBundle { artifact_dir }) => {
-            let validation = validate_workload_bundle_manifest(&artifact_dir)?;
-            let output = serde_json::json!({
-                "artifact_dir": artifact_dir.display().to_string(),
-                "manifest": workload_bundle_manifest_json(&validation.manifest),
-                "workload_report": validation.workload_report,
-                "workload_artifacts": validation.workload_artifacts,
-            });
+        Some(Command::ValidateWorkloadBundle {
+            artifact_dir,
+            report_path,
+            failure_report_path,
+        }) => {
+            let output = match validate_workload_bundle_json(
+                &artifact_dir,
+                report_path.as_ref(),
+                failure_report_path.as_ref(),
+            ) {
+                Ok(output) => output,
+                Err(error) => {
+                    if let Some(path) = failure_report_path.as_ref() {
+                        write_workload_bundle_validation_failure_report(
+                            &artifact_dir,
+                            report_path.as_ref(),
+                            path,
+                            error.to_string(),
+                        )?;
+                    }
+                    return Err(error);
+                }
+            };
+            if let Some(path) = report_path.as_ref() {
+                write_pretty_json_file(path, &output)?;
+            }
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
@@ -2760,6 +2784,45 @@ fn validate_workload_bundle_manifest(
         }),
         workload_artifacts,
     })
+}
+
+fn validate_workload_bundle_json(
+    artifact_dir: &Path,
+    report_path: Option<&PathBuf>,
+    failure_report_path: Option<&PathBuf>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let validation = validate_workload_bundle_manifest(artifact_dir)?;
+    Ok(serde_json::json!({
+        "artifact_dir": artifact_dir.display().to_string(),
+        "report_path": report_path.map(|path| path.display().to_string()),
+        "failure_report_path": failure_report_path.map(|path| path.display().to_string()),
+        "manifest": workload_bundle_manifest_json(&validation.manifest),
+        "workload_report": validation.workload_report,
+        "workload_artifacts": validation.workload_artifacts,
+        "failure": serde_json::Value::Null,
+    }))
+}
+
+fn write_workload_bundle_validation_failure_report(
+    artifact_dir: &Path,
+    report_path: Option<&PathBuf>,
+    failure_report_path: &Path,
+    message: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = serde_json::json!({
+        "artifact_dir": artifact_dir.display().to_string(),
+        "report_path": report_path.map(|path| path.display().to_string()),
+        "failure_report_path": failure_report_path.display().to_string(),
+        "manifest": serde_json::Value::Null,
+        "workload_report": serde_json::Value::Null,
+        "workload_artifacts": serde_json::Value::Null,
+        "failure": {
+            "stage": "workload_bundle_validation",
+            "message": message,
+        },
+    });
+    write_pretty_json_file(failure_report_path, &output)?;
+    Ok(())
 }
 
 fn validate_workload_manifest_report_content(
