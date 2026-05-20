@@ -1060,6 +1060,24 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .require_rationale_term("refresh")
         .forbid_rationale_term("no target"),
         StewardEvaluationCase::new(
+            "new evidence draft creation",
+            created_at,
+            "Draft a StateCell from new benchmark evidence.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/new-benchmark-evidence",
+            "A local Steward benchmark produced a new result that should be captured as a draft StateCell for review.",
+        )
+        .expect_action(StewardAction::CreateCellDraft {
+            anchors: vec![SemanticAnchor::new("project:continuitydb:benchmark-result")],
+            payload_text:
+                "ContinuityDB local Steward benchmark produced a new result requiring review."
+                    .to_string(),
+        })
+        .require_citation("continuitydb://evaluation/new-benchmark-evidence")
+        .require_rationale_term("draft")
+        .forbid_rationale_term("committed"),
+        StewardEvaluationCase::new(
             "multi-source citation preservation",
             created_at,
             "Decide whether a release-status change should stay on the active frontier.",

@@ -1078,6 +1078,15 @@ mod tests {
                 },
                 {
                     "action": {
+                        "type": "create_cell_draft",
+                        "anchors": ["project:continuitydb:benchmark-result"],
+                        "payload_text": "ContinuityDB local Steward benchmark produced a new result requiring review."
+                    },
+                    "rationale": "The new benchmark evidence supports drafting a StateCell for review.",
+                    "citations": ["continuitydb://evaluation/new-benchmark-evidence"]
+                },
+                {
+                    "action": {
                         "type": "mark_frontier",
                         "cell_id": "00000000-0000-0000-0000-000000000003"
                     },
@@ -1104,7 +1113,7 @@ mod tests {
         let report = default_steward_evaluation_suite().evaluate(&steward);
 
         assert!(report.passed());
-        assert_eq!(report.case_reports().len(), 8);
+        assert_eq!(report.case_reports().len(), 9);
         assert!(report.case_reports()[1].passed());
         assert_eq!(report.case_reports()[1].name(), "conflict classification");
         assert!(report.case_reports()[2].passed());
@@ -1127,11 +1136,16 @@ mod tests {
         assert!(report.case_reports()[6].passed());
         assert_eq!(
             report.case_reports()[6].name(),
-            "multi-source citation preservation"
+            "new evidence draft creation"
         );
         assert!(report.case_reports()[7].passed());
         assert_eq!(
             report.case_reports()[7].name(),
+            "multi-source citation preservation"
+        );
+        assert!(report.case_reports()[8].passed());
+        assert_eq!(
+            report.case_reports()[8].name(),
             "policy rejection avoidance"
         );
         Ok(())
@@ -1142,7 +1156,7 @@ mod tests {
     fn default_steward_evaluation_suite_exposes_case_contracts() {
         let suite = default_steward_evaluation_suite();
 
-        assert_eq!(suite.len(), 8);
+        assert_eq!(suite.len(), 9);
         assert!(!suite.is_empty());
         let cases = suite.cases();
 
@@ -1306,22 +1320,53 @@ mod tests {
                 && request == "Refresh the stale high-impact frontier signal."
         ));
 
-        assert_eq!(cases[6].name(), "multi-source citation preservation");
+        assert_eq!(cases[6].name(), "new evidence draft creation");
         assert_eq!(
             cases[6].input().task(),
-            "Decide whether a release-status change should stay on the active frontier."
+            "Draft a StateCell from new benchmark evidence."
         );
-        assert_eq!(cases[6].input().evidence().len(), 2);
         assert_eq!(
             cases[6].input().evidence()[0].locator(),
-            "continuitydb://evaluation/release-build-source"
-        );
-        assert_eq!(
-            cases[6].input().evidence()[1].locator(),
-            "continuitydb://evaluation/release-incident-source"
+            "continuitydb://evaluation/new-benchmark-evidence"
         );
         assert_eq!(
             cases[6].required_citations(),
+            ["continuitydb://evaluation/new-benchmark-evidence".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[6].required_rationale_terms(),
+            ["draft".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[6].forbidden_rationale_terms(),
+            ["committed".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[6].expected_actions()[0],
+            StewardAction::CreateCellDraft {
+                anchors,
+                payload_text
+            } if anchors == &[SemanticAnchor::new("project:continuitydb:benchmark-result")]
+                && payload_text
+                    == "ContinuityDB local Steward benchmark produced a new result requiring review."
+        ));
+
+        assert_eq!(cases[7].name(), "multi-source citation preservation");
+        assert_eq!(
+            cases[7].input().task(),
+            "Decide whether a release-status change should stay on the active frontier."
+        );
+        assert_eq!(cases[7].input().evidence().len(), 2);
+        assert_eq!(
+            cases[7].input().evidence()[0].locator(),
+            "continuitydb://evaluation/release-build-source"
+        );
+        assert_eq!(
+            cases[7].input().evidence()[1].locator(),
+            "continuitydb://evaluation/release-incident-source"
+        );
+        assert_eq!(
+            cases[7].required_citations(),
             [
                 "continuitydb://evaluation/release-build-source".to_string(),
                 "continuitydb://evaluation/release-incident-source".to_string(),
@@ -1329,38 +1374,38 @@ mod tests {
             .as_slice()
         );
         assert_eq!(
-            cases[6].required_rationale_terms(),
+            cases[7].required_rationale_terms(),
             ["frontier".to_string()].as_slice()
         );
         assert!(matches!(
-            &cases[6].expected_actions()[0],
+            &cases[7].expected_actions()[0],
             StewardAction::MarkFrontier { cell_id }
                 if *cell_id == StateCellId::from_u128(3)
         ));
 
-        assert_eq!(cases[7].name(), "policy rejection avoidance");
+        assert_eq!(cases[8].name(), "policy rejection avoidance");
         assert_eq!(
-            cases[7].input().task(),
+            cases[8].input().task(),
             "Handle invalid answerability-label evidence without emitting an invalid label."
         );
         assert_eq!(
-            cases[7].input().evidence()[0].locator(),
+            cases[8].input().evidence()[0].locator(),
             "continuitydb://evaluation/invalid-answerability-label"
         );
         assert_eq!(
-            cases[7].required_citations(),
+            cases[8].required_citations(),
             ["continuitydb://evaluation/invalid-answerability-label".to_string()].as_slice()
         );
         assert_eq!(
-            cases[7].required_rationale_terms(),
+            cases[8].required_rationale_terms(),
             ["invalid".to_string()].as_slice()
         );
         assert_eq!(
-            cases[7].forbidden_rationale_terms(),
+            cases[8].forbidden_rationale_terms(),
             ["label applied".to_string()].as_slice()
         );
         assert!(matches!(
-            &cases[7].expected_actions()[0],
+            &cases[8].expected_actions()[0],
             StewardAction::RequestVerification { cell_id: None, request }
                 if request == "Ask for a concrete answerability question before labeling the cell."
         ));

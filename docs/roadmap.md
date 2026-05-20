@@ -271,6 +271,7 @@ Storage kernel
 59. Add default local-model supersession classification evaluation. Expanded the fixed Steward benchmark suite with a deterministic `Supersedes` revision-link case so local model baselines test whether models distinguish newer replacement evidence from direct conflicts.
 60. Add default local-model confidence-adjustment evaluation. Expanded the fixed Steward benchmark suite with a deterministic `AdjustConfidence` case so local model baselines test belief confidence revision proposals.
 61. Add default local-model targeted-verification evaluation. Expanded the fixed Steward benchmark suite with a deterministic targeted `RequestVerification` case so local model baselines test whether refresh requests preserve the specific stale high-impact StateCell identity.
+62. Add default local-model create-cell-draft evaluation. Expanded the fixed Steward benchmark suite with a deterministic `CreateCellDraft` case so local model baselines test whether new evidence becomes a draft proposal rather than an un-audited truth mutation.
 
 ## Small Embeddable Model Track
 

@@ -86,6 +86,7 @@ The first milestone builds:
 - Default local model supersession-classification evaluation case.
 - Default local model confidence-adjustment evaluation case.
 - Default local model targeted-verification evaluation case.
+- Default local model create-cell-draft evaluation case.
 - Default local model unsupported-claim evaluation case.
 - Default local model multi-source citation preservation evaluation case.
 - Default local model policy-rejection avoidance evaluation case.
