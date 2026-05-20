@@ -2541,6 +2541,10 @@ mod tests {
         assert_eq!(regression.previous_passed_cases(), 1);
         assert_eq!(regression.current_passed_cases(), 0);
         assert_eq!(regression.pass_count_delta(), -1);
+        assert_eq!(
+            regression.failure_count_deltas().get("missing_citation"),
+            Some(&1)
+        );
         Ok(())
     }
 

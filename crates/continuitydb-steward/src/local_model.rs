@@ -1714,6 +1714,7 @@ pub struct LocalModelBenchmarkRegression {
     current_passed_cases: usize,
     previous_failure_counts: BTreeMap<String, usize>,
     current_failure_counts: BTreeMap<String, usize>,
+    failure_count_deltas: BTreeMap<String, isize>,
     pass_count_delta: isize,
     regressed: bool,
 }
@@ -1728,6 +1729,8 @@ impl LocalModelBenchmarkRegression {
         let current_passed_cases = current.evaluation_summary().passed_cases();
         let previous_failure_counts = owned_failure_counts(previous.evaluation().failure_counts());
         let current_failure_counts = owned_failure_counts(current.evaluation().failure_counts());
+        let failure_count_deltas =
+            failure_count_deltas(&previous_failure_counts, &current_failure_counts);
         let pass_count_delta = current_passed_cases as isize - previous_passed_cases as isize;
         let regressed = current_passed_cases < previous_passed_cases
             || (previous.passed() && !current.passed());
@@ -1741,6 +1744,7 @@ impl LocalModelBenchmarkRegression {
             current_passed_cases,
             previous_failure_counts,
             current_failure_counts,
+            failure_count_deltas,
             pass_count_delta,
             regressed,
         }
@@ -1786,6 +1790,11 @@ impl LocalModelBenchmarkRegression {
         &self.current_failure_counts
     }
 
+    /// Returns current failure counts minus previous failure counts by stable code.
+    pub fn failure_count_deltas(&self) -> &BTreeMap<String, isize> {
+        &self.failure_count_deltas
+    }
+
     /// Returns current passing cases minus previous passing cases.
     pub fn pass_count_delta(&self) -> isize {
         self.pass_count_delta
@@ -1802,6 +1811,22 @@ fn owned_failure_counts(counts: BTreeMap<&'static str, usize>) -> BTreeMap<Strin
         .into_iter()
         .map(|(code, count)| (code.to_string(), count))
         .collect()
+}
+
+fn failure_count_deltas(
+    previous: &BTreeMap<String, usize>,
+    current: &BTreeMap<String, usize>,
+) -> BTreeMap<String, isize> {
+    let mut deltas = BTreeMap::new();
+    for code in previous.keys().chain(current.keys()) {
+        let previous_count = previous.get(code).copied().unwrap_or(0) as isize;
+        let current_count = current.get(code).copied().unwrap_or(0) as isize;
+        let delta = current_count - previous_count;
+        if delta != 0 {
+            deltas.insert(code.clone(), delta);
+        }
+    }
+    deltas
 }
 
 /// Result of recording a current benchmark baseline and comparing with prior state.

@@ -1321,6 +1321,14 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         report["baseline_comparison"]["current_failure_counts"]["missing_citation"].as_u64(),
         Some(9)
     );
+    assert_eq!(
+        report["baseline_comparison"]["failure_count_deltas"]["missing_expected_action"].as_i64(),
+        Some(8)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["failure_count_deltas"]["missing_citation"].as_i64(),
+        Some(9)
+    );
     assert!(report["bundle_manifest"].is_null());
 
     fs::remove_file(executable_path)?;
