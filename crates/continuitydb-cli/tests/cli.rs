@@ -380,12 +380,20 @@ fn cli_replay_workload_replays_artifact_bundle() -> Result<(), Box<dyn std::erro
         .assert()
         .success();
 
+    let replay_report_path =
+        temp_store_path("continuitydb-cli-replay-workload-report").with_extension("json");
+    if replay_report_path.exists() {
+        fs::remove_file(&replay_report_path)?;
+    }
+
     let output = Command::cargo_bin("continuitydb")?
         .arg("replay-workload")
         .arg("--kernel")
         .arg("memory")
         .arg("--artifact-dir")
         .arg(&artifact_dir)
+        .arg("--report-path")
+        .arg(&replay_report_path)
         .assert()
         .success()
         .get_output()
@@ -415,8 +423,19 @@ fn cli_replay_workload_replays_artifact_bundle() -> Result<(), Box<dyn std::erro
     assert!(json["workload_artifacts"]["cells_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_eq!(
+        json["report_path"].as_str(),
+        Some(replay_report_path.display().to_string().as_str())
+    );
+    let replay_report: Value = serde_json::from_str(&fs::read_to_string(&replay_report_path)?)?;
+    assert_eq!(replay_report["kernel"].as_str(), Some("memory"));
+    assert_eq!(
+        replay_report["checkout"]["selected_count"].as_u64(),
+        Some(3)
+    );
 
     fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(replay_report_path)?;
     Ok(())
 }
 
@@ -485,6 +504,79 @@ fn cli_replay_workload_compares_archived_report() -> Result<(), Box<dyn std::err
         .stderr(contains("workload replay mismatch detected"));
 
     fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[test]
+fn cli_replay_workload_failure_report_path_records_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-failure-report-dir-{}",
+        std::process::id()
+    ));
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-replay-workload-failure-report").with_extension("json");
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if failure_report_path.exists() {
+        fs::remove_file(&failure_report_path)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+    let report_path = artifact_dir.join("workload-report.json");
+    let mut report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    report["checkout"]["selected_count"] = Value::from(2);
+    fs::write(&report_path, serde_json::to_string_pretty(&report)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--fail-on-mismatch")
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .assert()
+        .failure()
+        .stderr(contains("workload replay mismatch detected"));
+
+    let failure_report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    assert_eq!(
+        failure_report["failure_report_path"].as_str(),
+        Some(failure_report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        failure_report["replay_comparison"]["passed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        failure_report["replay_comparison"]["mismatches"][0]["CheckoutSelectedCountChanged"]
+            ["previous"]
+            .as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        failure_report["replay_comparison"]["mismatches"][0]["CheckoutSelectedCountChanged"]
+            ["current"]
+            .as_u64(),
+        Some(3)
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(failure_report_path)?;
     Ok(())
 }
 

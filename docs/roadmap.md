@@ -181,6 +181,7 @@ Storage kernel
 14. Add CLI workload replay fixture artifacts. Extended workload artifact bundles with deterministic `workload-cells.json` and `checkout-request.json` files plus fingerprints so archived storage-engine runs carry the exact StateCell corpus and checkout predicate needed for replay.
 15. Add CLI workload artifact replay. Added `replay-workload --artifact-dir` for memory and file kernels so archived workload cells and checkout requests can be ingested and re-executed to reproduce comparable checkout counts from a bundle.
 16. Add CLI workload replay comparison gates. Extended `replay-workload` with `--compare-report` and `--fail-on-mismatch` so replayed deterministic workload and checkout counts can be compared against the archived `workload-report.json` and fail CI when fixtures no longer reproduce the report.
+17. Add CLI workload replay report artifacts. Added `replay-workload --report-path` and `--failure-report-path` so successful replay evidence and mismatch-gate failures can be written as durable JSON artifacts for CI and storage-engine trials.
 
 ## Native API Milestones
 

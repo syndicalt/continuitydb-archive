@@ -254,6 +254,12 @@ enum Command {
         /// Path to the JSONL file-backed store when replaying the file kernel.
         #[arg(long = "store-path")]
         store_path: Option<PathBuf>,
+        /// Optional path to write the successful workload replay JSON report.
+        #[arg(long = "report-path")]
+        report_path: Option<PathBuf>,
+        /// Optional path to write workload replay JSON when a mismatch gate fails.
+        #[arg(long = "failure-report-path")]
+        failure_report_path: Option<PathBuf>,
         /// Compare replay counts against workload-report.json in the artifact directory.
         #[arg(long = "compare-report")]
         compare_report: bool,
@@ -473,6 +479,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             kernel,
             artifact_dir,
             store_path,
+            report_path,
+            failure_report_path,
             compare_report,
             fail_on_mismatch,
         }) => {
@@ -480,6 +488,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 kernel,
                 &artifact_dir,
                 store_path.as_ref(),
+                report_path.as_ref(),
+                failure_report_path.as_ref(),
                 compare_report || fail_on_mismatch,
                 fail_on_mismatch,
             )?;
@@ -2052,6 +2062,8 @@ fn replay_workload_json(
     kernel: WorkloadKernelProfile,
     artifact_dir: &Path,
     store_path: Option<&PathBuf>,
+    report_path: Option<&PathBuf>,
+    failure_report_path: Option<&PathBuf>,
     compare_report: bool,
     fail_on_mismatch: bool,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
@@ -2088,6 +2100,8 @@ fn replay_workload_json(
         "kernel": workload_kernel_name(kernel),
         "artifact_dir": artifact_dir.display().to_string(),
         "store_path": store_path.map(|path| path.display().to_string()),
+        "report_path": report_path.map(|path| path.display().to_string()),
+        "failure_report_path": failure_report_path.map(|path| path.display().to_string()),
         "workload_artifacts": {
             "cells_path": cells_path.display().to_string(),
             "cells_fingerprint": fnv1a64_fingerprint(&cells_text),
@@ -2125,10 +2139,17 @@ fn replay_workload_json(
         let passed = comparison["passed"].as_bool().unwrap_or(false);
         output["replay_comparison"] = comparison;
         if fail_on_mismatch && !passed {
+            if let Some(path) = failure_report_path {
+                write_pretty_json_file(path, &output)?;
+            }
             return Err(std::io::Error::other("workload replay mismatch detected").into());
         }
     } else {
         output["replay_comparison"] = serde_json::Value::Null;
+    }
+
+    if let Some(path) = report_path {
+        write_pretty_json_file(path, &output)?;
     }
 
     Ok(output)
