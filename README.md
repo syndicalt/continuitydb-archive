@@ -54,6 +54,7 @@ The first milestone builds:
 - Standalone dependency-kind storage lookups with file-kernel planner diagnostics.
 - File-kernel lookup plans with exact post-filter match counts.
 - File-kernel lookup plans with filtered-candidate diagnostics.
+- File-kernel lookup plans with exact predicate labels.
 - Portable typed query serialization for bindings and future query files.
 - Versioned JSON envelopes for portable typed query files.
 - Read-only typed query AST introspection for embedders and bindings.

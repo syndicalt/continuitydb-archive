@@ -5099,6 +5099,40 @@ WHERE valid_at = "2026-05-22T00:00:00Z""#,
 }
 
 #[test]
+fn cli_inspect_kernel_reports_lookup_plan_exact_constraint_labels(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-exact-constraint-lookup-plan");
+    write_revision_link_store(&path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--lookup-query")
+        .arg(
+            r#"CHECKOUT "inspect" ANSWER "what is stored?"
+WHERE scope = project("continuitydb")"#,
+        )
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        json["lookup_plan"]["exact_constraint_count"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        json["lookup_plan"]["exact_constraints"],
+        serde_json::json!(["scope", "answerability_question"])
+    );
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_inspect_kernel_reports_legacy_health() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-inspect-legacy-health");
     write_legacy_store(&path)?;

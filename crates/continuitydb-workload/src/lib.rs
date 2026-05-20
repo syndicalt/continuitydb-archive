@@ -183,6 +183,10 @@ pub struct WorkloadLookupPlanSnapshot {
     pub indexed_constraints: Vec<String>,
     /// Ordered per-constraint indexed candidate details.
     pub indexed_constraint_plans: Vec<WorkloadIndexedConstraintPlanSnapshot>,
+    /// Number of exact lookup constraints present in the request.
+    pub exact_constraint_count: usize,
+    /// Ordered names of exact lookup constraints checked after candidate selection.
+    pub exact_constraints: Vec<String>,
     /// Number of StateCell candidates selected before exact predicate filtering.
     pub candidate_count: usize,
     /// Number of selected candidates that satisfy the exact lookup predicate.
@@ -209,6 +213,12 @@ impl From<FileKernelLookupPlan> for WorkloadLookupPlanSnapshot {
                     name: constraint.name.to_string(),
                     candidate_count: constraint.candidate_count,
                 })
+                .collect(),
+            exact_constraint_count: plan.exact_constraint_count,
+            exact_constraints: plan
+                .exact_constraints
+                .into_iter()
+                .map(str::to_string)
                 .collect(),
             candidate_count: plan.candidate_count,
             exact_match_count: plan.exact_match_count,
@@ -430,6 +440,13 @@ pub enum WorkloadBaselineRegression {
         /// Baseline ordered indexed constraint names.
         previous: Vec<String>,
         /// Current ordered indexed constraint names.
+        current: Vec<String>,
+    },
+    /// Ordered exact lookup constraints changed.
+    LookupPlanExactConstraintsChanged {
+        /// Baseline ordered exact constraint names.
+        previous: Vec<String>,
+        /// Current ordered exact constraint names.
         current: Vec<String>,
     },
     /// Final lookup-plan candidate count changed.
@@ -785,6 +802,15 @@ fn push_lookup_plan_regressions(
                         previous: previous.to_vec(),
                         current: current.to_vec(),
                     }
+                },
+            );
+            push_if_changed(
+                regressions,
+                previous.exact_constraints.as_slice(),
+                current.exact_constraints.as_slice(),
+                |previous, current| WorkloadBaselineRegression::LookupPlanExactConstraintsChanged {
+                    previous: previous.to_vec(),
+                    current: current.to_vec(),
                 },
             );
             push_if_changed(
@@ -1270,6 +1296,8 @@ mod tests {
                         candidate_count: 8,
                     },
                 ],
+                exact_constraint_count: 2,
+                exact_constraints: vec!["scope", "minimum_confidence"],
                 candidate_count: 8,
                 exact_match_count: 8,
                 filtered_candidate_count: 0,
@@ -1306,6 +1334,8 @@ mod tests {
                         candidate_count: 8,
                     },
                 ],
+                exact_constraint_count: 1,
+                exact_constraints: vec!["valid_at"],
                 candidate_count: 8,
                 exact_match_count: 5,
                 filtered_candidate_count: 3,
@@ -1333,6 +1363,8 @@ mod tests {
                         candidate_count: 8,
                     },
                 ],
+                exact_constraint_count: 1,
+                exact_constraints: vec!["valid_at"],
                 candidate_count: 8,
                 exact_match_count: 5,
                 filtered_candidate_count: 3,
@@ -1344,6 +1376,46 @@ mod tests {
         assert_eq!(
             json["lookup_plan"]["filtered_candidate_count"].as_u64(),
             Some(3)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_snapshot_preserves_lookup_plan_exact_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let measurement = sample_measurement()?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement_with_lookup_plan(
+            &measurement,
+            Some(continuitydb_kernel::FileKernelLookupPlan {
+                indexed_constraint_count: 2,
+                indexed_constraints: vec!["scope", "valid_at"],
+                indexed_constraint_plans: vec![
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "scope",
+                        candidate_count: 5,
+                    },
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "valid_at",
+                        candidate_count: 8,
+                    },
+                ],
+                exact_constraint_count: 2,
+                exact_constraints: vec!["scope", "valid_at"],
+                candidate_count: 5,
+                exact_match_count: 4,
+                filtered_candidate_count: 1,
+                full_scan: false,
+            }),
+        );
+        let json = serde_json::to_value(snapshot)?;
+
+        assert_eq!(
+            json["lookup_plan"]["exact_constraint_count"].as_u64(),
+            Some(2)
+        );
+        assert_eq!(
+            json["lookup_plan"]["exact_constraints"],
+            serde_json::json!(["scope", "valid_at"])
         );
         Ok(())
     }
@@ -1620,6 +1692,10 @@ mod tests {
                     previous: vec!["scope".to_string(), "minimum_confidence".to_string()],
                     current: vec!["scope".to_string(), "activation".to_string()],
                 },
+                WorkloadBaselineRegression::LookupPlanExactConstraintsChanged {
+                    previous: vec!["scope".to_string(), "minimum_confidence".to_string()],
+                    current: vec!["scope".to_string(), "activation".to_string()],
+                },
                 WorkloadBaselineRegression::LookupPlanCandidateCountChanged {
                     previous: 8,
                     current: 9,
@@ -1653,6 +1729,8 @@ mod tests {
                 name: "valid_at".to_string(),
                 candidate_count: 8,
             }],
+            exact_constraint_count: 1,
+            exact_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 3,
@@ -1666,6 +1744,8 @@ mod tests {
                 name: "valid_at".to_string(),
                 candidate_count: 8,
             }],
+            exact_constraint_count: 1,
+            exact_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 4,
@@ -1684,6 +1764,58 @@ mod tests {
                 WorkloadBaselineRegression::LookupPlanFilteredCandidateCountChanged {
                     previous: 3,
                     current: 4,
+                }
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_detects_lookup_plan_exact_constraint_change(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut previous = baseline_record("current", "file", 100, 100)?;
+        previous.snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["scope".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "scope".to_string(),
+                candidate_count: 8,
+            }],
+            exact_constraint_count: 1,
+            exact_constraints: vec!["scope".to_string()],
+            candidate_count: 8,
+            exact_match_count: 8,
+            filtered_candidate_count: 0,
+            full_scan: false,
+        });
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["scope".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "scope".to_string(),
+                candidate_count: 8,
+            }],
+            exact_constraint_count: 2,
+            exact_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            candidate_count: 8,
+            exact_match_count: 8,
+            filtered_candidate_count: 0,
+            full_scan: false,
+        });
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert_eq!(
+            comparison.regressions,
+            vec![
+                WorkloadBaselineRegression::LookupPlanExactConstraintsChanged {
+                    previous: vec!["scope".to_string()],
+                    current: vec!["scope".to_string(), "valid_at".to_string()],
                 }
             ]
         );
@@ -1780,6 +1912,11 @@ mod tests {
                         candidate_count: *candidate_count,
                     },
                 )
+                .collect(),
+            exact_constraint_count: constraints.len(),
+            exact_constraints: constraints
+                .iter()
+                .map(|constraint| constraint.to_string())
                 .collect(),
             candidate_count,
             exact_match_count: candidate_count,
