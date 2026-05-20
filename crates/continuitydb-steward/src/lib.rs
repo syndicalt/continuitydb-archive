@@ -21,9 +21,9 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    record_local_model_benchmark_baseline, small_model_candidates,
-    FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
-    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    latest_local_model_benchmark_baseline, record_local_model_benchmark_baseline,
+    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
+    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression,
     LocalModelBenchmarkReport, LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
     MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
@@ -38,12 +38,12 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 mod tests {
     #[cfg(feature = "local-model")]
     use super::{
-        record_local_model_benchmark_baseline, small_model_candidates,
-        FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
-        LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
+        latest_local_model_benchmark_baseline, record_local_model_benchmark_baseline,
+        small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
+        LocalModelBenchmark, LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
         LocalModelBenchmarkRegression, MemoryLocalModelBenchmarkBaselineStore,
-        MistralRsRuntimeProfile, StewardEvaluationCase, StewardEvaluationFailure,
-        StewardEvaluationSuite,
+        MistralRsRuntimeProfile, SmallModelCandidate, StewardEvaluationCase,
+        StewardEvaluationFailure, StewardEvaluationSuite,
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
@@ -131,6 +131,22 @@ mod tests {
         Ok(LocalModelBenchmarkBaseline::from_report(
             benchmark.run(steward()?),
             created_at(),
+        ))
+    }
+
+    #[cfg(feature = "local-model")]
+    fn local_model_empty_baseline(
+        candidate: SmallModelCandidate,
+        recorded_at: chrono::DateTime<Utc>,
+    ) -> Result<LocalModelBenchmarkBaseline, StewardError> {
+        Ok(LocalModelBenchmarkBaseline::from_report(
+            LocalModelBenchmark::new(
+                candidate,
+                LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("sh")),
+                StewardEvaluationSuite::new(Vec::new()),
+            )
+            .run(steward()?),
+            recorded_at,
         ))
     }
 
@@ -1275,6 +1291,55 @@ mod tests {
 
         assert!(!regression.regressed());
         assert_eq!(regression.pass_count_delta(), 0);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn latest_local_model_baseline_returns_newest_matching_candidate(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let old_qwen = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let other_candidate = local_model_empty_baseline(
+            small_model_candidates()[1],
+            Utc.with_ymd_and_hms(2026, 5, 20, 3, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let new_qwen = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 2, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(old_qwen)?;
+        store.append_baseline(other_candidate)?;
+        store.append_baseline(new_qwen.clone())?;
+
+        let latest = latest_local_model_benchmark_baseline(&store, small_model_candidates()[0])?;
+
+        assert_eq!(latest, Some(new_qwen));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn latest_local_model_baseline_returns_none_without_candidate_match(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(local_model_empty_baseline(
+            small_model_candidates()[1],
+            created_at(),
+        )?)?;
+
+        let latest = latest_local_model_benchmark_baseline(&store, small_model_candidates()[0])?;
+
+        assert_eq!(latest, None);
         Ok(())
     }
 

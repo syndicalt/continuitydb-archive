@@ -755,6 +755,22 @@ where
     Ok(baseline)
 }
 
+/// Returns the newest stored benchmark baseline for a model candidate.
+pub fn latest_local_model_benchmark_baseline<S>(
+    store: &S,
+    candidate: SmallModelCandidate,
+) -> Result<Option<LocalModelBenchmarkBaseline>, StewardError>
+where
+    S: LocalModelBenchmarkBaselineStore,
+{
+    Ok(store
+        .list_baselines()?
+        .into_iter()
+        .filter(|baseline| baseline.candidate_model_id() == candidate.model_id())
+        .filter(|baseline| baseline.candidate_role() == candidate.role())
+        .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
+}
+
 fn passed_case_count(evaluation: &StewardEvaluationReport) -> usize {
     evaluation
         .case_reports()
