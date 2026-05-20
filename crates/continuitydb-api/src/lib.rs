@@ -10,7 +10,8 @@ use continuitydb_kernel::{
     KernelCapabilities, KernelError, KernelRequirements, StorageKernel,
 };
 use continuitydb_query::{
-    decode_query_json, CheckoutQuery, ContinuityQuery, QueryEnvelopeError, QueryError,
+    decode_query_json, parse_query_text, CheckoutQuery, ContinuityQuery, QueryEnvelopeError,
+    QueryError, QueryTextError,
 };
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
@@ -41,6 +42,9 @@ pub enum ContinuityError {
     /// Query envelope decoding or validation failure.
     #[error(transparent)]
     QueryEnvelope(#[from] QueryEnvelopeError),
+    /// Query text parsing failure.
+    #[error(transparent)]
+    QueryText(#[from] QueryTextError),
     /// Raw typed query JSON could not be decoded.
     #[error("query JSON is invalid")]
     QueryJson,
@@ -585,10 +589,25 @@ impl<K: StorageKernel> ContinuityDb<K> {
 }
 
 fn decode_query_file(bytes: &[u8]) -> Result<ContinuityQuery, ContinuityError> {
+    if let Some(text) = query_text_input(bytes) {
+        return parse_query_text(text).map_err(Into::into);
+    }
     if is_query_envelope_shape(bytes)? {
         return decode_query_json(bytes).map_err(Into::into);
     }
     serde_json::from_slice::<ContinuityQuery>(bytes).map_err(|_error| ContinuityError::QueryJson)
+}
+
+fn query_text_input(bytes: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let trimmed = text.trim_start();
+    if trimmed.len() >= "checkout".len()
+        && trimmed[.."checkout".len()].eq_ignore_ascii_case("checkout")
+    {
+        Some(text)
+    } else {
+        None
+    }
 }
 
 fn is_query_envelope_shape(bytes: &[u8]) -> Result<bool, ContinuityError> {
@@ -732,7 +751,7 @@ mod tests {
     use continuitydb_query::{
         encode_query_json, CheckoutQuery, ContinuityQuery, QueryEnvelope, QueryEnvelopeError,
         QueryError, QueryOptimization, QueryRequirements, QueryReturnShape, QueryTask,
-        QUERY_ENVELOPE_FORMAT, QUERY_ENVELOPE_FORMAT_VERSION,
+        QueryTextError, QUERY_ENVELOPE_FORMAT, QUERY_ENVELOPE_FORMAT_VERSION,
     };
     use std::{fs, path::Path};
 
@@ -1214,6 +1233,51 @@ mod tests {
         assert_eq!(
             slice.cells[0].payload,
             CellPayload::Text("project:continuitydb:query-file-raw".to_string())
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_file_executes_text_query() -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-file-text",
+            0.91,
+            12,
+        )?)?;
+        let path = temp_file_kernel_path("query-file-text");
+        fs::write(
+            &path,
+            r#"CHECKOUT "stored-facts" ANSWER "what should the agent know?"
+WHERE scope = project("continuitydb")
+  AND min_confidence >= 0.7
+  AND token_budget <= 1200"#,
+        )?;
+
+        let slice = db.checkout_query_file(&path)?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(
+            slice.cells[0].payload,
+            CellPayload::Text("project:continuitydb:query-file-text".to_string())
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_file_reports_invalid_text_query(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let path = temp_file_kernel_path("invalid-query-file-text");
+        fs::write(&path, r#"CHECKOUT "stored-facts" WHERE scope = global"#)?;
+
+        let result = db.checkout_query_file(&path);
+
+        assert_eq!(
+            result.err(),
+            Some(ContinuityError::QueryText(QueryTextError::InvalidSyntax))
         );
         fs::remove_file(path)?;
         Ok(())

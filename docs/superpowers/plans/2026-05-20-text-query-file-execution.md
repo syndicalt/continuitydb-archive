@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add test imports**
+- [x] **Step 1: Add test imports**
 
 Update the test query import in `crates/continuitydb-api/src/lib.rs` to include `QueryTextError`:
 
@@ -35,7 +35,7 @@ use continuitydb_query::{
 };
 ```
 
-- [ ] **Step 2: Add native text query file tests**
+- [x] **Step 2: Add native text query file tests**
 
 Add these tests after `api_checkout_query_file_executes_raw_query_json`:
 
@@ -82,7 +82,7 @@ fn api_checkout_query_file_reports_invalid_text_query(
 }
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -97,7 +97,7 @@ Expected: FAIL because `ContinuityError::QueryText` does not exist and text file
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add production imports**
+- [x] **Step 1: Add production imports**
 
 Update the production query import near the top of `crates/continuitydb-api/src/lib.rs`:
 
@@ -108,7 +108,7 @@ use continuitydb_query::{
 };
 ```
 
-- [ ] **Step 2: Add native error variant**
+- [x] **Step 2: Add native error variant**
 
 Add this variant after `QueryEnvelope`:
 
@@ -118,7 +118,7 @@ Add this variant after `QueryEnvelope`:
     QueryText(#[from] QueryTextError),
 ```
 
-- [ ] **Step 3: Extend file decoder**
+- [x] **Step 3: Extend file decoder**
 
 Update `decode_query_file` and add helper:
 
@@ -146,7 +146,7 @@ fn query_text_input(bytes: &[u8]) -> Option<&str> {
 }
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -157,7 +157,7 @@ cargo test -p continuitydb-api --all-features
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit native implementation**
+- [x] **Step 5: Commit native implementation**
 
 ```bash
 git add crates/continuitydb-api/src/lib.rs docs/superpowers/plans/2026-05-20-text-query-file-execution.md
