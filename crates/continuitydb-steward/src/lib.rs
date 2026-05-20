@@ -75,7 +75,10 @@ mod tests {
     use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "local-model")]
     use std::cell::RefCell;
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     fn created_at() -> chrono::DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
@@ -166,6 +169,34 @@ mod tests {
             )
             .run(steward()?),
             recorded_at,
+        ))
+    }
+
+    #[cfg(feature = "local-model")]
+    fn local_model_file_backed_benchmark(
+        cell_id: StateCellId,
+        script_name: &str,
+        response_path: &Path,
+    ) -> Result<LocalModelBenchmark, Box<dyn std::error::Error>> {
+        let script = write_local_model_script(
+            script_name,
+            &format!("cat >/dev/null\ncat '{}'\n", response_path.display()),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier baseline regression",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        Ok(LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            runner,
+            suite,
         ))
     }
 
@@ -1604,6 +1635,74 @@ mod tests {
     fn local_model_baseline_gate_reports_regression_against_latest_previous(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let cell_id = StateCellId::new();
+        let response_path = temp_local_model_baseline_store_path(
+            "continuitydb-local-model-compatible-regression-response",
+        );
+        fs::write(
+            &response_path,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://frontier"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let benchmark = local_model_file_backed_benchmark(
+            cell_id,
+            "continuitydb-local-model-compatible-regression",
+            &response_path,
+        )?;
+        let previous = LocalModelBenchmarkBaseline::from_report(
+            benchmark.clone().run(steward()?),
+            created_at(),
+        );
+        fs::write(
+            &response_path,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://other"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(previous)?;
+
+        let report: LocalModelBenchmarkGateReport =
+            record_local_model_benchmark_baseline_with_regression(
+                &benchmark,
+                steward()?,
+                created_at(),
+                &mut store,
+            )?;
+
+        let Some(regression) = report.regression() else {
+            return Err("previous baseline missing".into());
+        };
+        assert!(regression.regressed());
+        assert_eq!(regression.previous_passed_cases(), 1);
+        assert_eq!(regression.current_passed_cases(), 0);
+        assert!(report.regressed());
+        assert_eq!(store.list_baselines()?.len(), 2);
+        fs::remove_file(response_path)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_baseline_gate_skips_incompatible_runtime_baseline(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
         let previous = local_model_baseline_for_response(
             cell_id,
             serde_json::json!({
@@ -1635,21 +1734,15 @@ mod tests {
         let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
         store.append_baseline(previous)?;
 
-        let report: LocalModelBenchmarkGateReport =
-            record_local_model_benchmark_baseline_with_regression(
-                &benchmark,
-                steward()?,
-                created_at(),
-                &mut store,
-            )?;
+        let report = record_local_model_benchmark_baseline_with_regression(
+            &benchmark,
+            steward()?,
+            created_at(),
+            &mut store,
+        )?;
 
-        let Some(regression) = report.regression() else {
-            return Err("previous baseline missing".into());
-        };
-        assert!(regression.regressed());
-        assert_eq!(regression.previous_passed_cases(), 1);
-        assert_eq!(regression.current_passed_cases(), 0);
-        assert!(report.regressed());
+        assert_eq!(report.regression(), None);
+        assert!(!report.regressed());
         assert_eq!(store.list_baselines()?.len(), 2);
         Ok(())
     }

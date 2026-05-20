@@ -1061,11 +1061,12 @@ pub fn record_local_model_benchmark_baseline_with_regression<S>(
 where
     S: LocalModelBenchmarkBaselineStore,
 {
-    let previous = latest_local_model_benchmark_baseline(store, benchmark.candidate())?;
-    let current = record_local_model_benchmark_baseline(benchmark, identity, recorded_at, store)?;
+    let current = LocalModelBenchmarkBaseline::from_report(benchmark.run(identity), recorded_at);
+    let previous = latest_compatible_local_model_benchmark_baseline(store, &current)?;
     let regression = previous
         .as_ref()
         .map(|previous| LocalModelBenchmarkRegression::compare(previous, &current));
+    store.append_baseline(current.clone())?;
 
     Ok(LocalModelBenchmarkGateReport::new(current, regression))
 }
@@ -1083,6 +1084,23 @@ where
         .into_iter()
         .filter(|baseline| baseline.candidate_model_id() == candidate.model_id())
         .filter(|baseline| baseline.candidate_role() == candidate.role())
+        .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
+}
+
+fn latest_compatible_local_model_benchmark_baseline<S>(
+    store: &S,
+    current: &LocalModelBenchmarkBaseline,
+) -> Result<Option<LocalModelBenchmarkBaseline>, StewardError>
+where
+    S: LocalModelBenchmarkBaselineStore,
+{
+    Ok(store
+        .list_baselines()?
+        .into_iter()
+        .filter(|baseline| baseline.candidate_model_id() == current.candidate_model_id())
+        .filter(|baseline| baseline.candidate_role() == current.candidate_role())
+        .filter(|baseline| baseline.response_schema_version() == current.response_schema_version())
+        .filter(|baseline| baseline.runtime() == current.runtime())
         .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
 }
 
