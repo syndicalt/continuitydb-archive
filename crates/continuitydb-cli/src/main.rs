@@ -2321,6 +2321,17 @@ fn validate_workload_artifact_manifest(
         return Err(std::io::Error::other("workload artifact manifest path mismatch").into());
     }
 
+    let manifest_cells_bytes = required_json_u64(&manifest["workload_artifacts"], "cells_bytes")?;
+    if manifest_cells_bytes != cells_text.len() as u64 {
+        return Err(std::io::Error::other("workload artifact manifest byte count mismatch").into());
+    }
+
+    let manifest_request_bytes =
+        required_json_u64(&manifest["workload_artifacts"], "checkout_request_bytes")?;
+    if manifest_request_bytes != request_text.len() as u64 {
+        return Err(std::io::Error::other("workload artifact manifest byte count mismatch").into());
+    }
+
     let manifest_cells_fingerprint =
         required_json_string(&manifest["workload_artifacts"], "cells_fingerprint")?;
     let current_cells_fingerprint = fnv1a64_fingerprint(cells_text);
@@ -2527,6 +2538,15 @@ fn required_json_string<'a>(
 ) -> Result<&'a str, Box<dyn std::error::Error>> {
     value[key]
         .as_str()
+        .ok_or_else(|| std::io::Error::other(format!("missing manifest field {key}")).into())
+}
+
+fn required_json_u64(
+    value: &serde_json::Value,
+    key: &str,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    value[key]
+        .as_u64()
         .ok_or_else(|| std::io::Error::other(format!("missing manifest field {key}")).into())
 }
 

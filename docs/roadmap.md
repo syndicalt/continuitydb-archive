@@ -192,6 +192,7 @@ Storage kernel
 25. Add CLI workload replay manifest report-path validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `workload-report.json` path does not match the replayed artifact directory, preserving the bundle manifest as an authoritative description of the archived workload report.
 26. Add CLI workload replay manifest artifact-directory validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `artifact_dir` does not match the replayed artifact directory, preserving the manifest as a self-consistent description of the archived workload bundle.
 27. Add CLI workload replay manifest workload-summary validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded workload summary does not match the archived `workload-cells.json` summary, preserving the manifest as an accurate description of the replay fixture corpus.
+28. Add CLI workload replay manifest fixture byte-count validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `workload-cells.json` or `checkout-request.json` byte counts do not match the archived fixture files, preserving manifest metadata integrity alongside fingerprint validation.
 
 ## Native API Milestones
 
