@@ -10,11 +10,12 @@ use continuitydb_core::{
     Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, TrustSignal, ValidTimeRange,
 };
 use continuitydb_core::{
-    CommitId, CommitManifest, CoreError, StateCell, StateCellId, UtilityFeedback,
+    CommitId, CommitManifest, CoreError, RevisionLinkKind, RevisionLinkRecord, StateCell,
+    StateCellId, UtilityFeedback,
 };
 use continuitydb_kernel::{
     CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelStatus,
-    KernelCapabilities, KernelError, KernelRequirements, StorageKernel,
+    KernelCapabilities, KernelError, KernelRequirements, RevisionLinkLookup, StorageKernel,
 };
 use continuitydb_query::{
     decode_query_json, parse_query_text, CheckoutQuery, ContinuityQuery, QueryEnvelopeError,
@@ -357,6 +358,29 @@ impl<K: StorageKernel> ContinuityDb<K> {
         self.kernel
             .append_cells_at_with_commit_id(cells, committed_at, commit_id)?;
         Ok(cell_ids)
+    }
+
+    /// Appends a native revision-link record after validating both endpoint StateCells exist.
+    pub fn record_revision_link_at(
+        &mut self,
+        source: StateCellId,
+        kind: RevisionLinkKind,
+        target: StateCellId,
+        recorded_at: DateTime<Utc>,
+    ) -> Result<RevisionLinkRecord, ContinuityError> {
+        self.lookup_one_cell(source)?;
+        self.lookup_one_cell(target)?;
+        let record = RevisionLinkRecord::new(source, kind, target, recorded_at);
+        self.kernel.append_revision_link(record.clone())?;
+        Ok(record)
+    }
+
+    /// Lists native revision-link records matching deterministic lookup constraints.
+    pub fn list_revision_links(
+        &self,
+        lookup: RevisionLinkLookup,
+    ) -> Result<Vec<RevisionLinkRecord>, ContinuityError> {
+        self.kernel.list_revision_links(lookup).map_err(Into::into)
     }
 
     /// Materializes a deterministic continuity slice.
@@ -859,6 +883,30 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(Some(link_cell_id))
     }
 
+    /// Applies an accepted LinkRevision Steward proposal as a native revision-link record.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_link_revision_record_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        recorded_at: DateTime<Utc>,
+    ) -> Result<Option<RevisionLinkRecord>, ContinuityError> {
+        if record.decision().outcome() == ProposalOutcome::Rejected {
+            return Ok(None);
+        }
+
+        let (source, kind, target) = match record.proposal().action() {
+            StewardAction::LinkRevision {
+                source,
+                kind,
+                target,
+            } => (*source, *kind, *target),
+            _ => return Err(ContinuityError::UnsupportedStewardProposalAction),
+        };
+
+        self.record_revision_link_at(source, kind, target, recorded_at)
+            .map(Some)
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -1183,13 +1231,13 @@ mod tests {
     #[cfg(feature = "steward")]
     use continuitydb_core::{ActivationState, CellDependencyKind};
     use continuitydb_core::{
-        Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence, Scope,
-        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
-        ValidTimeRange,
+        Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence,
+        RevisionLinkKind, Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal,
+        UtilityFeedback, ValidTimeRange,
     };
     use continuitydb_kernel::{
         CellLookup, CommitManifestLookup, FileKernel, KernelDurability, KernelError,
-        KernelRequirements, StorageKernel,
+        KernelRequirements, RevisionLinkLookup, StorageKernel,
     };
     use continuitydb_memory::MemoryKernel;
     use continuitydb_query::{
@@ -1197,8 +1245,6 @@ mod tests {
         QueryError, QueryOptimization, QueryRequirements, QueryReturnShape, QueryTask,
         QueryTextError, QUERY_ENVELOPE_FORMAT, QUERY_ENVELOPE_FORMAT_VERSION,
     };
-    #[cfg(feature = "steward")]
-    use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "steward")]
     use continuitydb_steward::{
         ConflictResolutionSteward, FrontierSteward, FrontierSubscription, FrontierSubscriptionId,
@@ -1968,6 +2014,49 @@ WHERE scope = project("continuitydb")
             Err(ContinuityError::Kernel(KernelError::DuplicateCell))
         ));
         assert!(db.kernel().lookup_cells(CellLookup::default())?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_record_api_records_and_lists_links() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 15, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:api-revision-source", 0.91, 12)?,
+            committed_at,
+        )?;
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:api-revision-target", 0.41, 12)?,
+            committed_at,
+        )?;
+
+        let record = db.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::Supersedes,
+            target_id,
+            committed_at,
+        )?;
+
+        assert_eq!(record.source, source_id);
+        assert_eq!(record.kind, RevisionLinkKind::Supersedes);
+        assert_eq!(record.target, target_id);
+        assert_eq!(record.recorded_at, committed_at);
+        assert_eq!(
+            db.list_revision_links(RevisionLinkLookup::default())?,
+            vec![record.clone()]
+        );
+        assert_eq!(
+            db.list_revision_links(RevisionLinkLookup {
+                source: Some(source_id),
+                target: Some(target_id),
+                kind: Some(RevisionLinkKind::Supersedes),
+            })?,
+            vec![record]
+        );
         Ok(())
     }
 
@@ -4730,6 +4819,182 @@ WHERE scope = project("continuitydb")
             db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
 
         let result = db.apply_accepted_link_revision_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_target
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn revision_link_record_api_steward_application_records_native_link(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 15, 15, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:revision-record-link-source", 0.91, 12)?,
+            initial_commit,
+        )?;
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:revision-record-link-target", 0.41, 12)?,
+            initial_commit,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: source_id,
+                kind: RevisionLinkKind::Supersedes,
+                target: target_id,
+            },
+            "Accepted policy records that the stronger source supersedes the target.",
+            vec!["test://revision-link-record-apply".to_string()],
+            initial_commit,
+        )?;
+        let audit_record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), initial_commit)?;
+
+        let link_record = db
+            .apply_accepted_link_revision_record_proposal_at(&audit_record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected revision link record"))?;
+
+        assert_eq!(link_record.source, source_id);
+        assert_eq!(link_record.kind, RevisionLinkKind::Supersedes);
+        assert_eq!(link_record.target, target_id);
+        assert_eq!(link_record.recorded_at, apply_commit);
+        assert_eq!(
+            db.kernel()
+                .list_revision_links(RevisionLinkLookup::default())?,
+            vec![link_record]
+        );
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 3);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn revision_link_record_api_steward_application_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-record-link-source", 0.91, 12)?,
+            committed_at,
+        )?;
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-record-link-target", 0.41, 12)?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: source_id,
+                kind: RevisionLinkKind::Supersedes,
+                target: target_id,
+            },
+            "Policy rejected this native revision link application.",
+            vec!["test://revision-link-record-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let audit_record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied =
+            db.apply_accepted_link_revision_record_proposal_at(&audit_record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert!(db
+            .kernel()
+            .list_revision_links(RevisionLinkLookup::default())?
+            .is_empty());
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 2);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn revision_link_record_api_steward_application_reports_missing_source(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_source = StateCellId::new();
+        let target_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:missing-record-source-target",
+                0.41,
+                12,
+            )?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: missing_source,
+                kind: RevisionLinkKind::Supersedes,
+                target: target_id,
+            },
+            "Missing source should be reported before native record application.",
+            vec!["test://revision-link-record-missing-source".to_string()],
+            committed_at,
+        )?;
+        let audit_record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result =
+            db.apply_accepted_link_revision_record_proposal_at(&audit_record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_source
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn revision_link_record_api_steward_application_reports_missing_target(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:missing-record-target-source",
+                0.91,
+                12,
+            )?,
+            committed_at,
+        )?;
+        let missing_target = StateCellId::new();
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: source_id,
+                kind: RevisionLinkKind::Supersedes,
+                target: missing_target,
+            },
+            "Missing target should be reported before native record application.",
+            vec!["test://revision-link-record-missing-target".to_string()],
+            committed_at,
+        )?;
+        let audit_record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result =
+            db.apply_accepted_link_revision_record_proposal_at(&audit_record, committed_at);
 
         assert!(matches!(
             result,

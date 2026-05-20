@@ -21,6 +21,7 @@ The first milestone builds:
 - Basic revision links.
 - Core native revision-link records.
 - Storage-kernel-native revision-link records.
+- Native API revision-link record operations.
 - Deterministic checkout.
 - Semantic-anchor scoped checkout and strict text query constraints.
 - Activation-aware checkout and strict text query constraints.
