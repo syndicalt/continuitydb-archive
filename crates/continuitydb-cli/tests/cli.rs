@@ -683,6 +683,52 @@ fn cli_replay_workload_artifact_dir_writes_mismatch_bundle(
     Ok(())
 }
 
+#[test]
+fn cli_replay_workload_artifact_dir_rejects_input_directory(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-same-bundle-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--replay-artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "--replay-artifact-dir must differ from --artifact-dir",
+        ));
+
+    assert!(!artifact_dir
+        .join("continuitydb-workload-replay.manifest.json")
+        .exists());
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error::Error>> {

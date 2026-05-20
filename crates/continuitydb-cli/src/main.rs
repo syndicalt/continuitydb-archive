@@ -2077,6 +2077,14 @@ fn write_workload_artifact_bundle_report(
 fn replay_workload_json(
     options: WorkloadReplayOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if options
+        .replay_artifact_dir
+        .is_some_and(|replay_artifact_dir| replay_artifact_dir == options.artifact_dir)
+    {
+        return Err(
+            std::io::Error::other("--replay-artifact-dir must differ from --artifact-dir").into(),
+        );
+    }
     let cells_path = options.artifact_dir.join("workload-cells.json");
     let checkout_request_path = options.artifact_dir.join("checkout-request.json");
     let cells_text = std::fs::read_to_string(&cells_path)?;

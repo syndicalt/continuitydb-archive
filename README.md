@@ -22,6 +22,7 @@ The first milestone builds:
 - CLI workload replay comparison gate.
 - CLI workload replay report artifacts.
 - CLI workload replay artifact bundles.
+- CLI workload replay artifact bundle separation.
 - CLI workload measurement report artifact output.
 - CLI workload regression failure report artifact output.
 - CLI workload measurement baseline recording.
