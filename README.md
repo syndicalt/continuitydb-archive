@@ -30,6 +30,7 @@ The first milestone builds:
 - Deterministic frontier subscription runner.
 - Native typed operation API for ingest, checkout, and audit.
 - Native typed utility feedback revision API.
+- Native read-only conflict analysis API.
 - A thin CLI over library APIs.
 
 ## Roadmap

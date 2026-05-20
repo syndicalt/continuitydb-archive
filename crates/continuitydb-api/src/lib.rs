@@ -6,7 +6,10 @@ use continuitydb_checkout::{
 };
 use continuitydb_core::{StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
-use continuitydb_revision::revise_utility_feedback;
+use continuitydb_revision::{
+    detect_cell_conflict, recommend_conflict_resolution, revise_utility_feedback, CellConflict,
+    ConflictResolutionRecommendation,
+};
 use thiserror::Error;
 
 /// Errors produced by the native ContinuityDB operation API.
@@ -101,6 +104,28 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(successor_id)
     }
 
+    /// Detects a deterministic conflict between two stored StateCells.
+    pub fn detect_conflict(
+        &self,
+        left_id: StateCellId,
+        right_id: StateCellId,
+    ) -> Result<Option<CellConflict>, ContinuityError> {
+        let left = self.lookup_one_cell(left_id)?;
+        let right = self.lookup_one_cell(right_id)?;
+        Ok(detect_cell_conflict(&left, &right))
+    }
+
+    /// Recommends a deterministic non-mutating conflict resolution for two stored StateCells.
+    pub fn recommend_conflict_resolution(
+        &self,
+        left_id: StateCellId,
+        right_id: StateCellId,
+    ) -> Result<Option<ConflictResolutionRecommendation>, ContinuityError> {
+        let left = self.lookup_one_cell(left_id)?;
+        let right = self.lookup_one_cell(right_id)?;
+        Ok(recommend_conflict_resolution(&left, &right))
+    }
+
     /// Produces an audit trace for a stored StateCell.
     pub fn audit_cell(&self, cell_id: StateCellId) -> Result<AuditTrace, ContinuityError> {
         self.lookup_one_cell(cell_id).map(|cell| audit(&cell))
@@ -138,8 +163,18 @@ mod tests {
         confidence: f32,
         tokens: i64,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        sample_cell_with_payload_day_and_confidence(anchor, anchor, 20, confidence, tokens)
+    }
+
+    fn sample_cell_with_payload_day_and_confidence(
+        anchor: &str,
+        payload: &str,
+        valid_from_day: u32,
+        confidence: f32,
+        tokens: i64,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
         let valid_from = Utc
-            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .with_ymd_and_hms(2026, 5, valid_from_day, 0, 0, 0)
             .single()
             .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
         StateCell::new(
@@ -156,7 +191,7 @@ mod tests {
                 confidence: Confidence::new(confidence)?,
                 trust: vec![TrustSignal::DirectObservation],
             }],
-            CellPayload::Text(anchor.to_string()),
+            CellPayload::Text(payload.to_string()),
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
@@ -299,6 +334,144 @@ mod tests {
 
         assert!(matches!(
             result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn api_detects_conflict_between_stored_cells() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let left = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:conflict",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let right = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:conflict",
+            "release is blocked",
+            20,
+            0.60,
+            12,
+        )?;
+        let left_id = db.ingest_cell_at(left, committed_at)?;
+        let right_id = db.ingest_cell_at(right, committed_at)?;
+
+        let conflict = db
+            .detect_conflict(left_id, right_id)?
+            .ok_or_else(|| std::io::Error::other("missing conflict"))?;
+
+        assert_eq!(conflict.left, left_id);
+        assert_eq!(conflict.right, right_id);
+        assert_eq!(
+            conflict.kind,
+            continuitydb_revision::CellConflictKind::PayloadMismatch
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_recommends_conflict_resolution_between_stored_cells(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let left = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:recommendation",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let right = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:recommendation",
+            "release is blocked",
+            20,
+            0.60,
+            12,
+        )?;
+        let left_id = db.ingest_cell_at(left, committed_at)?;
+        let right_id = db.ingest_cell_at(right, committed_at)?;
+
+        let recommendation = db
+            .recommend_conflict_resolution(left_id, right_id)?
+            .ok_or_else(|| std::io::Error::other("missing recommendation"))?;
+
+        assert_eq!(
+            recommendation.kind,
+            continuitydb_revision::ConflictResolutionKind::CandidateSupersession
+        );
+        assert_eq!(recommendation.winner, Some(left_id));
+        assert_eq!(recommendation.loser, Some(right_id));
+        Ok(())
+    }
+
+    #[test]
+    fn api_conflict_analysis_returns_none_for_non_conflicting_cells(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let left = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:left",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let right = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:right",
+            "release is blocked",
+            20,
+            0.60,
+            12,
+        )?;
+        let left_id = db.ingest_cell_at(left, committed_at)?;
+        let right_id = db.ingest_cell_at(right, committed_at)?;
+
+        assert!(db.detect_conflict(left_id, right_id)?.is_none());
+        assert!(db
+            .recommend_conflict_resolution(left_id, right_id)?
+            .is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn api_conflict_analysis_reports_missing_id() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let left = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:left",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let left_id = db.ingest_cell_at(left, committed_at)?;
+        let missing_id = StateCellId::new();
+
+        let conflict = db.detect_conflict(left_id, missing_id);
+        let recommendation = db.recommend_conflict_resolution(left_id, missing_id);
+
+        assert!(matches!(
+            conflict,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        assert!(matches!(
+            recommendation,
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
         Ok(())

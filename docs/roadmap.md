@@ -99,6 +99,7 @@ Storage kernel
 
 1. Add typed embeddable operations for ingest, checkout, and audit. Implemented in `continuitydb-api` as `ContinuityDb<K>` over any `StorageKernel`, backed by first-class `CellLookup.cell_id` support in memory and file kernels.
 2. Add typed utility feedback revision operations. Implemented `ContinuityDb::record_utility_feedback` and `record_utility_feedback_at` so applications can record outcome feedback as append-only successor StateCells through the native API.
+3. Add typed read-only conflict analysis operations. Implemented `ContinuityDb::detect_conflict` and `recommend_conflict_resolution` so applications can inspect deterministic StateCell conflicts and non-mutating resolution recommendations through the native API.
 
 ## Steward Milestones
 
