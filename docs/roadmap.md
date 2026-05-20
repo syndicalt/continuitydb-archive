@@ -194,6 +194,7 @@ Storage kernel
 34. Add native accepted Steward `CreateCellDraft` application. Implemented optional `steward` feature method `apply_accepted_create_cell_draft_proposal_at` so embedders can deterministically promote accepted draft content into append-only StateCells with proposal-derived evidence.
 35. Add native accepted Steward proposal dispatch. Implemented optional `steward` feature method `apply_accepted_steward_proposal_at` so embedders can apply any current accepted Steward action through one deterministic policy-to-commit boundary.
 36. Add native revision-link record operations. Implemented endpoint-validating native API append/list methods for `RevisionLinkRecord` plus a Steward `LinkRevision` application path that writes native revision-link records without adding an operational link StateCell.
+37. Add typed accepted Steward proposal dispatch. Implemented optional `steward` feature enum `StewardApplicationResult` and `apply_accepted_steward_proposal_typed_at` so unified application can return either committed StateCell IDs or native revision-link records while preserving the legacy `StateCellId` dispatcher.
 
 ## Steward Milestones
 
