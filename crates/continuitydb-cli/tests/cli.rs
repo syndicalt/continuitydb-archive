@@ -501,6 +501,73 @@ fn cli_benchmark_local_model_enforces_candidate_grammar_requirement(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_contract_dir_writes_artifacts_and_supplies_grammar(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-contract-dir-baseline");
+    let contract_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-contract-dir-{}",
+        std::process::id()
+    ));
+    if contract_dir.exists() {
+        fs::remove_dir_all(&contract_dir)?;
+    }
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--candidate-defaults")
+        .arg("--enforce-candidate-requirements")
+        .arg("--contract-dir")
+        .arg(&contract_dir)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let schema_path = contract_dir.join("local-model-response.schema.json");
+    let grammar_path = contract_dir.join("local-model-response.gbnf");
+
+    assert!(schema_path.exists());
+    assert!(grammar_path.exists());
+    assert_eq!(
+        json["contract_artifacts"]["schema_path"].as_str(),
+        Some(schema_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        json["contract_artifacts"]["grammar_path"].as_str(),
+        Some(grammar_path.display().to_string().as_str())
+    );
+    assert!(json["contract_artifacts"]["schema_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["contract_artifacts"]["grammar_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_eq!(
+        json["runtime"]["arguments"][8].as_str(),
+        Some("--grammar-file")
+    );
+    assert_eq!(
+        json["runtime"]["arguments"][9].as_str(),
+        Some(grammar_path.display().to_string().as_str())
+    );
+    assert!(!baseline_path.exists());
+
+    fs::remove_dir_all(contract_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_evaluation_suite_outputs_case_contracts(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::cargo_bin("continuitydb")?

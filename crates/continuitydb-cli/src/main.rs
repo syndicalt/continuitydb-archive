@@ -67,11 +67,20 @@ struct LocalModelBenchmarkOptions<'a> {
     arguments: &'a [String],
     candidate_defaults: bool,
     grammar_path: Option<&'a Path>,
+    contract_dir: Option<&'a Path>,
     enforce_candidate_requirements: bool,
     baseline_path: &'a Path,
     dry_run: bool,
     compare_baseline: bool,
     fail_on_regression: bool,
+}
+
+#[cfg(feature = "local-model")]
+struct LocalModelContractArtifacts {
+    schema_path: PathBuf,
+    grammar_path: PathBuf,
+    schema_fingerprint: String,
+    grammar_fingerprint: String,
 }
 
 /// Named kernel requirement profiles understood by the CLI.
@@ -220,6 +229,9 @@ enum Command {
         /// GBNF grammar path passed to the executable as `--grammar-file <path>`.
         #[arg(long = "grammar-path")]
         grammar_path: Option<PathBuf>,
+        /// Directory where benchmark-local Steward schema and grammar artifacts are written.
+        #[arg(long = "contract-dir")]
+        contract_dir: Option<PathBuf>,
         /// Reject benchmark configurations that violate selected candidate requirements.
         #[arg(long = "enforce-candidate-requirements")]
         enforce_candidate_requirements: bool,
@@ -424,6 +436,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             arguments,
             candidate_defaults,
             grammar_path,
+            contract_dir,
             enforce_candidate_requirements,
             baseline_path,
             dry_run,
@@ -437,6 +450,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 arguments: &arguments,
                 candidate_defaults,
                 grammar_path: grammar_path.as_deref(),
+                contract_dir: contract_dir.as_deref(),
                 enforce_candidate_requirements,
                 baseline_path: &baseline_path,
                 dry_run,
@@ -618,9 +632,18 @@ fn benchmark_local_model_json(
     options: LocalModelBenchmarkOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let candidate = local_model_candidate(options.candidate_id)?;
+    let contract_artifacts = options
+        .contract_dir
+        .map(write_local_model_contract_artifacts)
+        .transpose()?;
+    let effective_grammar_path = options.grammar_path.or_else(|| {
+        contract_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.grammar_path.as_path())
+    });
     if options.enforce_candidate_requirements
         && candidate.requires_grammar()
-        && options.grammar_path.is_none()
+        && effective_grammar_path.is_none()
     {
         return Err(std::io::Error::other(
             "selected local model candidate requires grammar-constrained output; missing --grammar-path",
@@ -636,7 +659,7 @@ fn benchmark_local_model_json(
         LocalExecutableRunnerConfig::new(options.executable.to_path_buf())
             .with_model_path(options.model_path.to_path_buf())
     };
-    if let Some(grammar_path) = options.grammar_path {
+    if let Some(grammar_path) = effective_grammar_path {
         config = config
             .with_argument("--grammar-file")
             .with_argument(grammar_path);
@@ -649,6 +672,7 @@ fn benchmark_local_model_json(
             candidate,
             &config,
             options.baseline_path,
+            contract_artifacts.as_ref(),
         ));
     }
 
@@ -675,6 +699,7 @@ fn benchmark_local_model_json(
         options.compare_baseline,
         report.current_baseline(),
         report.regression(),
+        contract_artifacts.as_ref(),
     ))
 }
 
@@ -683,6 +708,7 @@ fn local_model_benchmark_dry_run_json(
     candidate: SmallModelCandidate,
     config: &LocalExecutableRunnerConfig,
     baseline_path: &Path,
+    contract_artifacts: Option<&LocalModelContractArtifacts>,
 ) -> serde_json::Value {
     serde_json::json!({
         "dry_run": true,
@@ -694,6 +720,7 @@ fn local_model_benchmark_dry_run_json(
         "evaluation_suite_fingerprint": default_steward_evaluation_suite().fingerprint(),
         "schema_fingerprint": local_model_contract_fingerprint(local_model_response_json_schema()),
         "grammar_fingerprint": local_model_contract_fingerprint(local_model_response_gbnf_grammar()),
+        "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "runtime": {
             "executable": config.executable().display().to_string(),
             "arguments": config.command_arguments(),
@@ -709,6 +736,42 @@ fn local_model_contract_fingerprint(text: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("fnv1a64:{hash:016x}")
+}
+
+#[cfg(feature = "local-model")]
+fn write_local_model_contract_artifacts(
+    contract_dir: &Path,
+) -> Result<LocalModelContractArtifacts, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(contract_dir)?;
+    let schema = local_model_response_json_schema();
+    let grammar = local_model_response_gbnf_grammar();
+    let schema_path = contract_dir.join("local-model-response.schema.json");
+    let grammar_path = contract_dir.join("local-model-response.gbnf");
+    std::fs::write(&schema_path, schema)?;
+    std::fs::write(&grammar_path, grammar)?;
+
+    Ok(LocalModelContractArtifacts {
+        schema_path,
+        grammar_path,
+        schema_fingerprint: local_model_contract_fingerprint(schema),
+        grammar_fingerprint: local_model_contract_fingerprint(grammar),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_contract_artifacts_json(
+    contract_artifacts: Option<&LocalModelContractArtifacts>,
+) -> serde_json::Value {
+    contract_artifacts
+        .map(|artifacts| {
+            serde_json::json!({
+                "schema_path": artifacts.schema_path.display().to_string(),
+                "grammar_path": artifacts.grammar_path.display().to_string(),
+                "schema_fingerprint": artifacts.schema_fingerprint,
+                "grammar_fingerprint": artifacts.grammar_fingerprint,
+            })
+        })
+        .unwrap_or(serde_json::Value::Null)
 }
 
 #[cfg(feature = "local-model")]
@@ -728,6 +791,7 @@ fn local_model_benchmark_json(
     compared: bool,
     baseline: &LocalModelBenchmarkBaseline,
     regression: Option<&LocalModelBenchmarkRegression>,
+    contract_artifacts: Option<&LocalModelContractArtifacts>,
 ) -> serde_json::Value {
     let summary = baseline.evaluation_summary();
     serde_json::json!({
@@ -745,6 +809,7 @@ fn local_model_benchmark_json(
         "evaluation_suite_fingerprint": baseline.evaluation_suite_fingerprint(),
         "schema_fingerprint": baseline.schema_fingerprint(),
         "grammar_fingerprint": baseline.grammar_fingerprint(),
+        "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "runtime": {
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),

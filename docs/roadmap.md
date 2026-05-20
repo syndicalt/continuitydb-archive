@@ -256,6 +256,7 @@ Storage kernel
 44. Add CLI local-model benchmark candidate defaults. Added `benchmark-local-model --candidate-defaults` so benchmark runs and dry-runs can materialize candidate-recommended runner arguments before operator-supplied extra arguments.
 45. Add CLI local-model benchmark grammar path support. Added `benchmark-local-model --grammar-path` so dry-runs and benchmark runs can pass generated GBNF grammar artifacts as first-class runtime arguments.
 46. Add CLI local-model candidate requirement enforcement. Added `benchmark-local-model --enforce-candidate-requirements` so strict dry-runs and benchmark runs reject grammar-required candidates when no grammar artifact path is supplied.
+47. Add CLI local-model benchmark contract artifact directory. Added `benchmark-local-model --contract-dir` so dry-runs and benchmark runs can materialize schema and grammar artifacts, report their fingerprints, and use the generated grammar path for strict grammar-required candidates.
 
 ## Small Embeddable Model Track
 
