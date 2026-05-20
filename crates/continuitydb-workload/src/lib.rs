@@ -10,6 +10,7 @@ use continuitydb_core::{
 use continuitydb_kernel::{FileKernelLookupPlan, KernelError, StorageKernel};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -411,6 +412,43 @@ pub enum WorkloadBaselineRegression {
         /// Maximum allowed current elapsed nanoseconds under the threshold.
         max_allowed_nanos: u128,
     },
+    /// Lookup-plan diagnostics were added or removed between comparable workload snapshots.
+    LookupPlanPresenceChanged {
+        /// Whether the baseline snapshot had lookup-plan diagnostics.
+        previous: bool,
+        /// Whether the current snapshot has lookup-plan diagnostics.
+        current: bool,
+    },
+    /// Ordered indexed lookup constraints changed.
+    LookupPlanIndexedConstraintsChanged {
+        /// Baseline ordered indexed constraint names.
+        previous: Vec<String>,
+        /// Current ordered indexed constraint names.
+        current: Vec<String>,
+    },
+    /// Final lookup-plan candidate count changed.
+    LookupPlanCandidateCountChanged {
+        /// Baseline candidate count.
+        previous: usize,
+        /// Current candidate count.
+        current: usize,
+    },
+    /// Lookup-plan full-scan fallback changed.
+    LookupPlanFullScanChanged {
+        /// Baseline full-scan status.
+        previous: bool,
+        /// Current full-scan status.
+        current: bool,
+    },
+    /// Candidate count for a shared indexed lookup constraint changed.
+    LookupPlanConstraintCandidateCountChanged {
+        /// Stable indexed constraint name.
+        name: String,
+        /// Baseline candidate count for this constraint.
+        previous: usize,
+        /// Current candidate count for this constraint.
+        current: usize,
+    },
 }
 
 /// Workload generation failure.
@@ -653,6 +691,12 @@ pub fn compare_workload_snapshot_to_baseline(
         },
     );
 
+    push_lookup_plan_regressions(
+        &mut regressions,
+        &previous.lookup_plan,
+        &current.lookup_plan,
+    );
+
     let ingest_allowed = max_allowed_elapsed(
         previous.ingest.elapsed_nanos,
         thresholds.max_elapsed_growth_percent,
@@ -695,6 +739,86 @@ fn push_if_changed<T, F>(
 {
     if previous != current {
         regressions.push(build(previous, current));
+    }
+}
+
+fn push_lookup_plan_regressions(
+    regressions: &mut Vec<WorkloadBaselineRegression>,
+    previous: &Option<WorkloadLookupPlanSnapshot>,
+    current: &Option<WorkloadLookupPlanSnapshot>,
+) {
+    match (previous, current) {
+        (None, None) => {}
+        (None, Some(_)) | (Some(_), None) => {
+            regressions.push(WorkloadBaselineRegression::LookupPlanPresenceChanged {
+                previous: previous.is_some(),
+                current: current.is_some(),
+            });
+        }
+        (Some(previous), Some(current)) => {
+            push_if_changed(
+                regressions,
+                previous.indexed_constraints.as_slice(),
+                current.indexed_constraints.as_slice(),
+                |previous, current| {
+                    WorkloadBaselineRegression::LookupPlanIndexedConstraintsChanged {
+                        previous: previous.to_vec(),
+                        current: current.to_vec(),
+                    }
+                },
+            );
+            push_if_changed(
+                regressions,
+                previous.candidate_count,
+                current.candidate_count,
+                |previous, current| WorkloadBaselineRegression::LookupPlanCandidateCountChanged {
+                    previous,
+                    current,
+                },
+            );
+            push_if_changed(
+                regressions,
+                previous.full_scan,
+                current.full_scan,
+                |previous, current| WorkloadBaselineRegression::LookupPlanFullScanChanged {
+                    previous,
+                    current,
+                },
+            );
+            push_lookup_plan_constraint_candidate_count_regressions(
+                regressions,
+                &previous.indexed_constraint_plans,
+                &current.indexed_constraint_plans,
+            );
+        }
+    }
+}
+
+fn push_lookup_plan_constraint_candidate_count_regressions(
+    regressions: &mut Vec<WorkloadBaselineRegression>,
+    previous: &[WorkloadIndexedConstraintPlanSnapshot],
+    current: &[WorkloadIndexedConstraintPlanSnapshot],
+) {
+    let current_counts = current
+        .iter()
+        .map(|plan| (plan.name.as_str(), plan.candidate_count))
+        .collect::<BTreeMap<_, _>>();
+
+    for previous_plan in previous {
+        if let Some(current_count) = current_counts.get(previous_plan.name.as_str()) {
+            push_if_changed(
+                regressions,
+                previous_plan.candidate_count,
+                *current_count,
+                |previous, current| {
+                    WorkloadBaselineRegression::LookupPlanConstraintCandidateCountChanged {
+                        name: previous_plan.name.clone(),
+                        previous,
+                        current,
+                    }
+                },
+            );
+        }
     }
 }
 
@@ -1325,6 +1449,96 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn workload_baseline_regression_detects_lookup_plan_presence_change(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = baseline_record("current", "file", 100, 100)?;
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.lookup_plan =
+            Some(lookup_plan_snapshot(&["scope"], &[("scope", 8)], 8, false));
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert_eq!(
+            comparison.regressions,
+            vec![WorkloadBaselineRegression::LookupPlanPresenceChanged {
+                previous: false,
+                current: true
+            }]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_ignores_missing_lookup_plans(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = baseline_record("current", "memory", 100, 100)?;
+        let current_snapshot = deterministic_snapshot();
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert!(comparison.passed());
+        assert!(comparison.regressions.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_detects_lookup_plan_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut previous = baseline_record("current", "file", 100, 100)?;
+        previous.snapshot.lookup_plan = Some(lookup_plan_snapshot(
+            &["scope", "minimum_confidence"],
+            &[("scope", 8), ("minimum_confidence", 8)],
+            8,
+            false,
+        ));
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.lookup_plan = Some(lookup_plan_snapshot(
+            &["scope", "activation"],
+            &[("scope", 7), ("activation", 9)],
+            9,
+            true,
+        ));
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert_eq!(
+            comparison.regressions,
+            vec![
+                WorkloadBaselineRegression::LookupPlanIndexedConstraintsChanged {
+                    previous: vec!["scope".to_string(), "minimum_confidence".to_string()],
+                    current: vec!["scope".to_string(), "activation".to_string()],
+                },
+                WorkloadBaselineRegression::LookupPlanCandidateCountChanged {
+                    previous: 8,
+                    current: 9,
+                },
+                WorkloadBaselineRegression::LookupPlanFullScanChanged {
+                    previous: false,
+                    current: true,
+                },
+                WorkloadBaselineRegression::LookupPlanConstraintCandidateCountChanged {
+                    name: "scope".to_string(),
+                    previous: 8,
+                    current: 7,
+                },
+            ]
+        );
+        Ok(())
+    }
+
     fn sample_measurement() -> Result<WorkloadMeasurement, Box<dyn std::error::Error>> {
         let workload = generate_world_model_workload(sample_config()?)?;
         let mut kernel = MemoryKernel::default();
@@ -1392,6 +1606,32 @@ mod tests {
                 selected_token_count: 370,
             },
             lookup_plan: None,
+        }
+    }
+
+    fn lookup_plan_snapshot(
+        constraints: &[&str],
+        constraint_plans: &[(&str, usize)],
+        candidate_count: usize,
+        full_scan: bool,
+    ) -> WorkloadLookupPlanSnapshot {
+        WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: constraints.len(),
+            indexed_constraints: constraints
+                .iter()
+                .map(|constraint| constraint.to_string())
+                .collect(),
+            indexed_constraint_plans: constraint_plans
+                .iter()
+                .map(
+                    |(name, candidate_count)| WorkloadIndexedConstraintPlanSnapshot {
+                        name: name.to_string(),
+                        candidate_count: *candidate_count,
+                    },
+                )
+                .collect(),
+            candidate_count,
+            full_scan,
         }
     }
 

@@ -2897,6 +2897,87 @@ fn cli_measure_workload_records_baseline_for_file_kernel() -> Result<(), Box<dyn
 }
 
 #[test]
+fn cli_measure_workload_reports_file_lookup_plan_baseline_regression(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let first_store_path =
+        temp_store_path("continuitydb-cli-measure-workload-file-plan-regression-store-first");
+    let second_store_path =
+        temp_store_path("continuitydb-cli-measure-workload-file-plan-regression-store-second");
+    let baseline_path = temp_store_path("continuitydb-cli-measure-workload-file-plan-regression");
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("file")
+        .arg("--store-path")
+        .arg(&first_store_path)
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("file-plan-regression")
+        .assert()
+        .success();
+
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    let mut record: Value = serde_json::from_str(
+        baseline_text
+            .lines()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing baseline record"))?,
+    )?;
+    record["snapshot"]["lookup_plan"]["candidate_count"] = Value::from(7);
+    record["snapshot"]["lookup_plan"]["indexed_constraint_plans"][0]["candidate_count"] =
+        Value::from(7);
+    fs::write(
+        &baseline_path,
+        format!("{}\n", serde_json::to_string(&record)?),
+    )?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("file")
+        .arg("--store-path")
+        .arg(&second_store_path)
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("file-plan-regression")
+        .arg("--compare-baseline")
+        .arg("--max-elapsed-growth-percent")
+        .arg("1000000000000")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["baseline_comparison"]["passed"].as_bool(), Some(false));
+    assert_eq!(
+        json["baseline_comparison"]["regressions"][0]["LookupPlanCandidateCountChanged"]
+            ["previous"]
+            .as_u64(),
+        Some(7)
+    );
+    assert_eq!(
+        json["baseline_comparison"]["regressions"][0]["LookupPlanCandidateCountChanged"]["current"]
+            .as_u64(),
+        Some(8)
+    );
+    assert_eq!(
+        json["baseline_comparison"]["regressions"][1]["LookupPlanConstraintCandidateCountChanged"]
+            ["name"]
+            .as_str(),
+        Some("scope")
+    );
+
+    fs::remove_file(first_store_path)?;
+    fs::remove_file(second_store_path)?;
+    fs::remove_file(baseline_path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_measure_workload_compares_baseline_and_reports_passed(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let baseline_path = temp_store_path("continuitydb-cli-measure-workload-compare-pass");
