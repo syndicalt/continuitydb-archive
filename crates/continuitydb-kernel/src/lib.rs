@@ -395,6 +395,7 @@ struct FileKernelIndex {
     scopes: HashMap<Scope, Vec<usize>>,
     answerability_questions: HashMap<String, Vec<usize>>,
     evidence_sources: HashMap<String, Vec<usize>>,
+    max_evidence_confidences: Vec<(f32, usize)>,
     activations: HashMap<ActivationState, Vec<usize>>,
     dependency_targets: HashMap<StateCellId, Vec<usize>>,
     dependency_target_kinds: HashMap<(StateCellId, CellDependencyKind), Vec<usize>>,
@@ -469,6 +470,8 @@ impl FileKernelIndex {
                 .or_default()
                 .push(position);
         }
+        self.max_evidence_confidences
+            .push((max_evidence_confidence(&cell), position));
         self.activations
             .entry(cell.activation)
             .or_default()
@@ -498,6 +501,14 @@ impl FileKernelIndex {
             });
         self.cells.push(cell);
         Ok(())
+    }
+
+    fn positions_with_minimum_confidence(&self, minimum_confidence: Confidence) -> Vec<usize> {
+        self.max_evidence_confidences
+            .iter()
+            .filter(|(confidence, _position)| *confidence >= minimum_confidence.value())
+            .map(|(_confidence, position)| *position)
+            .collect()
     }
 
     fn apply_explicit_manifest(&mut self, manifest: CommitManifest) -> Result<(), KernelError> {
@@ -1077,6 +1088,13 @@ fn record_file_health(health: &mut FileKernelHealth, has_checksum: bool) {
     }
 }
 
+fn max_evidence_confidence(cell: &StateCell) -> f32 {
+    cell.evidence
+        .iter()
+        .map(|evidence| evidence.confidence.value())
+        .fold(0.0, f32::max)
+}
+
 impl StorageKernel for FileKernel {
     fn capabilities(&self) -> KernelCapabilities {
         KernelCapabilities::file_append_log()
@@ -1258,6 +1276,12 @@ impl StorageKernel for FileKernel {
                     })
                     .unwrap_or_default()
             }
+        } else if let Some(minimum_confidence) = lookup.minimum_confidence {
+            self.index
+                .positions_with_minimum_confidence(minimum_confidence)
+                .iter()
+                .map(|position| &self.index.cells[*position])
+                .collect()
         } else {
             self.index.cells.iter().collect()
         };
@@ -3501,6 +3525,57 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![strong]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rebuilds_confidence_index() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-confidence-index-reopen");
+        let weak = sample_cell("project:continuitydb:confidence-index-weak", 0.61, 12)?;
+        let mut strong = sample_cell("project:continuitydb:confidence-index-strong", 0.86, 15)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            append_committed(&mut kernel, weak)?;
+            strong = append_committed(&mut kernel, strong)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let indexed = reopened
+            .index
+            .max_evidence_confidences
+            .iter()
+            .filter(|(confidence, _position)| *confidence >= 0.8)
+            .map(|(_confidence, position)| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+        let lookup_results = reopened.lookup_cells(CellLookup {
+            minimum_confidence: Some(Confidence::new(0.8)?),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(indexed, vec![strong.clone()]);
+        assert_eq!(lookup_results, vec![strong]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_confidence_index_after_append() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-confidence-index-append");
+        let strong = sample_cell("project:continuitydb:confidence-index-append", 0.91, 12)?;
+        let mut kernel = FileKernel::open(&path)?;
+
+        let expected = append_committed(&mut kernel, strong)?;
+        let indexed = kernel
+            .index
+            .max_evidence_confidences
+            .iter()
+            .filter(|(confidence, _position)| *confidence >= 0.9)
+            .map(|(_confidence, position)| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![expected]);
         fs::remove_file(path)?;
         Ok(())
     }
