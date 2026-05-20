@@ -1545,6 +1545,106 @@ printf '%s\n' '{{"proposals":[{{"action":{{"type":"request_verification","cell_i
     Ok(())
 }
 
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_benchmark_local_model_artifact_dir_writes_instability_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-unstable-bundle-runner");
+    let counter_path = temp_store_path("continuitydb-cli-local-model-unstable-bundle-counter");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-unstable-bundle-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-unstable-bundle-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    let script = format!(
+        r#"#!/usr/bin/env sh
+cat >/dev/null
+counter_path='{counter_path}'
+count=0
+if test -f "$counter_path"; then
+    count=$(cat "$counter_path")
+fi
+count=$((count + 1))
+printf '%s' "$count" >"$counter_path"
+if test "$count" -le 5; then
+    thin_rationale='The evidence is thin, so uncertainty remains.'
+else
+    thin_rationale='The evidence is thin, so uncertainty still remains.'
+fi
+printf '%s\n' '{{"proposals":[{{"action":{{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."}},"rationale":"'"$thin_rationale"'","citations":["continuitydb://evaluation/thin-evidence"]}},{{"action":{{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"}},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]}},{{"action":{{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."}},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]}},{{"action":{{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"}},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]}},{{"action":{{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."}},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}}]}}'
+"#,
+        counter_path = counter_path.display()
+    );
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--stability-trials")
+        .arg("2")
+        .arg("--fail-on-unstable")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--temp")
+        .arg("--arg")
+        .arg("0")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("local model benchmark stability check failed"));
+
+    assert!(!baseline_path.exists());
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let bundle_manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let bundle_manifest: Value = serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+
+    assert_eq!(report["stability"]["stable"].as_bool(), Some(false));
+    assert_eq!(report["stability"]["trials"].as_u64(), Some(2));
+    assert!(report["stability"]["case_reports"]
+        .as_array()
+        .is_some_and(|cases| cases
+            .iter()
+            .any(|case| case["stable"].as_bool() == Some(false))));
+    assert_eq!(
+        report["bundle_manifest"]["manifest_path"].as_str(),
+        Some(bundle_manifest_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["benchmark_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["response_artifacts"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+    assert!(
+        bundle_manifest["response_artifact_manifest"]["manifest_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("responses/local-model-responses.manifest.json"))
+    );
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(counter_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_benchmark_local_model_dry_run_compare_reports_missing_baseline_without_creating_file(

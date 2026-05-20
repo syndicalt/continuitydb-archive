@@ -280,6 +280,7 @@ Storage kernel
 68. Add CLI local-model benchmark bundle manifests. Added `local-model-benchmark.manifest.json` inside `benchmark-local-model --artifact-dir` output so archived benchmark bundles expose one versioned entry point with report, contract, prompt, response, and nested response-manifest references.
 69. Add CLI local-model fixed-failure artifact bundles. Extended `benchmark-local-model --artifact-dir --fail-on-failed-cases` so failed fixed-suite runs still write contracts, prompts, responses, nested response manifests, `benchmark-report.json`, and the root bundle manifest before exiting non-zero without recording a baseline.
 70. Add CLI local-model regression artifact bundles. Extended `benchmark-local-model --artifact-dir --fail-on-regression` so compatible baseline regressions still write the current benchmark report, regression comparison, responses, and root bundle manifest before exiting non-zero without recording the regressed run.
+71. Add CLI local-model instability artifact bundles. Extended `benchmark-local-model --artifact-dir --stability-trials --fail-on-unstable` so unstable repeated-output checks still write a benchmark report with stability drift metadata, responses, nested response manifests, and the root bundle manifest before exiting non-zero without recording a baseline.
 
 ## Small Embeddable Model Track
 

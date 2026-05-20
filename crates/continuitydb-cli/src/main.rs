@@ -828,6 +828,40 @@ fn benchmark_local_model_json(
             .as_ref()
             .is_some_and(|stability| !stability.stable())
     {
+        if let Some(artifact_dir) = options.artifact_dir {
+            let (report, responses) = if effective_response_dir.is_some() {
+                benchmark.run_with_responses(identity)
+            } else {
+                (benchmark.run(identity), Vec::new())
+            };
+            let response_artifacts = effective_response_dir
+                .map(|response_dir| write_local_model_response_artifacts(response_dir, &responses))
+                .transpose()?
+                .unwrap_or_default();
+            let response_manifest = if let Some(response_dir) = effective_response_dir {
+                Some(write_local_model_response_artifact_manifest(
+                    response_dir,
+                    &response_artifacts,
+                )?)
+            } else {
+                None
+            };
+            let current_baseline = LocalModelBenchmarkBaseline::from_report(report, Utc::now());
+            let report = local_model_benchmark_json(
+                options.baseline_path,
+                options.compare_baseline,
+                &current_baseline,
+                None,
+                LocalModelBenchmarkArtifacts {
+                    contract: contract_artifacts.as_ref(),
+                    prompts: &prompt_artifacts,
+                    responses: &response_artifacts,
+                    response_manifest: response_manifest.as_ref(),
+                },
+                stability.as_ref(),
+            );
+            write_local_model_artifact_bundle_report(artifact_dir, report)?;
+        }
         return Err(std::io::Error::other("local model benchmark stability check failed").into());
     }
 
