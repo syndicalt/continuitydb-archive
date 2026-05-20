@@ -47,6 +47,8 @@ pub struct CheckoutSlice {
     pub uncertainty: Vec<UncertaintyEntry>,
     /// Selected frontier cells that should remain monitored.
     pub frontier_recommendations: Vec<FrontierRecommendation>,
+    /// Candidate cells that matched constraints but were not selected.
+    pub alternatives: Vec<CheckoutAlternative>,
 }
 
 /// Deterministic uncertainty metadata for a selected StateCell.
@@ -65,6 +67,26 @@ pub struct FrontierRecommendation {
     pub cell_id: StateCellId,
     /// Citation locators supporting the frontier recommendation.
     pub citations: Vec<String>,
+}
+
+/// Deterministic reason a matching candidate was not selected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CheckoutAlternativeReason {
+    /// Candidate could not fit inside the remaining token budget.
+    TokenBudgetExceeded,
+}
+
+/// Metadata for a matching candidate omitted from the selected slice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CheckoutAlternative {
+    /// Omitted candidate cell identifier.
+    pub cell_id: StateCellId,
+    /// Deterministic omission reason.
+    pub reason: CheckoutAlternativeReason,
+    /// Citation locators supporting the omitted candidate.
+    pub citations: Vec<String>,
+    /// Maximum confidence across the omitted candidate's evidence.
+    pub max_confidence: Confidence,
 }
 
 /// Audit trace for a StateCell.
@@ -107,11 +129,19 @@ pub fn checkout<K: StorageKernel>(
 
     let mut total_tokens = 0;
     let mut cells = Vec::new();
+    let mut alternatives = Vec::new();
     for cell in candidates {
         let next_total = total_tokens + cell.cost.token_count;
         if next_total <= request.token_budget {
             total_tokens = next_total;
             cells.push(cell);
+        } else {
+            alternatives.push(CheckoutAlternative {
+                cell_id: cell.id,
+                reason: CheckoutAlternativeReason::TokenBudgetExceeded,
+                citations: citations(&cell),
+                max_confidence: Confidence::new(max_confidence(&cell))?,
+            });
         }
     }
 
@@ -140,6 +170,7 @@ pub fn checkout<K: StorageKernel>(
         audit_traces,
         uncertainty,
         frontier_recommendations,
+        alternatives,
     })
 }
 
@@ -415,6 +446,41 @@ mod tests {
             slice.frontier_recommendations[0].citations,
             vec!["test://project:continuitydb:frontier".to_string()]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_records_token_budget_alternatives() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let selected = sample_cell("project:continuitydb:selected", 0.95, 10)?;
+        let omitted = sample_cell("project:continuitydb:omitted", 0.90, 10)?;
+        kernel.append_cell(selected.clone())?;
+        kernel.append_cell(omitted.clone())?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                answerability_question: None,
+                evidence_source: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 10,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![selected]);
+        assert_eq!(slice.alternatives.len(), 1);
+        assert_eq!(slice.alternatives[0].cell_id, omitted.id);
+        assert_eq!(
+            slice.alternatives[0].reason,
+            super::CheckoutAlternativeReason::TokenBudgetExceeded
+        );
+        assert_eq!(
+            slice.alternatives[0].citations,
+            vec!["test://project:continuitydb:omitted".to_string()]
+        );
+        assert_eq!(slice.alternatives[0].max_confidence, Confidence::new(0.90)?);
         Ok(())
     }
 
