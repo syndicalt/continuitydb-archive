@@ -27,7 +27,7 @@
 - Modify: `crates/continuitydb-memory/src/lib.rs`
 - Modify: `crates/continuitydb-checkout/src/lib.rs`
 
-- [ ] **Step 1: Write failing memory tests**
+- [x] **Step 1: Write failing memory tests**
 
 Add in `crates/continuitydb-memory/src/lib.rs` tests:
 
@@ -122,7 +122,7 @@ fn memory_kernel_reports_unknown_commit_manifest_cursor(
 
 Import `CommitManifestLookup` in the memory tests.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -133,7 +133,7 @@ cargo test -p continuitydb-memory limits_commit_manifest
 
 Expected: FAIL because `CommitManifestLookup`, `CommitNotFound`, and `list_commit_manifests_matching` do not exist.
 
-- [ ] **Step 3: Implement kernel lookup type and memory behavior**
+- [x] **Step 3: Implement kernel lookup type and memory behavior**
 
 In `crates/continuitydb-kernel/src/lib.rs`, add:
 
@@ -212,7 +212,7 @@ fn list_commit_manifests_matching(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run:
 
@@ -228,7 +228,7 @@ Expected: PASS.
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Write failing file test**
+- [x] **Step 1: Write failing file test**
 
 Add in `crates/continuitydb-kernel/src/lib.rs` tests:
 
@@ -281,13 +281,13 @@ fn file_kernel_reconstructs_cursor_commit_manifest_listing_after_reopen(
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p continuitydb-kernel cursor_commit_manifest`
 
 Expected: FAIL until file-kernel cursor listing is implemented.
 
-- [ ] **Step 3: Implement file cursor listing**
+- [x] **Step 3: Implement file cursor listing**
 
 Add `list_manifests_matching` to `FileKernelIndex` using the same cursor and limit logic as memory.
 
@@ -302,7 +302,7 @@ fn list_commit_manifests_matching(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p continuitydb-kernel cursor_commit_manifest`
 
@@ -313,7 +313,7 @@ Expected: PASS.
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Write failing API test**
+- [x] **Step 1: Write failing API test**
 
 Add in `crates/continuitydb-api/src/lib.rs` tests:
 
@@ -366,13 +366,13 @@ fn api_returns_commit_manifests_after_cursor_with_limit(
 
 Import `CommitManifestLookup` in API tests.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p continuitydb-api after_cursor`
 
 Expected: FAIL because `ContinuityDb::commit_manifests_matching` does not exist.
 
-- [ ] **Step 3: Implement API method**
+- [x] **Step 3: Implement API method**
 
 Import `CommitManifestLookup` from `continuitydb_kernel` and add:
 
@@ -388,7 +388,7 @@ pub fn commit_manifests_matching(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p continuitydb-api after_cursor`
 
@@ -401,7 +401,7 @@ Expected: PASS.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-commit-manifest-cursor-listing.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 In `README.md`, add:
 
@@ -415,7 +415,7 @@ In `docs/roadmap.md`, add Storage Kernel milestone 13:
 13. Add cursor-based commit manifest listing. Implemented `CommitManifestLookup` with exclusive commit cursors and limits across memory/file kernels and the native API for incremental audit, backup, and future sync reads.
 ```
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run:
 
@@ -428,7 +428,7 @@ cargo test -p continuitydb-api after_cursor
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -442,7 +442,7 @@ git diff --check
 
 Expected: all PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 

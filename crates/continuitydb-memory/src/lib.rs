@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{CommitId, CommitManifest, StateCell, SystemTimeRange};
-use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
+use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
 use std::collections::{HashMap, HashSet};
 
 /// Append-only in-memory storage kernel.
@@ -153,9 +153,28 @@ impl StorageKernel for MemoryKernel {
     }
 
     fn list_commit_manifests(&self) -> Result<Vec<CommitManifest>, KernelError> {
+        self.list_commit_manifests_matching(CommitManifestLookup::default())
+    }
+
+    fn list_commit_manifests_matching(
+        &self,
+        lookup: CommitManifestLookup,
+    ) -> Result<Vec<CommitManifest>, KernelError> {
+        let start = if let Some(after) = lookup.after {
+            self.manifest_order
+                .iter()
+                .position(|commit_id| *commit_id == after)
+                .map(|position| position + 1)
+                .ok_or(KernelError::CommitNotFound)?
+        } else {
+            0
+        };
+        let limit = lookup.limit.unwrap_or(usize::MAX);
         Ok(self
             .manifest_order
             .iter()
+            .skip(start)
+            .take(limit)
             .filter_map(|commit_id| self.manifests.get(commit_id).cloned())
             .collect())
     }
@@ -169,7 +188,7 @@ mod tests {
         Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
         StateCellId, TrustSignal, ValidTimeRange,
     };
-    use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
+    use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
 
     use super::MemoryKernel;
 
@@ -394,6 +413,96 @@ mod tests {
         kernel.append_cells_at_with_commit_id(Vec::new(), test_commit_time()?, CommitId::new())?;
 
         assert!(kernel.list_commit_manifests()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_lists_commit_manifests_after_cursor() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut kernel = MemoryKernel::default();
+        let first_time = test_commit_time()?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let third_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let third_commit = CommitId::new();
+
+        kernel.append_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:cursor-first", 0.91, 12)?],
+            first_time,
+            first_commit,
+        )?;
+        kernel.append_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:cursor-second", 0.83, 15)?],
+            second_time,
+            second_commit,
+        )?;
+        kernel.append_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:cursor-third", 0.77, 18)?],
+            third_time,
+            third_commit,
+        )?;
+
+        let manifests = kernel.list_commit_manifests_matching(CommitManifestLookup {
+            after: Some(first_commit),
+            limit: None,
+        })?;
+
+        assert_eq!(
+            manifests
+                .iter()
+                .map(|manifest| manifest.commit_id)
+                .collect::<Vec<_>>(),
+            vec![second_commit, third_commit]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_limits_commit_manifest_listing() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        kernel.append_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:limit-first", 0.91, 12)?],
+            test_commit_time()?,
+            first_commit,
+        )?;
+        kernel.append_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:limit-second", 0.83, 15)?],
+            Utc.with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+                .single()
+                .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?,
+            second_commit,
+        )?;
+
+        let manifests = kernel.list_commit_manifests_matching(CommitManifestLookup {
+            after: None,
+            limit: Some(1),
+        })?;
+
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].commit_id, first_commit);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_reports_unknown_commit_manifest_cursor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let kernel = MemoryKernel::default();
+
+        let result = kernel.list_commit_manifests_matching(CommitManifestLookup {
+            after: Some(CommitId::new()),
+            limit: None,
+        });
+
+        assert!(matches!(result, Err(KernelError::CommitNotFound)));
         Ok(())
     }
 

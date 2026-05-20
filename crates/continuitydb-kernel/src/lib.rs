@@ -22,6 +22,9 @@ pub enum KernelError {
     /// A commit identifier already has a visible manifest.
     #[error("commit already exists")]
     DuplicateCommit,
+    /// Requested commit was not found.
+    #[error("commit not found")]
+    CommitNotFound,
     /// Storage kernel I/O failed.
     #[error("storage kernel I/O failed")]
     StoreIo,
@@ -57,6 +60,15 @@ pub struct CellLookup {
     pub dependency_target: Option<StateCellId>,
     /// Optional dependency kind filter, applied with dependency target when present.
     pub dependency_kind: Option<CellDependencyKind>,
+}
+
+/// Query constraints for ordered commit manifest listing.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CommitManifestLookup {
+    /// Exclusive cursor commit. When present, listing starts after this commit.
+    pub after: Option<CommitId>,
+    /// Maximum manifests to return.
+    pub limit: Option<usize>,
 }
 
 /// Minimal append and lookup contract required by the first ContinuityDB milestone.
@@ -125,7 +137,15 @@ pub trait StorageKernel {
     ) -> Result<Option<CommitManifest>, KernelError>;
 
     /// Lists commit manifests in commit visibility order.
-    fn list_commit_manifests(&self) -> Result<Vec<CommitManifest>, KernelError>;
+    fn list_commit_manifests(&self) -> Result<Vec<CommitManifest>, KernelError> {
+        self.list_commit_manifests_matching(CommitManifestLookup::default())
+    }
+
+    /// Lists commit manifests matching deterministic constraints.
+    fn list_commit_manifests_matching(
+        &self,
+        lookup: CommitManifestLookup,
+    ) -> Result<Vec<CommitManifest>, KernelError>;
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -198,6 +218,29 @@ impl FileKernelIndex {
             .iter()
             .filter_map(|commit_id| self.manifests.get(commit_id).cloned())
             .collect()
+    }
+
+    fn list_manifests_matching(
+        &self,
+        lookup: CommitManifestLookup,
+    ) -> Result<Vec<CommitManifest>, KernelError> {
+        let start = if let Some(after) = lookup.after {
+            self.manifest_order
+                .iter()
+                .position(|commit_id| *commit_id == after)
+                .map(|position| position + 1)
+                .ok_or(KernelError::CommitNotFound)?
+        } else {
+            0
+        };
+        let limit = lookup.limit.unwrap_or(usize::MAX);
+        Ok(self
+            .manifest_order
+            .iter()
+            .skip(start)
+            .take(limit)
+            .filter_map(|commit_id| self.manifests.get(commit_id).cloned())
+            .collect())
     }
 }
 
@@ -445,11 +488,18 @@ impl StorageKernel for FileKernel {
     fn list_commit_manifests(&self) -> Result<Vec<CommitManifest>, KernelError> {
         Ok(self.index.list_manifests())
     }
+
+    fn list_commit_manifests_matching(
+        &self,
+        lookup: CommitManifestLookup,
+    ) -> Result<Vec<CommitManifest>, KernelError> {
+        self.index.list_manifests_matching(lookup)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CellLookup, FileKernel, KernelError, StorageKernel};
+    use super::{CellLookup, CommitManifestLookup, FileKernel, KernelError, StorageKernel};
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
@@ -706,6 +756,65 @@ mod tests {
         assert_eq!(manifests[1].commit_id, second_commit);
         assert_eq!(manifests[1].committed_at, second_time);
         assert_eq!(manifests[1].cell_ids, expected_second_ids);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_reconstructs_cursor_commit_manifest_listing_after_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-manifest-cursor-list");
+        let first_time = test_commit_time()?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let third_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let third_commit = CommitId::new();
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at_with_commit_id(
+                vec![sample_cell(
+                    "project:continuitydb:file-cursor-first",
+                    0.91,
+                    12,
+                )?],
+                first_time,
+                first_commit,
+            )?;
+            kernel.append_cells_at_with_commit_id(
+                vec![sample_cell(
+                    "project:continuitydb:file-cursor-second",
+                    0.83,
+                    15,
+                )?],
+                second_time,
+                second_commit,
+            )?;
+            kernel.append_cells_at_with_commit_id(
+                vec![sample_cell(
+                    "project:continuitydb:file-cursor-third",
+                    0.77,
+                    18,
+                )?],
+                third_time,
+                third_commit,
+            )?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let manifests = reopened.list_commit_manifests_matching(CommitManifestLookup {
+            after: Some(first_commit),
+            limit: Some(1),
+        })?;
+
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].commit_id, second_commit);
         fs::remove_file(path)?;
         Ok(())
     }

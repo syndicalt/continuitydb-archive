@@ -66,6 +66,7 @@ Storage kernel
 10. Add first-class commit identifiers. Implemented `CommitId`, `StateCell.commit_id`, explicit commit-stamped append APIs, and `CellLookup.commit_id` filtering across memory and file kernels so transaction-scoped continuity slices have stable audit IDs.
 11. Add first-class commit manifests. Implemented `CommitManifest` and kernel/API manifest lookup so a commit boundary can expose its commit time and ordered StateCell IDs without reconstructing from checkout results.
 12. Add commit manifest timeline listing. Implemented ordered `list_commit_manifests` support across the storage kernel, memory/file kernels, and native API so audit and sync callers can discover commit boundaries deterministically.
+13. Add cursor-based commit manifest listing. Implemented `CommitManifestLookup` with exclusive commit cursors and limits across memory/file kernels and the native API for incremental audit, backup, and future sync reads.
 
 ## Checkout Milestones
 

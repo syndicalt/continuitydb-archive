@@ -5,7 +5,7 @@ use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
 use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
-use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
+use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
@@ -150,6 +150,16 @@ impl<K: StorageKernel> ContinuityDb<K> {
         self.kernel.list_commit_manifests().map_err(Into::into)
     }
 
+    /// Returns commit manifests matching deterministic listing constraints.
+    pub fn commit_manifests_matching(
+        &self,
+        lookup: CommitManifestLookup,
+    ) -> Result<Vec<CommitManifest>, ContinuityError> {
+        self.kernel
+            .list_commit_manifests_matching(lookup)
+            .map_err(Into::into)
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -253,7 +263,7 @@ mod tests {
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
         ValidTimeRange,
     };
-    use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
+    use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
 
     use super::{ContinuityDb, ContinuityError};
@@ -463,6 +473,63 @@ mod tests {
         );
         assert_eq!(manifests[0].committed_at, first_time);
         assert_eq!(manifests[1].committed_at, second_time);
+        Ok(())
+    }
+
+    #[test]
+    fn api_returns_commit_manifests_after_cursor_with_limit(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let first_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let third_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let third_commit = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:api-cursor-first",
+                0.91,
+                12,
+            )?],
+            first_time,
+            first_commit,
+        )?;
+        db.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:api-cursor-second",
+                0.83,
+                15,
+            )?],
+            second_time,
+            second_commit,
+        )?;
+        db.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:api-cursor-third",
+                0.77,
+                18,
+            )?],
+            third_time,
+            third_commit,
+        )?;
+
+        let manifests = db.commit_manifests_matching(CommitManifestLookup {
+            after: Some(first_commit),
+            limit: Some(1),
+        })?;
+
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].commit_id, second_commit);
         Ok(())
     }
 

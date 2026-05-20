@@ -366,6 +366,13 @@ mod tests {
         ) -> Result<Vec<continuitydb_core::CommitManifest>, KernelError> {
             Ok(Vec::new())
         }
+
+        fn list_commit_manifests_matching(
+            &self,
+            _lookup: continuitydb_kernel::CommitManifestLookup,
+        ) -> Result<Vec<continuitydb_core::CommitManifest>, KernelError> {
+            Ok(Vec::new())
+        }
     }
 
     fn test_commit_time() -> Result<DateTime<Utc>, Box<dyn std::error::Error>> {
