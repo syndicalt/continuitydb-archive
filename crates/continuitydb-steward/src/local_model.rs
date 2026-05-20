@@ -17,6 +17,175 @@ use crate::{
     StewardProposal,
 };
 
+/// Stable local model response schema version.
+pub const LOCAL_MODEL_RESPONSE_SCHEMA_VERSION: u32 = 1;
+
+const LOCAL_MODEL_RESPONSE_JSON_SCHEMA: &str = r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuitydb.dev/schemas/local-model-response.schema.json",
+  "title": "ContinuityDB Local Model Steward Response",
+  "type": "object",
+  "additionalProperties": false,
+  "x-continuitydb-schema-version": 1,
+  "required": ["proposals"],
+  "properties": {
+    "proposals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/proposal" }
+    }
+  },
+  "$defs": {
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "rationale", "citations"],
+      "properties": {
+        "action": { "$ref": "#/$defs/action" },
+        "rationale": { "type": "string", "minLength": 1 },
+        "citations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "anchors", "payload_text"],
+          "properties": {
+            "type": { "const": "create_cell_draft" },
+            "anchors": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "payload_text": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "source", "kind", "target"],
+          "properties": {
+            "type": { "const": "link_revision" },
+            "source": { "type": "string", "format": "uuid" },
+            "kind": { "enum": ["predecessor", "supersedes", "conflicts_with", "derives_from"] },
+            "target": { "type": "string", "format": "uuid" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "cell_id", "proposed_confidence"],
+          "properties": {
+            "type": { "const": "adjust_confidence" },
+            "cell_id": { "type": "string", "format": "uuid" },
+            "proposed_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "cell_id", "questions"],
+          "properties": {
+            "type": { "const": "label_answerability" },
+            "cell_id": { "type": "string", "format": "uuid" },
+            "questions": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "cell_id"],
+          "properties": {
+            "type": { "const": "mark_frontier" },
+            "cell_id": { "type": "string", "format": "uuid" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "request"],
+          "properties": {
+            "type": { "const": "request_verification" },
+            "cell_id": { "type": ["string", "null"], "format": "uuid" },
+            "request": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  }
+}"##;
+
+/// Returns the stable JSON Schema for local model Steward responses.
+pub fn local_model_response_json_schema() -> &'static str {
+    LOCAL_MODEL_RESPONSE_JSON_SCHEMA
+}
+
+const LOCAL_MODEL_RESPONSE_GBNF_GRAMMAR: &str = r#"
+root ::= response
+response ::= object-start ws proposals-field ws object-end
+proposals-field ::= string-proposals ws colon ws array-start ws proposal-list? ws array-end
+proposal-list ::= proposal (ws comma ws proposal)*
+proposal ::= object-start ws action-field ws comma ws rationale-field ws comma ws citations-field ws object-end
+action-field ::= string-action ws colon ws action
+action ::= create-cell-draft-action | link-revision-action | adjust-confidence-action | label-answerability-action | mark-frontier-action | request-verification-action
+create-cell-draft-action ::= object-start ws type-create-cell-draft ws comma ws anchors-field ws comma ws payload-text-field ws object-end
+link-revision-action ::= object-start ws type-link-revision ws comma ws source-field ws comma ws kind-field ws comma ws target-field ws object-end
+adjust-confidence-action ::= object-start ws type-adjust-confidence ws comma ws cell-id-field ws comma ws proposed-confidence-field ws object-end
+label-answerability-action ::= object-start ws type-label-answerability ws comma ws cell-id-field ws comma ws questions-field ws object-end
+mark-frontier-action ::= object-start ws type-mark-frontier ws comma ws cell-id-field ws object-end
+request-verification-action ::= object-start ws type-request-verification ws (comma ws cell-id-nullable-field)? ws comma ws request-field ws object-end
+anchors-field ::= string-anchors ws colon ws string-array
+questions-field ::= string-questions ws colon ws string-array
+citations-field ::= string-citations ws colon ws string-array
+rationale-field ::= string-rationale ws colon ws string
+payload-text-field ::= string-payload-text ws colon ws string
+source-field ::= string-source ws colon ws string
+target-field ::= string-target ws colon ws string
+cell-id-field ::= string-cell-id ws colon ws string
+cell-id-nullable-field ::= string-cell-id ws colon ws (string | null)
+kind-field ::= string-kind ws colon ws revision-kind
+request-field ::= string-request ws colon ws string
+proposed-confidence-field ::= string-proposed-confidence ws colon ws number
+string-array ::= array-start ws (string (ws comma ws string)*)? ws array-end
+revision-kind ::= "\"predecessor\"" | "\"supersedes\"" | "\"conflicts_with\"" | "\"derives_from\""
+type-create-cell-draft ::= string-type ws colon ws "\"create_cell_draft\""
+type-link-revision ::= string-type ws colon ws "\"link_revision\""
+type-adjust-confidence ::= string-type ws colon ws "\"adjust_confidence\""
+type-label-answerability ::= string-type ws colon ws "\"label_answerability\""
+type-mark-frontier ::= string-type ws colon ws "\"mark_frontier\""
+type-request-verification ::= string-type ws colon ws "\"request_verification\""
+string-proposals ::= "\"proposals\""
+string-action ::= "\"action\""
+string-rationale ::= "\"rationale\""
+string-citations ::= "\"citations\""
+string-type ::= "\"type\""
+string-anchors ::= "\"anchors\""
+string-payload-text ::= "\"payload_text\""
+string-source ::= "\"source\""
+string-kind ::= "\"kind\""
+string-target ::= "\"target\""
+string-cell-id ::= "\"cell_id\""
+string-proposed-confidence ::= "\"proposed_confidence\""
+string-questions ::= "\"questions\""
+string-request ::= "\"request\""
+object-start ::= "{"
+object-end ::= "}"
+array-start ::= "["
+array-end ::= "]"
+colon ::= ":"
+comma ::= ","
+null ::= "null"
+string ::= "\"" ([^"\\] | "\\" ["\\/bfnrt])* "\""
+number ::= "-"? ([0-9] | [1-9] [0-9]*) ("." [0-9]+)?
+ws ::= [ \t\n\r]*
+"#;
+
+/// Returns a conservative GBNF grammar for local model Steward responses.
+pub fn local_model_response_gbnf_grammar() -> &'static str {
+    LOCAL_MODEL_RESPONSE_GBNF_GRAMMAR
+}
+
 /// Backend that runs local model inference for the database Steward.
 pub trait LocalModelBackend {
     /// Runs inference for a prompt and returns a JSON proposal response.
@@ -111,6 +280,11 @@ impl LlamaCppRuntimeProfile {
         self
     }
 
+    /// Sets the Steward response grammar file used to constrain JSON output.
+    pub fn with_steward_response_grammar_file(self, grammar_file: impl Into<PathBuf>) -> Self {
+        self.with_grammar_file(grammar_file)
+    }
+
     /// Builds the executable runner configuration for this profile.
     pub fn runner_config(&self) -> LocalExecutableRunnerConfig {
         let mut config = LocalExecutableRunnerConfig::new(self.executable.clone())
@@ -168,6 +342,11 @@ impl MistralRsRuntimeProfile {
     pub fn with_json_output(mut self) -> Self {
         self.json_output = true;
         self
+    }
+
+    /// Requests Steward JSON output from the runtime wrapper.
+    pub fn with_steward_json_output(self) -> Self {
+        self.with_json_output()
     }
 
     /// Builds the executable runner configuration for this profile.

@@ -23,7 +23,8 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    latest_local_model_benchmark_baseline, record_local_model_benchmark_baseline,
+    latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
+    local_model_response_json_schema, record_local_model_benchmark_baseline,
     record_local_model_benchmark_baseline_with_regression, small_model_candidates,
     FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
@@ -32,6 +33,7 @@ pub use local_model::{
     LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile,
     SmallModelCandidate, StewardEvaluationCase, StewardEvaluationCaseReport,
     StewardEvaluationFailure, StewardEvaluationReport, StewardEvaluationSuite,
+    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -41,13 +43,15 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 mod tests {
     #[cfg(feature = "local-model")]
     use super::{
-        latest_local_model_benchmark_baseline, record_local_model_benchmark_baseline,
+        latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
+        local_model_response_json_schema, record_local_model_benchmark_baseline,
         record_local_model_benchmark_baseline_with_regression, small_model_candidates,
         FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
         LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
         LocalModelBenchmarkGateReport, LocalModelBenchmarkRegression,
         MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
         StewardEvaluationCase, StewardEvaluationFailure, StewardEvaluationSuite,
+        LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
@@ -929,6 +933,45 @@ mod tests {
     }
 
     #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_response_json_schema_describes_steward_proposals(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let schema: serde_json::Value = serde_json::from_str(local_model_response_json_schema())?;
+
+        assert_eq!(
+            schema["$id"].as_str(),
+            Some("https://continuitydb.dev/schemas/local-model-response.schema.json")
+        );
+        assert_eq!(
+            schema["x-continuitydb-schema-version"].as_u64(),
+            Some(LOCAL_MODEL_RESPONSE_SCHEMA_VERSION as u64)
+        );
+        assert_eq!(schema["required"], serde_json::json!(["proposals"]));
+        assert!(schema["properties"]["proposals"].is_object());
+        assert_eq!(
+            schema["$defs"]["action"]["oneOf"][0]["properties"]["type"]["const"].as_str(),
+            Some("create_cell_draft")
+        );
+        assert_eq!(
+            schema["$defs"]["action"]["oneOf"][5]["properties"]["type"]["const"].as_str(),
+            Some("request_verification")
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_response_gbnf_grammar_describes_proposal_shape() {
+        let grammar = local_model_response_gbnf_grammar();
+
+        assert!(grammar.contains("root ::= response"));
+        assert!(grammar.contains("response ::= object-start ws proposals-field ws object-end"));
+        assert!(grammar.contains("proposal ::= object-start ws action-field"));
+        assert!(grammar.contains("action ::= create-cell-draft-action"));
+        assert!(grammar.contains("request-verification-action"));
+    }
+
+    #[cfg(feature = "local-model")]
     fn write_local_model_script(
         name: &str,
         body: &str,
@@ -1055,6 +1098,28 @@ mod tests {
                 "--prompt-stdin".to_string(),
             ]
         );
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn runtime_profiles_accept_steward_response_contract_helpers() {
+        let llama_config = LlamaCppRuntimeProfile::new("llama-cli", "models/qwen.gguf")
+            .with_steward_response_grammar_file("schemas/steward-response.gbnf")
+            .runner_config();
+
+        assert!(llama_config
+            .command_arguments()
+            .windows(2)
+            .any(|pair| pair == ["--grammar-file", "schemas/steward-response.gbnf"]));
+
+        let mistral_config = MistralRsRuntimeProfile::new("mistralrs-server", "models/qwen.gguf")
+            .with_steward_json_output()
+            .runner_config();
+
+        assert!(mistral_config
+            .command_arguments()
+            .iter()
+            .any(|argument| argument == "--json-output"));
     }
 
     #[cfg(feature = "local-model")]

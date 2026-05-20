@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-steward/src/lib.rs`
 
-- [ ] **Step 1: Add contract imports to local-model tests**
+- [x] **Step 1: Add contract imports to local-model tests**
 
 In the `#[cfg(feature = "local-model")] use super::{ ... }` import list near the top of `crates/continuitydb-steward/src/lib.rs`, add:
 
@@ -32,7 +32,7 @@ local_model_response_gbnf_grammar, local_model_response_json_schema,
 LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 ```
 
-- [ ] **Step 2: Add JSON Schema contract test**
+- [x] **Step 2: Add JSON Schema contract test**
 
 Add this test after `small_model_candidates_include_default_feasibility_model`:
 
@@ -65,7 +65,7 @@ fn local_model_response_json_schema_describes_steward_proposals(
 }
 ```
 
-- [ ] **Step 3: Add GBNF contract test**
+- [x] **Step 3: Add GBNF contract test**
 
 Add this test after the JSON Schema contract test:
 
@@ -83,7 +83,7 @@ fn local_model_response_gbnf_grammar_describes_proposal_shape() {
 }
 ```
 
-- [ ] **Step 4: Add runtime profile helper tests**
+- [x] **Step 4: Add runtime profile helper tests**
 
 Add this test after `mistral_rs_runtime_profile_builds_deterministic_runner_config`:
 
@@ -111,7 +111,7 @@ fn runtime_profiles_accept_steward_response_contract_helpers() {
 }
 ```
 
-- [ ] **Step 5: Verify RED**
+- [x] **Step 5: Verify RED**
 
 Run:
 
@@ -127,7 +127,7 @@ Expected: FAIL because the public contract functions and helper methods do not e
 - Modify: `crates/continuitydb-steward/src/local_model.rs`
 - Modify: `crates/continuitydb-steward/src/lib.rs`
 
-- [ ] **Step 1: Add schema version and JSON Schema accessor**
+- [x] **Step 1: Add schema version and JSON Schema accessor**
 
 Add near the top of `local_model.rs`, after the imports:
 
@@ -237,7 +237,7 @@ pub fn local_model_response_json_schema() -> &'static str {
 }
 ```
 
-- [ ] **Step 2: Add GBNF grammar accessor**
+- [x] **Step 2: Add GBNF grammar accessor**
 
 Add after the JSON Schema accessor:
 
@@ -308,7 +308,7 @@ pub fn local_model_response_gbnf_grammar() -> &'static str {
 }
 ```
 
-- [ ] **Step 3: Add runtime profile helper methods**
+- [x] **Step 3: Add runtime profile helper methods**
 
 In `impl LlamaCppRuntimeProfile`, add:
 
@@ -328,7 +328,7 @@ pub fn with_steward_json_output(self) -> Self {
 }
 ```
 
-- [ ] **Step 4: Re-export public contract APIs**
+- [x] **Step 4: Re-export public contract APIs**
 
 In the `#[cfg(feature = "local-model")] pub use local_model::{ ... }` list in `crates/continuitydb-steward/src/lib.rs`, add:
 
@@ -337,7 +337,7 @@ local_model_response_gbnf_grammar, local_model_response_json_schema,
 LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 ```
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run:
 
@@ -356,7 +356,7 @@ Expected: PASS.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-local-model-response-contract.md`
 
-- [ ] **Step 1: Update README current scope**
+- [x] **Step 1: Update README current scope**
 
 Add this bullet after `Local executable Steward model runner.`:
 
@@ -364,7 +364,7 @@ Add this bullet after `Local executable Steward model runner.`:
 - Stable local model Steward response schema and grammar contract.
 ```
 
-- [ ] **Step 2: Update Steward roadmap**
+- [x] **Step 2: Update Steward roadmap**
 
 Add this milestone after local model inference and renumber later Steward milestones:
 
@@ -372,7 +372,7 @@ Add this milestone after local model inference and renumber later Steward milest
 6. Publish the local model response contract. Implemented feature-gated JSON Schema and GBNF grammar accessors plus runtime-profile helpers so embedders can constrain real model output before deterministic proposal decoding and policy validation.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -386,7 +386,7 @@ git diff --check
 
 Expected: all commands exit successfully.
 
-- [ ] **Step 4: Commit implementation**
+- [x] **Step 4: Commit implementation**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-local-model-response-contract.md crates/continuitydb-steward/src/local_model.rs crates/continuitydb-steward/src/lib.rs
