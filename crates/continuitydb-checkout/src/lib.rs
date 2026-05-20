@@ -1,7 +1,7 @@
 //! Deterministic checkout and audit.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{Confidence, Scope, StateCell, StateCellId};
+use continuitydb_core::{ActivationState, Confidence, CoreError, Scope, StateCell, StateCellId};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,6 +12,9 @@ pub enum CheckoutError {
     /// Storage kernel failure.
     #[error(transparent)]
     Kernel(#[from] KernelError),
+    /// Checkout metadata could not be derived from selected cells.
+    #[error(transparent)]
+    Core(#[from] CoreError),
 }
 
 /// Request constraints for deterministic checkout.
@@ -38,6 +41,30 @@ pub struct CheckoutSlice {
     pub cells: Vec<StateCell>,
     /// Total estimated tokens.
     pub total_tokens: i64,
+    /// Citation traces for selected cells.
+    pub audit_traces: Vec<AuditTrace>,
+    /// Per-cell uncertainty metadata for selected cells.
+    pub uncertainty: Vec<UncertaintyEntry>,
+    /// Selected frontier cells that should remain monitored.
+    pub frontier_recommendations: Vec<FrontierRecommendation>,
+}
+
+/// Deterministic uncertainty metadata for a selected StateCell.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UncertaintyEntry {
+    /// Selected cell identifier.
+    pub cell_id: StateCellId,
+    /// Maximum confidence across the selected cell's evidence.
+    pub max_confidence: Confidence,
+}
+
+/// Recommendation to keep a selected frontier StateCell under monitoring.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FrontierRecommendation {
+    /// Frontier cell identifier.
+    pub cell_id: StateCellId,
+    /// Citation locators supporting the frontier recommendation.
+    pub citations: Vec<String>,
 }
 
 /// Audit trace for a StateCell.
@@ -88,9 +115,31 @@ pub fn checkout<K: StorageKernel>(
         }
     }
 
+    let audit_traces: Vec<AuditTrace> = cells.iter().map(audit).collect();
+    let uncertainty = cells
+        .iter()
+        .map(|cell| {
+            Ok(UncertaintyEntry {
+                cell_id: cell.id,
+                max_confidence: Confidence::new(max_confidence(cell))?,
+            })
+        })
+        .collect::<Result<Vec<_>, CheckoutError>>()?;
+    let frontier_recommendations = cells
+        .iter()
+        .filter(|cell| cell.activation == ActivationState::Frontier)
+        .map(|cell| FrontierRecommendation {
+            cell_id: cell.id,
+            citations: citations(cell),
+        })
+        .collect();
+
     Ok(CheckoutSlice {
         cells,
         total_tokens,
+        audit_traces,
+        uncertainty,
+        frontier_recommendations,
     })
 }
 
@@ -98,12 +147,15 @@ pub fn checkout<K: StorageKernel>(
 pub fn audit(cell: &StateCell) -> AuditTrace {
     AuditTrace {
         cell_id: cell.id,
-        citations: cell
-            .evidence
-            .iter()
-            .map(|evidence| evidence.citation.locator.clone())
-            .collect(),
+        citations: citations(cell),
     }
+}
+
+fn citations(cell: &StateCell) -> Vec<String> {
+    cell.evidence
+        .iter()
+        .map(|evidence| evidence.citation.locator.clone())
+        .collect()
 }
 
 fn max_confidence(cell: &StateCell) -> f32 {
@@ -119,8 +171,8 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
-        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
+        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
@@ -317,6 +369,52 @@ mod tests {
 
         assert_eq!(slice.cells, vec![reviewed]);
         assert_eq!(slice.total_tokens, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_slice_includes_citations_uncertainty_and_frontier_metadata(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let active = sample_cell("project:continuitydb:active", 0.95, 10)?;
+        let mut frontier = sample_cell("project:continuitydb:frontier", 0.72, 10)?;
+        frontier.activation = ActivationState::Frontier;
+        kernel.append_cell(active.clone())?;
+        kernel.append_cell(frontier.clone())?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                answerability_question: None,
+                evidence_source: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 20,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![active.clone(), frontier.clone()]);
+        assert_eq!(slice.audit_traces[0].cell_id, active.id);
+        assert_eq!(
+            slice.audit_traces[0].citations,
+            vec!["test://project:continuitydb:active".to_string()]
+        );
+        assert_eq!(slice.audit_traces[1].cell_id, frontier.id);
+        assert_eq!(
+            slice.audit_traces[1].citations,
+            vec!["test://project:continuitydb:frontier".to_string()]
+        );
+        assert_eq!(slice.uncertainty[0].cell_id, active.id);
+        assert_eq!(slice.uncertainty[0].max_confidence, Confidence::new(0.95)?);
+        assert_eq!(slice.uncertainty[1].cell_id, frontier.id);
+        assert_eq!(slice.uncertainty[1].max_confidence, Confidence::new(0.72)?);
+        assert_eq!(slice.frontier_recommendations.len(), 1);
+        assert_eq!(slice.frontier_recommendations[0].cell_id, frontier.id);
+        assert_eq!(
+            slice.frontier_recommendations[0].citations,
+            vec!["test://project:continuitydb:frontier".to_string()]
+        );
         Ok(())
     }
 

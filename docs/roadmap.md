@@ -64,6 +64,7 @@ Storage kernel
 ## Checkout Milestones
 
 1. Push deterministic checkout constraints into storage lookup. Implemented for scope, valid time, answerability question, evidence source, and minimum confidence in `continuitydb-checkout`.
+2. Add selected-cell metadata to checkout slices. Implemented audit traces, uncertainty entries, and frontier recommendations in `continuitydb-checkout`.
 
 ## Steward Milestones
 
