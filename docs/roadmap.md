@@ -205,6 +205,7 @@ Storage kernel
 39. Add revision-link-aware commit export/import/copy. Extended `CommitExportBatch` with source-owned native revision links, validated imported link endpoints against existing or imported StateCells, and restored links after commit cell import.
 40. Add duplicate-safe revision-link import validation. Extended commit export batch validation to reject duplicate incoming revision-link records and revision links already visible in the target before any cells or links are imported.
 41. Add duplicate-safe native revision-link append validation. Native revision-link record operations now surface `KernelError::DuplicateRevisionLink` when a caller attempts to append the same source, target, kind, and recorded time twice.
+42. Add native conflict-resolution Steward audit/application. Implemented `resolve_conflicts_with_steward_at` so embedders can run deterministic conflict stewardship, persist proposal audit records, and apply accepted results through the typed dispatcher in proposal order.
 
 ## Steward Milestones
 
@@ -229,6 +230,7 @@ Storage kernel
 19. Add accepted `LinkRevision` proposal application. Implemented deterministic revision-link assertion materialization through the native API by appending operational StateCells with derived evidence, endpoint dependencies, and full proposal audit payloads.
 20. Add accepted `CreateCellDraft` proposal application. Implemented deterministic draft promotion through the native API by appending StateCells with proposed anchors, proposed text payloads, proposal-derived evidence, and deterministic commit time.
 21. Add unified accepted proposal application. Implemented deterministic dispatch from a policy-evaluated proposal audit record to the correct action-specific application path so embedders no longer need to duplicate Steward action matching.
+22. Add native conflict-resolution application workflow. Implemented a composed native API path that records conflict-resolution proposal audits and applies accepted `LinkRevision` proposals as native revision-link records through the typed dispatcher.
 
 ## Small Embeddable Model Track
 

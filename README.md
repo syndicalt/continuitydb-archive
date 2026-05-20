@@ -50,6 +50,7 @@ The first milestone builds:
 - StorageKernel-backed proposal audit store adapter.
 - Native feature-gated Steward proposal audit API.
 - Native feature-gated Steward conflict-resolution audit API.
+- Native feature-gated Steward conflict-resolution audit-and-application API.
 - Native feature-gated Steward frontier/watch audit API.
 - Native feature-gated Steward `MarkFrontier` application API.
 - Native feature-gated Steward `LabelAnswerability` application API.

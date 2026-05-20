@@ -156,6 +156,15 @@ pub struct StewardConflictAudit {
     pub records: Vec<ProposalAuditRecord>,
 }
 
+/// Result of deterministic conflict-resolution stewardship with accepted applications.
+#[cfg(feature = "steward")]
+pub struct StewardConflictResolution {
+    /// Conflict-resolution scan, proposals, and persisted proposal audit records.
+    pub audit: StewardConflictAudit,
+    /// Accepted proposal applications committed through the typed dispatcher.
+    pub applications: Vec<StewardApplicationResult>,
+}
+
 /// Result of subscribed frontier/watch stewardship recorded through the native API.
 #[cfg(feature = "steward")]
 pub struct StewardFrontierAudit {
@@ -1057,6 +1066,35 @@ impl<K: StorageKernel> ContinuityDb<K> {
             scan,
             proposals,
             records,
+        })
+    }
+
+    /// Runs conflict-resolution stewardship, records audits, and applies accepted results.
+    #[cfg(feature = "steward")]
+    pub fn resolve_conflicts_with_steward_at<I>(
+        &mut self,
+        cell_ids: I,
+        steward: &ConflictResolutionSteward,
+        policy: &ProposalPolicy,
+        decided_at: DateTime<Utc>,
+    ) -> Result<StewardConflictResolution, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCellId>,
+    {
+        let audit =
+            self.audit_conflict_resolutions_with_steward(cell_ids, steward, policy, decided_at)?;
+        let mut applications = Vec::new();
+        for record in &audit.records {
+            if let Some(application) =
+                self.apply_accepted_steward_proposal_typed_at(record, decided_at)?
+            {
+                applications.push(application);
+            }
+        }
+
+        Ok(StewardConflictResolution {
+            audit,
+            applications,
         })
     }
 
@@ -4231,6 +4269,140 @@ WHERE scope = project("continuitydb")
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
         assert!(db.steward_proposal_records()?.is_empty());
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_resolves_conflicts_with_steward_records_audit_and_applies_native_link(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let low = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-conflict-apply",
+            "release is blocked",
+            20,
+            0.55,
+            12,
+        )?;
+        let high = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-conflict-apply",
+            "release is ready",
+            21,
+            0.95,
+            12,
+        )?;
+        let low_id = db.ingest_cell_at(low, committed_at)?;
+        let high_id = db.ingest_cell_at(high, committed_at)?;
+        let steward = test_conflict_steward()?;
+
+        let resolution = db.resolve_conflicts_with_steward_at(
+            [low_id, high_id],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        )?;
+
+        assert_eq!(resolution.audit.scan.recommendations.len(), 1);
+        assert_eq!(resolution.audit.proposals.len(), 1);
+        assert_eq!(resolution.audit.records.len(), 1);
+        assert_eq!(resolution.applications.len(), 1);
+        let StewardApplicationResult::RevisionLink(link_record) = &resolution.applications[0]
+        else {
+            return Err(std::io::Error::other("expected native revision link").into());
+        };
+        assert_eq!(link_record.source, high_id);
+        assert_eq!(link_record.kind, RevisionLinkKind::Supersedes);
+        assert_eq!(link_record.target, low_id);
+        assert_eq!(link_record.recorded_at, committed_at);
+        assert_eq!(
+            db.kernel()
+                .list_revision_links(RevisionLinkLookup::default())?,
+            vec![link_record.clone()]
+        );
+        assert_eq!(db.steward_proposal_records()?.len(), 1);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 3);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_resolve_conflicts_with_steward_allows_empty_and_singleton_inputs(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-singleton-apply",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let cell_id = db.ingest_cell_at(cell, committed_at)?;
+        let steward = test_conflict_steward()?;
+
+        let empty = db.resolve_conflicts_with_steward_at(
+            [],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        )?;
+        let singleton = db.resolve_conflicts_with_steward_at(
+            [cell_id],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        )?;
+
+        assert!(empty.audit.scan.recommendations.is_empty());
+        assert!(empty.audit.proposals.is_empty());
+        assert!(empty.audit.records.is_empty());
+        assert!(empty.applications.is_empty());
+        assert!(singleton.audit.scan.recommendations.is_empty());
+        assert!(singleton.audit.proposals.is_empty());
+        assert!(singleton.audit.records.is_empty());
+        assert!(singleton.applications.is_empty());
+        assert!(db.steward_proposal_records()?.is_empty());
+        assert!(db
+            .kernel()
+            .list_revision_links(RevisionLinkLookup::default())?
+            .is_empty());
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_resolve_conflicts_with_steward_reports_missing_id_without_mutation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:steward-missing-apply",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let cell_id = db.ingest_cell_at(cell, committed_at)?;
+        let missing_id = StateCellId::new();
+        let steward = test_conflict_steward()?;
+
+        let result = db.resolve_conflicts_with_steward_at(
+            [cell_id, missing_id],
+            &steward,
+            &ProposalPolicy::strict(),
+            committed_at,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        assert!(db.steward_proposal_records()?.is_empty());
+        assert!(db
+            .kernel()
+            .list_revision_links(RevisionLinkLookup::default())?
+            .is_empty());
         Ok(())
     }
 
