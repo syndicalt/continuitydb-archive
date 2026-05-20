@@ -170,6 +170,35 @@ fn cli_inspect_kernel_accepts_durable_append_log_requirement(
 }
 
 #[test]
+fn cli_inspect_kernel_requirement_output_matches_native_gate(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-native-gate");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--require")
+        .arg("durable-append-log")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let db = ContinuityDb::open_file_with_requirements(
+        &path,
+        continuitydb_kernel::KernelRequirements::durable_append_log(),
+    )?;
+
+    assert_eq!(json["required"].as_str(), Some("durable-append-log"));
+    assert_eq!(json["satisfies"].as_bool(), Some(true));
+    assert_eq!(db.kernel().path(), path.as_path());
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_inspect_kernel_rejects_indexed_embedded_requirement(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-inspect-require-indexed");

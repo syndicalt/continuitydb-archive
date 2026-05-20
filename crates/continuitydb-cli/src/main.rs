@@ -9,8 +9,7 @@ use continuitydb_core::{
     SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
 };
 use continuitydb_kernel::{
-    CommitManifestLookup, FileKernel, KernelCapabilities, KernelDurability, KernelRequirements,
-    StorageKernel,
+    CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements, StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
 use std::path::PathBuf;
@@ -96,15 +95,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             store_path,
             require,
         }) => {
-            let db = ContinuityDb::new(FileKernel::open(&store_path)?);
+            let db = if let Some(profile) = require {
+                open_file_database_with_profile(&store_path, profile)?
+            } else {
+                open_file_database(&store_path)?
+            };
             let capabilities = db.kernel_capabilities();
             let required = require.map(profile_name);
             let satisfies = require
                 .map(|profile| db.kernel_satisfies(requirements_for_profile(profile)))
                 .unwrap_or(true);
-            if let Some(profile) = require {
-                db.ensure_kernel_requirements(requirements_for_profile(profile))?;
-            }
             let output = serde_json::json!({
                 "path": store_path.display().to_string(),
                 "capabilities": capabilities_json(capabilities),
@@ -114,7 +114,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::CompactFile { path }) => {
-            let mut db = ContinuityDb::new(FileKernel::open(&path)?);
+            let mut db = open_file_database(&path)?;
             db.compact_file_store()?;
             let output = serde_json::json!({
                 "path": path.display().to_string(),
@@ -126,7 +126,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             store_path,
             output_path,
         }) => {
-            let db = ContinuityDb::new(FileKernel::open(&store_path)?);
+            let db = open_file_database(&store_path)?;
             let summary =
                 db.export_commits_json_file(CommitManifestLookup::default(), &output_path)?;
             let output = serde_json::json!({
@@ -141,7 +141,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             store_path,
             input_path,
         }) => {
-            let mut db = ContinuityDb::new(FileKernel::open(&store_path)?);
+            let mut db = open_file_database(&store_path)?;
             let imported_commits = db.import_commits_json_file(&input_path)?;
             let output = serde_json::json!({
                 "path": store_path.display().to_string(),
@@ -189,6 +189,20 @@ fn capabilities_json(capabilities: KernelCapabilities) -> serde_json::Value {
         "durable_flush": capabilities.durable_flush,
         "compaction": capabilities.compaction,
     })
+}
+
+fn open_file_database(
+    path: &PathBuf,
+) -> Result<ContinuityDb<continuitydb_kernel::FileKernel>, Box<dyn std::error::Error>> {
+    ContinuityDb::open_file(path).map_err(Into::into)
+}
+
+fn open_file_database_with_profile(
+    path: &PathBuf,
+    profile: RequirementProfile,
+) -> Result<ContinuityDb<continuitydb_kernel::FileKernel>, Box<dyn std::error::Error>> {
+    ContinuityDb::open_file_with_requirements(path, requirements_for_profile(profile))
+        .map_err(Into::into)
 }
 
 fn demo_checkout() -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::error::Error>> {
