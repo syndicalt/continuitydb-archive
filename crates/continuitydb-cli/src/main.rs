@@ -27,7 +27,9 @@ use continuitydb_workload::{
     WorkloadBaselineRecord, WorkloadConfig, WorkloadMeasurement, WorkloadMeasurementSnapshot,
     WorkloadRegressionThresholds,
 };
-use std::path::{Path, PathBuf};
+#[cfg(feature = "local-model")]
+use std::path::Path;
+use std::path::PathBuf;
 
 /// ContinuityDB command-line interface.
 #[derive(Debug, Parser)]

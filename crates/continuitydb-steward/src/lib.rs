@@ -77,10 +77,9 @@ mod tests {
     use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "local-model")]
     use std::cell::RefCell;
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-    };
+    #[cfg(feature = "local-model")]
+    use std::path::Path;
+    use std::{fs, path::PathBuf};
 
     fn created_at() -> chrono::DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
@@ -1009,6 +1008,60 @@ mod tests {
         assert!(report.case_reports()[1].passed());
         assert_eq!(report.case_reports()[1].name(), "conflict classification");
         Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn default_steward_evaluation_suite_exposes_case_contracts() {
+        let suite = default_steward_evaluation_suite();
+
+        assert_eq!(suite.len(), 2);
+        assert!(!suite.is_empty());
+        let cases = suite.cases();
+
+        assert_eq!(cases[0].name(), "insufficient evidence uncertainty");
+        assert_eq!(
+            cases[0].input().task(),
+            "Assess whether thin evidence needs verification."
+        );
+        assert_eq!(
+            cases[0].input().evidence()[0].locator(),
+            "continuitydb://evaluation/thin-evidence"
+        );
+        assert_eq!(
+            cases[0].required_citations(),
+            ["continuitydb://evaluation/thin-evidence".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[0].required_rationale_terms(),
+            ["uncertainty".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[0].expected_actions()[0],
+            StewardAction::RequestVerification { cell_id: None, request }
+                if request == "Gather additional source evidence."
+        ));
+
+        assert_eq!(cases[1].name(), "conflict classification");
+        assert_eq!(
+            cases[1].input().task(),
+            "Classify whether contradictory release-status claims conflict."
+        );
+        assert_eq!(
+            cases[1].input().evidence()[0].locator(),
+            "continuitydb://evaluation/conflict-evidence"
+        );
+        assert_eq!(
+            cases[1].forbidden_rationale_terms(),
+            ["verified in production".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[1].expected_actions()[0],
+            StewardAction::LinkRevision {
+                kind: RevisionLinkKind::ConflictsWith,
+                ..
+            }
+        ));
     }
 
     #[cfg(feature = "local-model")]

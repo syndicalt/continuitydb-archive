@@ -524,6 +524,21 @@ impl LocalModelStewardInput {
         });
         self
     }
+
+    /// Returns the deterministic creation time for proposals from this run.
+    pub fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    /// Returns the task instruction sent to the local model.
+    pub fn task(&self) -> &str {
+        &self.task
+    }
+
+    /// Returns evidence snippets available to the local model.
+    pub fn evidence(&self) -> &[LocalModelEvidence] {
+        &self.evidence
+    }
 }
 
 /// Fixed proposal-quality case for local Steward model evaluation.
@@ -583,6 +598,36 @@ impl StewardEvaluationCase {
         self.forbidden_rationale_terms.push(term.into());
         self
     }
+
+    /// Returns the stable case name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the local model input for this case.
+    pub fn input(&self) -> &LocalModelStewardInput {
+        &self.input
+    }
+
+    /// Returns expected actions that at least one emitted proposal must match.
+    pub fn expected_actions(&self) -> &[StewardAction] {
+        &self.expected_actions
+    }
+
+    /// Returns citation locators that emitted proposals must preserve.
+    pub fn required_citations(&self) -> &[String] {
+        &self.required_citations
+    }
+
+    /// Returns rationale terms that emitted proposals must include.
+    pub fn required_rationale_terms(&self) -> &[String] {
+        &self.required_rationale_terms
+    }
+
+    /// Returns unsupported rationale terms that emitted proposals must avoid.
+    pub fn forbidden_rationale_terms(&self) -> &[String] {
+        &self.forbidden_rationale_terms
+    }
 }
 
 /// Deterministic suite for evaluating local Steward model proposal quality.
@@ -595,6 +640,21 @@ impl StewardEvaluationSuite {
     /// Creates an evaluation suite from fixed cases.
     pub fn new(cases: Vec<StewardEvaluationCase>) -> Self {
         Self { cases }
+    }
+
+    /// Returns the fixed cases in evaluation order.
+    pub fn cases(&self) -> &[StewardEvaluationCase] {
+        &self.cases
+    }
+
+    /// Returns the number of fixed evaluation cases.
+    pub fn len(&self) -> usize {
+        self.cases.len()
+    }
+
+    /// Returns whether this suite has no evaluation cases.
+    pub fn is_empty(&self) -> bool {
+        self.cases.is_empty()
     }
 
     /// Evaluates a local model Steward against all cases.

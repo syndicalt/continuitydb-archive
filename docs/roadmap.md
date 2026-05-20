@@ -243,6 +243,7 @@ Storage kernel
 31. Add CLI local-model evaluation summary output. Routed `benchmark-local-model` JSON through the public evaluation summary API and exposed failed-case and pass-rate metrics alongside existing pass counts.
 32. Add CLI local-model per-case evaluation detail output. Embedded serialized Steward evaluation reports in `benchmark-local-model` JSON so operator artifacts carry case names and deterministic failure reasons alongside aggregate metrics.
 33. Add default local-model conflict-classification evaluation. Expanded the fixed Steward benchmark suite with a deterministic `ConflictsWith` revision-link case so local model baselines test classification behavior beyond thin-evidence verification.
+34. Add local-model evaluation suite introspection. Implemented read-only accessors for fixed evaluation cases, inputs, expectations, required citations, and rationale constraints so embedders can inspect benchmark contracts before running local models.
 
 ## Small Embeddable Model Track
 
