@@ -77,8 +77,71 @@ pub struct CommitManifestLookup {
     pub limit: Option<usize>,
 }
 
+/// Broad durability class reported by a storage kernel.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KernelDurability {
+    /// In-process state with no durable persistence guarantee.
+    Ephemeral,
+    /// Durable append-log storage where indexes may be rebuilt from the log.
+    AppendLog,
+    /// Durable embedded storage with persistent indexes.
+    IndexedEmbedded,
+}
+
+/// Observable storage guarantees reported by a storage kernel.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KernelCapabilities {
+    /// Broad persistence level.
+    pub durability: KernelDurability,
+    /// Kernel writes immutable append-only records.
+    pub append_only: bool,
+    /// Kernel maintains derived in-process indexes.
+    pub derived_indexes: bool,
+    /// Kernel persists indexes durably rather than rebuilding them from the log.
+    pub persistent_indexes: bool,
+    /// Kernel stores explicit commit manifest records.
+    pub explicit_commit_records: bool,
+    /// Kernel flushes durable writes through the filesystem boundary.
+    pub durable_flush: bool,
+    /// Kernel can rewrite storage into a canonical compacted representation.
+    pub compaction: bool,
+}
+
+impl KernelCapabilities {
+    /// Capabilities for in-process correctness kernels.
+    pub const fn ephemeral() -> Self {
+        Self {
+            durability: KernelDurability::Ephemeral,
+            append_only: true,
+            derived_indexes: false,
+            persistent_indexes: false,
+            explicit_commit_records: false,
+            durable_flush: false,
+            compaction: false,
+        }
+    }
+
+    /// Capabilities for the JSONL append-log file kernel.
+    pub const fn file_append_log() -> Self {
+        Self {
+            durability: KernelDurability::AppendLog,
+            append_only: true,
+            derived_indexes: true,
+            persistent_indexes: false,
+            explicit_commit_records: true,
+            durable_flush: true,
+            compaction: true,
+        }
+    }
+}
+
 /// Minimal append and lookup contract required by the first ContinuityDB milestone.
 pub trait StorageKernel {
+    /// Returns the storage guarantees exposed by this kernel.
+    fn capabilities(&self) -> KernelCapabilities {
+        KernelCapabilities::ephemeral()
+    }
+
     /// Appends an immutable StateCell version.
     fn append_cell(&mut self, cell: StateCell) -> Result<(), KernelError> {
         self.append_cell_at(cell, Utc::now())
@@ -621,6 +684,10 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
 }
 
 impl StorageKernel for FileKernel {
+    fn capabilities(&self) -> KernelCapabilities {
+        KernelCapabilities::file_append_log()
+    }
+
     fn append_cells_at<I>(
         &mut self,
         cells: I,
@@ -890,7 +957,7 @@ impl StorageKernel for FileKernel {
 mod tests {
     use super::{
         sync_parent_directory, write_all_durable, CellLookup, CommitManifestLookup, FileKernel,
-        KernelError, StorageKernel,
+        KernelCapabilities, KernelDurability, KernelError, StorageKernel,
     };
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
@@ -958,6 +1025,38 @@ mod tests {
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
+    }
+
+    #[test]
+    fn default_capabilities_are_ephemeral() {
+        let capabilities = KernelCapabilities::ephemeral();
+
+        assert_eq!(KernelDurability::Ephemeral, capabilities.durability);
+        assert!(capabilities.append_only);
+        assert!(!capabilities.derived_indexes);
+        assert!(!capabilities.persistent_indexes);
+        assert!(!capabilities.explicit_commit_records);
+        assert!(!capabilities.durable_flush);
+        assert!(!capabilities.compaction);
+    }
+
+    #[test]
+    fn file_kernel_reports_append_log_capabilities() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("file-kernel-capabilities");
+        let kernel = FileKernel::open(&path)?;
+
+        let capabilities = kernel.capabilities();
+
+        assert_eq!(KernelDurability::AppendLog, capabilities.durability);
+        assert!(capabilities.append_only);
+        assert!(capabilities.derived_indexes);
+        assert!(!capabilities.persistent_indexes);
+        assert!(capabilities.explicit_commit_records);
+        assert!(capabilities.durable_flush);
+        assert!(capabilities.compaction);
+
+        let _ = std::fs::remove_file(path);
+        Ok(())
     }
 
     #[test]
