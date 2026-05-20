@@ -295,6 +295,72 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_local_model_evaluation_suite_outputs_case_contracts(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("local-model-evaluation-suite")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["response_schema_version"].as_u64(), Some(1));
+    assert_eq!(json["total_cases"].as_u64(), Some(2));
+    assert_eq!(
+        json["cases"][0]["name"].as_str(),
+        Some("insufficient evidence uncertainty")
+    );
+    assert_eq!(
+        json["cases"][0]["task"].as_str(),
+        Some("Assess whether thin evidence needs verification.")
+    );
+    assert_eq!(
+        json["cases"][0]["evidence"][0]["locator"].as_str(),
+        Some("continuitydb://evaluation/thin-evidence")
+    );
+    assert_eq!(
+        json["cases"][0]["expected_actions"][0]["type"].as_str(),
+        Some("request_verification")
+    );
+    assert_eq!(
+        json["cases"][0]["required_citations"][0].as_str(),
+        Some("continuitydb://evaluation/thin-evidence")
+    );
+    assert_eq!(
+        json["cases"][0]["required_rationale_terms"][0].as_str(),
+        Some("uncertainty")
+    );
+    assert_eq!(
+        json["cases"][1]["name"].as_str(),
+        Some("conflict classification")
+    );
+    assert_eq!(
+        json["cases"][1]["task"].as_str(),
+        Some("Classify whether contradictory release-status claims conflict.")
+    );
+    assert_eq!(
+        json["cases"][1]["evidence"][0]["locator"].as_str(),
+        Some("continuitydb://evaluation/conflict-evidence")
+    );
+    assert_eq!(
+        json["cases"][1]["expected_actions"][0]["type"].as_str(),
+        Some("link_revision")
+    );
+    assert_eq!(
+        json["cases"][1]["expected_actions"][0]["kind"].as_str(),
+        Some("conflicts_with")
+    );
+    assert_eq!(
+        json["cases"][1]["forbidden_rationale_terms"][0].as_str(),
+        Some("verified in production")
+    );
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_contract_writes_schema_and_grammar() -> Result<(), Box<dyn std::error::Error>> {
     let schema_path = temp_store_path("continuitydb-cli-local-model-schema");
     let grammar_path = temp_store_path("continuitydb-cli-local-model-grammar");

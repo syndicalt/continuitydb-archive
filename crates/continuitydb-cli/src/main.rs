@@ -4,6 +4,8 @@ use chrono::{TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use continuitydb_api::{ContinuityDb, ContinuityError};
 use continuitydb_checkout::{checkout, CheckoutRequest};
+#[cfg(feature = "local-model")]
+use continuitydb_core::RevisionLinkKind;
 use continuitydb_core::{
     ActivationState, Answerability, CellCost, CellPayload, Citation, CommitId, Confidence,
     Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
@@ -18,7 +20,7 @@ use continuitydb_steward::{
     local_model_response_json_schema, record_local_model_benchmark_baseline_with_regression,
     small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
-    LocalModelBenchmarkRegression, SmallModelCandidate, StewardIdentity,
+    LocalModelBenchmarkRegression, SmallModelCandidate, StewardAction, StewardIdentity,
     LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
@@ -217,6 +219,9 @@ enum Command {
         #[arg(long = "grammar-path")]
         grammar_path: PathBuf,
     },
+    /// Print the default local Steward model evaluation suite contract as JSON.
+    #[cfg(feature = "local-model")]
+    LocalModelEvaluationSuite,
 }
 
 fn main() {
@@ -410,9 +415,113 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let output = write_local_model_contract_json(&schema_path, &grammar_path)?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
+        #[cfg(feature = "local-model")]
+        Some(Command::LocalModelEvaluationSuite) => {
+            let output = local_model_evaluation_suite_json();
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
         None => {}
     }
     Ok(())
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_evaluation_suite_json() -> serde_json::Value {
+    let suite = default_steward_evaluation_suite();
+    let cases: Vec<serde_json::Value> = suite
+        .cases()
+        .iter()
+        .map(|case| {
+            let input = case.input();
+            let evidence: Vec<serde_json::Value> = input
+                .evidence()
+                .iter()
+                .map(|evidence| {
+                    serde_json::json!({
+                        "locator": evidence.locator(),
+                        "text": evidence.text(),
+                    })
+                })
+                .collect();
+
+            serde_json::json!({
+                "name": case.name(),
+                "created_at": input.created_at(),
+                "task": input.task(),
+                "evidence": evidence,
+                "expected_actions": case
+                    .expected_actions()
+                    .iter()
+                    .map(local_model_action_json)
+                    .collect::<Vec<_>>(),
+                "required_citations": case.required_citations(),
+                "required_rationale_terms": case.required_rationale_terms(),
+                "forbidden_rationale_terms": case.forbidden_rationale_terms(),
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "response_schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+        "total_cases": suite.len(),
+        "cases": cases,
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_action_json(action: &StewardAction) -> serde_json::Value {
+    match action {
+        StewardAction::CreateCellDraft {
+            anchors,
+            payload_text,
+        } => serde_json::json!({
+            "type": "create_cell_draft",
+            "anchors": anchors,
+            "payload_text": payload_text,
+        }),
+        StewardAction::LinkRevision {
+            source,
+            kind,
+            target,
+        } => serde_json::json!({
+            "type": "link_revision",
+            "source": source,
+            "kind": local_model_revision_kind(*kind),
+            "target": target,
+        }),
+        StewardAction::AdjustConfidence {
+            cell_id,
+            proposed_confidence,
+        } => serde_json::json!({
+            "type": "adjust_confidence",
+            "cell_id": cell_id,
+            "proposed_confidence": proposed_confidence,
+        }),
+        StewardAction::LabelAnswerability { cell_id, questions } => serde_json::json!({
+            "type": "label_answerability",
+            "cell_id": cell_id,
+            "questions": questions,
+        }),
+        StewardAction::MarkFrontier { cell_id } => serde_json::json!({
+            "type": "mark_frontier",
+            "cell_id": cell_id,
+        }),
+        StewardAction::RequestVerification { cell_id, request } => serde_json::json!({
+            "type": "request_verification",
+            "cell_id": cell_id,
+            "request": request,
+        }),
+    }
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_revision_kind(kind: RevisionLinkKind) -> &'static str {
+    match kind {
+        RevisionLinkKind::Predecessor => "predecessor",
+        RevisionLinkKind::Supersedes => "supersedes",
+        RevisionLinkKind::ConflictsWith => "conflicts_with",
+        RevisionLinkKind::DerivesFrom => "derives_from",
+    }
 }
 
 #[cfg(feature = "local-model")]

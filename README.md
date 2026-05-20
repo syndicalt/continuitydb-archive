@@ -79,6 +79,7 @@ The first milestone builds:
 - CLI local model per-case evaluation detail output.
 - Default local model conflict-classification evaluation case.
 - Public local model evaluation contract introspection.
+- CLI local model evaluation suite contract export.
 - Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.
