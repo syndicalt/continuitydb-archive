@@ -1,0 +1,24 @@
+[package]
+name = "continuitydb-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "continuitydb"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+continuitydb-checkout = { path = "../continuitydb-checkout" }
+continuitydb-core = { path = "../continuitydb-core" }
+continuitydb-memory = { path = "../continuitydb-memory" }
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+
+[lints]
+workspace = true
