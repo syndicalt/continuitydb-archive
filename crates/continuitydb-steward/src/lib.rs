@@ -2545,6 +2545,11 @@ mod tests {
             regression.failure_count_deltas().get("missing_citation"),
             Some(&1)
         );
+        assert_eq!(
+            regression.regressed_case_names(),
+            &["frontier baseline regression".to_string()]
+        );
+        assert!(regression.recovered_case_names().is_empty());
         Ok(())
     }
 

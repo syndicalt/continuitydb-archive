@@ -5,7 +5,7 @@ use continuitydb_core::{SemanticAnchor, StateCellId};
 use continuitydb_revision::RevisionLinkKind;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Write},
@@ -1715,6 +1715,8 @@ pub struct LocalModelBenchmarkRegression {
     previous_failure_counts: BTreeMap<String, usize>,
     current_failure_counts: BTreeMap<String, usize>,
     failure_count_deltas: BTreeMap<String, isize>,
+    regressed_case_names: Vec<String>,
+    recovered_case_names: Vec<String>,
     pass_count_delta: isize,
     regressed: bool,
 }
@@ -1731,6 +1733,8 @@ impl LocalModelBenchmarkRegression {
         let current_failure_counts = owned_failure_counts(current.evaluation().failure_counts());
         let failure_count_deltas =
             failure_count_deltas(&previous_failure_counts, &current_failure_counts);
+        let (regressed_case_names, recovered_case_names) =
+            case_outcome_deltas(previous.evaluation(), current.evaluation());
         let pass_count_delta = current_passed_cases as isize - previous_passed_cases as isize;
         let regressed = current_passed_cases < previous_passed_cases
             || (previous.passed() && !current.passed());
@@ -1745,6 +1749,8 @@ impl LocalModelBenchmarkRegression {
             previous_failure_counts,
             current_failure_counts,
             failure_count_deltas,
+            regressed_case_names,
+            recovered_case_names,
             pass_count_delta,
             regressed,
         }
@@ -1795,6 +1801,16 @@ impl LocalModelBenchmarkRegression {
         &self.failure_count_deltas
     }
 
+    /// Returns case names that passed previously and fail in the current baseline.
+    pub fn regressed_case_names(&self) -> &[String] {
+        &self.regressed_case_names
+    }
+
+    /// Returns case names that failed previously and pass in the current baseline.
+    pub fn recovered_case_names(&self) -> &[String] {
+        &self.recovered_case_names
+    }
+
     /// Returns current passing cases minus previous passing cases.
     pub fn pass_count_delta(&self) -> isize {
         self.pass_count_delta
@@ -1827,6 +1843,39 @@ fn failure_count_deltas(
         }
     }
     deltas
+}
+
+fn case_outcome_deltas(
+    previous: &StewardEvaluationReport,
+    current: &StewardEvaluationReport,
+) -> (Vec<String>, Vec<String>) {
+    let previous_by_name: BTreeMap<&str, bool> = previous
+        .case_reports()
+        .iter()
+        .map(|case| (case.name(), case.passed()))
+        .collect();
+    let current_by_name: BTreeMap<&str, bool> = current
+        .case_reports()
+        .iter()
+        .map(|case| (case.name(), case.passed()))
+        .collect();
+    let mut regressed = Vec::new();
+    let mut recovered = Vec::new();
+    let names: BTreeSet<&str> = previous_by_name
+        .keys()
+        .chain(current_by_name.keys())
+        .copied()
+        .collect();
+    for name in names {
+        let previous_passed = previous_by_name.get(name).copied().unwrap_or(false);
+        let current_passed = current_by_name.get(name).copied().unwrap_or(false);
+        match (previous_passed, current_passed) {
+            (true, false) => regressed.push(name.to_string()),
+            (false, true) => recovered.push(name.to_string()),
+            _ => {}
+        }
+    }
+    (regressed, recovered)
 }
 
 /// Result of recording a current benchmark baseline and comparing with prior state.

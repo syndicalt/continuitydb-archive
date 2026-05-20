@@ -85,6 +85,7 @@ The first milestone builds:
 - Local model evaluation failure count summaries.
 - Local model regression failure count comparisons.
 - Local model regression failure count delta summaries.
+- Local model regression case outcome summaries.
 - CLI local model fixed evaluation failure gating.
 - CLI local model fixed evaluation failure report artifacts.
 - CLI local model benchmark report artifact output.

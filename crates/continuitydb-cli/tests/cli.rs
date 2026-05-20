@@ -1329,6 +1329,25 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         report["baseline_comparison"]["failure_count_deltas"]["missing_citation"].as_i64(),
         Some(9)
     );
+    assert_eq!(
+        report["baseline_comparison"]["regressed_cases"]
+            .as_array()
+            .map(Vec::len),
+        Some(8)
+    );
+    assert!(
+        report["baseline_comparison"]["regressed_cases"]
+            .as_array()
+            .is_some_and(
+                |cases| cases.contains(&Value::String("conflict classification".to_string()))
+            )
+    );
+    assert_eq!(
+        report["baseline_comparison"]["recovered_cases"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
     assert!(report["bundle_manifest"].is_null());
 
     fs::remove_file(executable_path)?;
