@@ -573,13 +573,17 @@ fn write_local_model_contract_json(
     schema_path: &Path,
     grammar_path: &Path,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    std::fs::write(schema_path, local_model_response_json_schema())?;
-    std::fs::write(grammar_path, local_model_response_gbnf_grammar())?;
+    let schema = local_model_response_json_schema();
+    let grammar = local_model_response_gbnf_grammar();
+    std::fs::write(schema_path, schema)?;
+    std::fs::write(grammar_path, grammar)?;
 
     Ok(serde_json::json!({
         "schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
         "schema_path": schema_path.display().to_string(),
         "grammar_path": grammar_path.display().to_string(),
+        "schema_fingerprint": local_model_contract_fingerprint(schema),
+        "grammar_fingerprint": local_model_contract_fingerprint(grammar),
     }))
 }
 
@@ -641,11 +645,23 @@ fn local_model_benchmark_dry_run_json(
         "baseline_path": baseline_path.display().to_string(),
         "response_schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
         "evaluation_suite_fingerprint": default_steward_evaluation_suite().fingerprint(),
+        "schema_fingerprint": local_model_contract_fingerprint(local_model_response_json_schema()),
+        "grammar_fingerprint": local_model_contract_fingerprint(local_model_response_gbnf_grammar()),
         "runtime": {
             "executable": config.executable().display().to_string(),
             "arguments": config.command_arguments(),
         },
     })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_contract_fingerprint(text: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
 }
 
 #[cfg(feature = "local-model")]

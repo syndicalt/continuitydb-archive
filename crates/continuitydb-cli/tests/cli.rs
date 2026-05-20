@@ -339,6 +339,12 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
     assert!(json["evaluation_suite_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["schema_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["grammar_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert_eq!(
         json["baseline_path"].as_str(),
         Some(baseline_path.display().to_string().as_str())
@@ -496,6 +502,12 @@ fn cli_local_model_contract_writes_schema_and_grammar() -> Result<(), Box<dyn st
         Some("https://continuitydb.dev/schemas/local-model-response.schema.json")
     );
     assert_eq!(schema["x-continuitydb-schema-version"].as_u64(), Some(1));
+    assert!(json["schema_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["grammar_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert!(grammar.contains("root ::= response"));
     assert!(grammar.contains("request-verification-action"));
 
