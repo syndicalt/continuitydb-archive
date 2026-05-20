@@ -8,7 +8,7 @@ use continuitydb_core::{
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Write as IoWrite},
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -148,9 +148,36 @@ pub trait StorageKernel {
     ) -> Result<Vec<CommitManifest>, KernelError>;
 }
 
+const FILE_KERNEL_FORMAT: &str = "continuitydb.file_kernel";
+const FILE_KERNEL_FORMAT_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+struct FileKernelHeader {
+    format: String,
+    version: u32,
+}
+
+impl FileKernelHeader {
+    fn current() -> Self {
+        Self {
+            format: FILE_KERNEL_FORMAT.to_string(),
+            version: FILE_KERNEL_FORMAT_VERSION,
+        }
+    }
+
+    fn validate(&self) -> Result<(), KernelError> {
+        if self.format == FILE_KERNEL_FORMAT && self.version == FILE_KERNEL_FORMAT_VERSION {
+            Ok(())
+        } else {
+            Err(KernelError::StoreCorrupt)
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum FileKernelRecord {
+    Header { format: String, version: u32 },
     Cell { cell: Box<StateCell> },
     Commit { manifest: CommitManifest },
 }
@@ -332,6 +359,7 @@ impl FileKernel {
             .open(&path)
             .map_err(|_error| KernelError::StoreIo)?;
 
+        ensure_file_header(&path)?;
         let log = read_log_from_path(&path)?;
         let index = FileKernelIndex::rebuild(log)?;
 
@@ -344,10 +372,34 @@ impl FileKernel {
     }
 }
 
+fn ensure_file_header(path: &Path) -> Result<(), KernelError> {
+    if fs::metadata(path)
+        .map_err(|_error| KernelError::StoreIo)?
+        .len()
+        != 0
+    {
+        return Ok(());
+    }
+
+    let header = FileKernelHeader::current();
+    let encoded = serde_json::to_string(&FileKernelRecord::Header {
+        format: header.format,
+        version: header.version,
+    })
+    .map_err(|_error| KernelError::StoreCorrupt)?;
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|_error| KernelError::StoreIo)?;
+    writeln!(file, "{encoded}").map_err(|_error| KernelError::StoreIo)
+}
+
 fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
     let file = File::open(path).map_err(|_error| KernelError::StoreIo)?;
     let reader = BufReader::new(file);
     let mut log = FileKernelLog::default();
+    let mut seen_header = false;
+    let mut seen_data = false;
 
     for line in reader.lines() {
         let line = line.map_err(|_error| KernelError::StoreIo)?;
@@ -356,11 +408,27 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
         }
 
         match serde_json::from_str::<FileKernelRecord>(&line) {
-            Ok(FileKernelRecord::Cell { cell }) => log.cells.push(*cell),
-            Ok(FileKernelRecord::Commit { manifest }) => log.explicit_manifests.push(manifest),
-            Err(_record_error) => log.cells.push(
-                serde_json::from_str(&line).map_err(|_cell_error| KernelError::StoreCorrupt)?,
-            ),
+            Ok(FileKernelRecord::Header { format, version }) => {
+                if seen_header || seen_data {
+                    return Err(KernelError::StoreCorrupt);
+                }
+                FileKernelHeader { format, version }.validate()?;
+                seen_header = true;
+            }
+            Ok(FileKernelRecord::Cell { cell }) => {
+                seen_data = true;
+                log.cells.push(*cell);
+            }
+            Ok(FileKernelRecord::Commit { manifest }) => {
+                seen_data = true;
+                log.explicit_manifests.push(manifest);
+            }
+            Err(_record_error) => {
+                seen_data = true;
+                log.cells.push(
+                    serde_json::from_str(&line).map_err(|_cell_error| KernelError::StoreCorrupt)?,
+                );
+            }
         }
     }
 
@@ -790,16 +858,17 @@ mod tests {
             .map(serde_json::from_str::<serde_json::Value>)
             .collect::<Result<Vec<_>, _>>()?;
 
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0]["type"], "cell");
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0]["type"], "header");
         assert_eq!(lines[1]["type"], "cell");
-        assert_eq!(lines[2]["type"], "commit");
+        assert_eq!(lines[2]["type"], "cell");
+        assert_eq!(lines[3]["type"], "commit");
         assert_eq!(
-            lines[2]["manifest"]["commit_id"],
+            lines[3]["manifest"]["commit_id"],
             serde_json::to_value(commit_id)?
         );
         assert_eq!(
-            lines[2]["manifest"]["cell_ids"],
+            lines[3]["manifest"]["cell_ids"],
             serde_json::to_value(expected_ids)?
         );
         fs::remove_file(path)?;
@@ -954,6 +1023,102 @@ mod tests {
                 serde_json::json!({
                     "type": "commit",
                     "manifest": manifest
+                })
+            ),
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_open_writes_header_for_new_empty_file() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-header-new");
+
+        let kernel = FileKernel::open(&path)?;
+
+        assert_eq!(kernel.path(), path.as_path());
+        let lines = fs::read_to_string(&path)?
+            .lines()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["type"], "header");
+        assert_eq!(lines[0]["format"], "continuitydb.file_kernel");
+        assert_eq!(lines[0]["version"], 1);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_appends_records_after_header() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-header-before-records");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let cell = sample_cell("project:continuitydb:header-record-order", 0.91, 12)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell_at_with_commit_id(cell, committed_at, commit_id)?;
+        }
+
+        let lines = fs::read_to_string(&path)?
+            .lines()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0]["type"], "header");
+        assert_eq!(lines[1]["type"], "cell");
+        assert_eq!(lines[2]["type"], "commit");
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_unsupported_header_version() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-unsupported-header");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 999
+                })
+            ),
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_header_after_data_record() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-late-header");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:late-header", 0.91, 12)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({
+                    "type": "cell",
+                    "cell": cell
+                }),
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 1
                 })
             ),
         )?;
