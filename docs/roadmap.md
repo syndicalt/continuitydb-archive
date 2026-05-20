@@ -82,6 +82,7 @@ Storage kernel
 ## Conflict Detection Milestones
 
 1. Add deterministic StateCell conflict detection. Implemented same-anchor, overlapping-valid-time, different-payload detection in `continuitydb-revision`, backed by half-open valid-time overlap semantics in `continuitydb-core`.
+2. Add deterministic candidate-set conflict scanning. Implemented unordered pairwise scanning in input order with aggregate reciprocal `ConflictsWith` revision links in `continuitydb-revision`.
 
 ## CLI Milestones
 

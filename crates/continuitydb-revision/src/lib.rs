@@ -111,6 +111,43 @@ pub fn detect_cell_conflict(left: &StateCell, right: &StateCell) -> Option<CellC
     })
 }
 
+/// Deterministic conflict scan over a candidate StateCell set.
+pub struct CellConflictScan {
+    /// Pairwise conflicts found in deterministic input-pair order.
+    pub conflicts: Vec<CellConflict>,
+    /// Aggregate revision links for all detected conflicts.
+    pub revision: RevisionGraph,
+}
+
+/// Finds all deterministic conflicts across unordered pairs in input order.
+pub fn scan_cell_conflicts(cells: &[StateCell]) -> CellConflictScan {
+    let mut conflicts = Vec::new();
+    let mut revision = RevisionGraph::default();
+
+    for (left_index, left) in cells.iter().enumerate() {
+        for right in cells.iter().skip(left_index + 1) {
+            if let Some(conflict) = detect_cell_conflict(left, right) {
+                revision.link(
+                    conflict.left,
+                    RevisionLinkKind::ConflictsWith,
+                    conflict.right,
+                );
+                revision.link(
+                    conflict.right,
+                    RevisionLinkKind::ConflictsWith,
+                    conflict.left,
+                );
+                conflicts.push(conflict);
+            }
+        }
+    }
+
+    CellConflictScan {
+        conflicts,
+        revision,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
@@ -121,8 +158,8 @@ mod tests {
     };
 
     use super::{
-        detect_cell_conflict, revise_utility_feedback, CellConflictKind, RevisionGraph,
-        RevisionLinkKind,
+        detect_cell_conflict, revise_utility_feedback, scan_cell_conflicts, CellConflictKind,
+        RevisionGraph, RevisionLinkKind,
     };
 
     fn timestamp(day: u32) -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
@@ -278,6 +315,52 @@ mod tests {
         )?;
 
         assert!(detect_cell_conflict(&left, &right).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_scan_reports_each_conflicting_pair_once() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let left = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:release-status",
+            "Release is green.",
+            20,
+            Some(22),
+        )?;
+        let right = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:release-status",
+            "Release is blocked.",
+            21,
+            Some(23),
+        )?;
+        let adjacent = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:release-status",
+            "Release is ready for handoff.",
+            23,
+            Some(24),
+        )?;
+        let unrelated = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:roadmap",
+            "Roadmap is current.",
+            20,
+            Some(24),
+        )?;
+
+        let scan = scan_cell_conflicts(&[left.clone(), right.clone(), adjacent, unrelated]);
+
+        assert_eq!(scan.conflicts.len(), 1);
+        assert_eq!(scan.conflicts[0].left, left.id);
+        assert_eq!(scan.conflicts[0].right, right.id);
+        assert_eq!(
+            scan.revision
+                .targets(left.id, RevisionLinkKind::ConflictsWith),
+            vec![right.id]
+        );
+        assert_eq!(
+            scan.revision
+                .targets(right.id, RevisionLinkKind::ConflictsWith),
+            vec![left.id]
+        );
         Ok(())
     }
 }
