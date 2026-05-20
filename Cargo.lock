@@ -269,6 +269,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuitydb-query"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "continuitydb-checkout",
+ "continuitydb-core",
+ "thiserror",
+]
+
+[[package]]
 name = "continuitydb-revision"
 version = "0.1.0"
 dependencies = [

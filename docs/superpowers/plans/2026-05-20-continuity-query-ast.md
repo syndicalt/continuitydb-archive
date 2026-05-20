@@ -76,7 +76,7 @@ cargo test -p continuitydb-query
 
 Expected: PASS with zero tests.
 
-- [ ] **Step 5: Commit scaffold**
+- [x] **Step 5: Commit scaffold**
 
 ```bash
 git add Cargo.toml crates/continuitydb-query
@@ -88,7 +88,7 @@ git commit -m "chore: add continuity query crate"
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add tests before implementation**
+- [x] **Step 1: Add tests before implementation**
 
 Replace `crates/continuitydb-query/src/lib.rs` with this test-first skeleton:
 
@@ -242,7 +242,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -257,7 +257,7 @@ Expected: FAIL because `QueryTask`, `CheckoutQuery`, `ContinuityQuery`, `QueryRe
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add production types and compiler above the tests**
+- [x] **Step 1: Add production types and compiler above the tests**
 
 Insert this code above the `#[cfg(test)]` module:
 
@@ -443,7 +443,7 @@ pub enum QueryError {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify GREEN**
+- [x] **Step 2: Run tests and verify GREEN**
 
 Run:
 
