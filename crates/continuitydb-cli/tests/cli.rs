@@ -1542,6 +1542,12 @@ fn cli_benchmark_local_model_reports_passing_response_changes(
                     .is_some_and(serde_json::Map::is_empty)
         })
         .ok_or("missing passing response-change summary")?;
+    assert_eq!(changed_case["outcome_changed"].as_bool(), Some(false));
+    assert_eq!(
+        changed_case["failure_counts_changed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(changed_case["response_changed"].as_bool(), Some(true));
     assert_ne!(
         changed_case["previous_response_fingerprint"].as_str(),
         changed_case["current_response_fingerprint"].as_str()

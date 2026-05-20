@@ -2644,6 +2644,9 @@ mod tests {
         assert_eq!(changed_case.case_name(), "frontier baseline regression");
         assert!(changed_case.previous_passed());
         assert!(changed_case.current_passed());
+        assert!(!changed_case.outcome_changed());
+        assert!(!changed_case.failure_counts_changed());
+        assert!(changed_case.response_changed());
         assert!(changed_case.failure_count_deltas().is_empty());
         assert_ne!(
             changed_case.previous_response_fingerprint(),

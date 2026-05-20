@@ -293,6 +293,7 @@ Storage kernel
 81. Add local-model regression same-outcome failure change summaries. Extended changed-case regression summaries to include cases whose pass/fail outcome is unchanged but stable failure-code counts changed, so CI can detect local Steward model quality shifts that pass-count gates miss.
 82. Add local-model regression changed-case response fingerprints. Added previous/current raw response fingerprints and byte counts to each changed-case regression summary so CI artifacts can connect pass-state or failure-code movement directly to the model outputs that caused it.
 83. Add local-model regression passing-response change summaries. Extended changed-case regression summaries to include cases whose pass state and failure-code counts are unchanged but raw response fingerprints changed, so CI can detect local Steward model output drift that score-only gates miss.
+84. Add local-model regression changed-case reason flags. Added explicit outcome, failure-count, and response-change booleans to each changed-case summary so CI consumers can route local Steward model drift without reimplementing comparison logic.
 
 ## Small Embeddable Model Track
 

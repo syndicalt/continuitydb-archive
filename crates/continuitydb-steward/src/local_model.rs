@@ -1728,6 +1728,12 @@ pub struct LocalModelBenchmarkCaseSummary {
     case_name: String,
     previous_passed: bool,
     current_passed: bool,
+    #[serde(default)]
+    outcome_changed: bool,
+    #[serde(default)]
+    failure_counts_changed: bool,
+    #[serde(default)]
+    response_changed: bool,
     previous_failure_counts: BTreeMap<String, usize>,
     current_failure_counts: BTreeMap<String, usize>,
     failure_count_deltas: BTreeMap<String, isize>,
@@ -1755,6 +1761,21 @@ impl LocalModelBenchmarkCaseSummary {
     /// Returns whether the current baseline passed this case.
     pub fn current_passed(&self) -> bool {
         self.current_passed
+    }
+
+    /// Returns whether the case pass/fail outcome changed.
+    pub fn outcome_changed(&self) -> bool {
+        self.outcome_changed
+    }
+
+    /// Returns whether stable failure-code counts changed for this case.
+    pub fn failure_counts_changed(&self) -> bool {
+        self.failure_counts_changed
+    }
+
+    /// Returns whether the captured raw response fingerprint changed for this case.
+    pub fn response_changed(&self) -> bool {
+        self.response_changed
     }
 
     /// Returns stable failure-code counts for the previous case report.
@@ -1984,14 +2005,17 @@ fn changed_case_summaries(
             previous_response.and_then(LocalModelResponseFingerprint::response_fingerprint);
         let current_response_fingerprint =
             current_response.and_then(LocalModelResponseFingerprint::response_fingerprint);
-        if previous_passed != current_passed
-            || !failure_count_deltas.is_empty()
-            || previous_response_fingerprint != current_response_fingerprint
-        {
+        let outcome_changed = previous_passed != current_passed;
+        let failure_counts_changed = !failure_count_deltas.is_empty();
+        let response_changed = previous_response_fingerprint != current_response_fingerprint;
+        if outcome_changed || failure_counts_changed || response_changed {
             summaries.push(LocalModelBenchmarkCaseSummary {
                 case_name: name.to_string(),
                 previous_passed,
                 current_passed,
+                outcome_changed,
+                failure_counts_changed,
+                response_changed,
                 previous_failure_counts,
                 current_failure_counts,
                 failure_count_deltas,
