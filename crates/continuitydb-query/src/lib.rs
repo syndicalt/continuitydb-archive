@@ -635,8 +635,8 @@ WHERE scope = project("continuitydb")
     }
 
     #[test]
-    fn text_query_parses_temporal_and_commit_constraints(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn text_query_parses_temporal_and_commit_constraints() -> Result<(), Box<dyn std::error::Error>>
+    {
         let commit_id = CommitId::new();
         let query = parse_query_text(&format!(
             r#"CHECKOUT "release" ANSWER "what should ship?"
