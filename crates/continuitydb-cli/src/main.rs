@@ -187,11 +187,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "valid_commits": validation.valid_commits,
                 })
             } else {
-                let imported_commits = db.import_commits_json_file(&input_path)?;
+                let summary = db.import_commits_json_file_with_summary(&input_path)?;
                 serde_json::json!({
                     "path": store_path.display().to_string(),
                     "input": input_path.display().to_string(),
-                    "imported_commits": imported_commits,
+                    "imported_commits": summary.imported_commits,
+                    "next_after": summary.next_after,
                 })
             };
             println!("{}", serde_json::to_string_pretty(&output)?);

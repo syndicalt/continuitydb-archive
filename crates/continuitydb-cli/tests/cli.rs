@@ -402,6 +402,7 @@ fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Err
     assert_eq!(import_json["path"].as_str(), target_path.to_str());
     assert_eq!(import_json["input"].as_str(), backup_path.to_str());
     assert_eq!(import_json["imported_commits"].as_u64(), Some(1));
+    assert_eq!(import_json["next_after"], export_json["next_after"]);
     assert_eq!(target_batch, source_batch);
 
     fs::remove_file(source_path)?;
