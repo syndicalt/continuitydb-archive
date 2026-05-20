@@ -68,6 +68,8 @@ fn demo_checkout() -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::
             valid_at: None,
             answerability_question: None,
             evidence_source: None,
+            dependency_target: None,
+            dependency_kind: None,
             minimum_confidence: Confidence::new(0.7)?,
             token_budget: 10,
         },

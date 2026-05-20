@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
-    ActivationState, Confidence, CoreError, Scope, SemanticAnchor, StateCell, StateCellId,
+    ActivationState, CellDependencyKind, Confidence, CoreError, Scope, SemanticAnchor, StateCell,
+    StateCellId,
 };
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,10 @@ pub struct CheckoutRequest {
     pub answerability_question: Option<String>,
     /// Optional exact evidence-source filter.
     pub evidence_source: Option<String>,
+    /// Optional dependency target filter.
+    pub dependency_target: Option<StateCellId>,
+    /// Optional dependency kind filter.
+    pub dependency_kind: Option<CellDependencyKind>,
     /// Minimum evidence confidence for included cells.
     pub minimum_confidence: Confidence,
     /// Maximum token budget for the returned slice.
@@ -111,6 +116,8 @@ pub fn checkout<K: StorageKernel>(
         valid_at: request.valid_at,
         answerability_question: request.answerability_question,
         evidence_source: request.evidence_source,
+        dependency_target: request.dependency_target,
+        dependency_kind: request.dependency_kind,
         minimum_confidence: Some(request.minimum_confidence),
         ..CellLookup::default()
     })?;
@@ -214,9 +221,9 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
-        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
-        ValidTimeRange,
+        ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
+        Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
+        TrustSignal, UtilityFeedback, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
@@ -294,6 +301,8 @@ mod tests {
                 valid_at: None,
                 answerability_question: Some("what is frontier?".to_string()),
                 evidence_source: Some("human".to_string()),
+                dependency_target: None,
+                dependency_kind: None,
                 minimum_confidence: Confidence::new(0.8)?,
                 token_budget: 10,
             },
@@ -318,6 +327,35 @@ mod tests {
     }
 
     #[test]
+    fn checkout_pushes_dependency_constraints_to_kernel() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let kernel = RecordingKernel::default();
+        let target = StateCellId::new();
+        checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: Some(target),
+                dependency_kind: Some(CellDependencyKind::DependsOn),
+                minimum_confidence: Confidence::new(0.8)?,
+                token_budget: 10,
+            },
+        )?;
+
+        let lookup = kernel
+            .lookup
+            .borrow()
+            .clone()
+            .ok_or_else(|| std::io::Error::other("lookup was not captured"))?;
+        assert_eq!(lookup.dependency_target, Some(target));
+        assert_eq!(lookup.dependency_kind, Some(CellDependencyKind::DependsOn));
+        Ok(())
+    }
+
+    #[test]
     fn checkout_respects_token_budget_and_confidence() -> Result<(), Box<dyn std::error::Error>> {
         let mut kernel = MemoryKernel::default();
         let high = sample_cell("project:continuitydb:high", 0.95, 10)?;
@@ -332,6 +370,8 @@ mod tests {
                 valid_at: None,
                 answerability_question: None,
                 evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
                 minimum_confidence: Confidence::new(0.7)?,
                 token_budget: 10,
             },
@@ -370,6 +410,8 @@ mod tests {
                 valid_at: None,
                 answerability_question: None,
                 evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
                 minimum_confidence: Confidence::new(0.7)?,
                 token_budget: 10,
             },
@@ -381,6 +423,52 @@ mod tests {
             slice.alternatives[0].cell_id,
             high_confidence_low_utility.id
         );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_filters_by_dependency_target_and_kind() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let target = StateCellId::new();
+        let other_target = StateCellId::new();
+        let mut dependent = sample_cell("project:continuitydb:dependent", 0.95, 10)?;
+        dependent.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut unrelated = sample_cell("project:continuitydb:unrelated", 0.90, 10)?;
+        unrelated.dependencies.push(CellDependency::new(
+            other_target,
+            CellDependencyKind::DependsOn,
+            "depends on another target",
+        ));
+        let mut support = sample_cell("project:continuitydb:support", 0.85, 10)?;
+        support.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::Supports,
+            "supports target",
+        ));
+        kernel.append_cell(dependent.clone())?;
+        kernel.append_cell(unrelated)?;
+        kernel.append_cell(support)?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: Some(target),
+                dependency_kind: Some(CellDependencyKind::DependsOn),
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 20,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![dependent]);
+        assert_eq!(slice.total_tokens, 10);
         Ok(())
     }
 
@@ -411,6 +499,8 @@ mod tests {
                 valid_at: None,
                 answerability_question: Some("what is frontier?".to_string()),
                 evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
                 minimum_confidence: Confidence::new(0.7)?,
                 token_budget: 20,
             },
@@ -448,6 +538,8 @@ mod tests {
                 valid_at: None,
                 answerability_question: None,
                 evidence_source: Some("human".to_string()),
+                dependency_target: None,
+                dependency_kind: None,
                 minimum_confidence: Confidence::new(0.7)?,
                 token_budget: 20,
             },
@@ -475,6 +567,8 @@ mod tests {
                 valid_at: None,
                 answerability_question: None,
                 evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
                 minimum_confidence: Confidence::new(0.7)?,
                 token_budget: 20,
             },
@@ -519,6 +613,8 @@ mod tests {
                 valid_at: None,
                 answerability_question: None,
                 evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
                 minimum_confidence: Confidence::new(0.7)?,
                 token_budget: 10,
             },
