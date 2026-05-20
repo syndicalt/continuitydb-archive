@@ -149,6 +149,7 @@ Storage kernel
 1. Add deterministic world-model workload generation. Implemented `continuitydb-workload` with stable StateCell IDs, semantic anchors, scoped evidence, frontier activation cadence, dependency edges, utility signals, and workload summaries so storage engines and checkout algorithms can be compared against repeatable corpora.
 2. Add deterministic workload measurement harness. Implemented storage-kernel-generic ingest and checkout measurement over generated workloads, reporting operation counts, selected and alternative checkout counts, frontier counts, token totals, and observational elapsed durations without making benchmark superiority claims.
 3. Add CLI workload measurement. Implemented `continuitydb measure-workload` for memory and file-backed kernels so deterministic workload ingest and checkout measurements can be collected as JSON from operator and CI workflows.
+4. Add durable workload measurement baselines. Implemented JSONL baseline records for workload measurement snapshots so historical ingest and checkout evidence can be retained before adding regression gates.
 
 ## Native API Milestones
 

@@ -317,6 +317,8 @@ dependencies = [
  "continuitydb-core",
  "continuitydb-kernel",
  "continuitydb-memory",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

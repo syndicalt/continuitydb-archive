@@ -8,7 +8,13 @@ use continuitydb_core::{
     UtilityFeedback, ValidTimeRange,
 };
 use continuitydb_kernel::{KernelError, StorageKernel};
-use std::time::{Duration, Instant};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 
 /// Deterministic workload generation parameters.
@@ -89,6 +95,130 @@ pub struct WorkloadMeasurement {
     pub checkout: CheckoutMeasurement,
 }
 
+/// Serializable workload summary snapshot.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadSummarySnapshot {
+    /// Number of generated StateCells.
+    pub cell_count: usize,
+    /// Number of generated cells marked as frontier.
+    pub frontier_count: usize,
+    /// Number of generated dependency edges.
+    pub dependency_count: usize,
+    /// Sum of generated token costs.
+    pub total_token_cost: i64,
+}
+
+impl From<WorkloadSummary> for WorkloadSummarySnapshot {
+    fn from(summary: WorkloadSummary) -> Self {
+        Self {
+            cell_count: summary.cell_count,
+            frontier_count: summary.frontier_count,
+            dependency_count: summary.dependency_count,
+            total_token_cost: summary.total_token_cost,
+        }
+    }
+}
+
+/// Serializable measured operation snapshot.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MeasuredOperationSnapshot {
+    /// Number of logical operations performed.
+    pub operation_count: usize,
+    /// Observed elapsed nanoseconds for the operation group.
+    pub elapsed_nanos: u128,
+}
+
+impl From<MeasuredOperation> for MeasuredOperationSnapshot {
+    fn from(operation: MeasuredOperation) -> Self {
+        Self {
+            operation_count: operation.operation_count,
+            elapsed_nanos: operation.elapsed.as_nanos(),
+        }
+    }
+}
+
+/// Serializable checkout measurement snapshot.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CheckoutMeasurementSnapshot {
+    /// Number of checkout candidates matching request constraints.
+    pub matched_count: usize,
+    /// Number of cells selected into the returned slice.
+    pub selected_count: usize,
+    /// Number of matching cells omitted as alternatives.
+    pub alternative_count: usize,
+    /// Number of selected frontier cells.
+    pub frontier_count: usize,
+    /// Selected token total reported by checkout.
+    pub selected_token_count: i64,
+}
+
+impl From<CheckoutMeasurement> for CheckoutMeasurementSnapshot {
+    fn from(measurement: CheckoutMeasurement) -> Self {
+        Self {
+            matched_count: measurement.matched_count,
+            selected_count: measurement.selected_count,
+            alternative_count: measurement.alternative_count,
+            frontier_count: measurement.frontier_count,
+            selected_token_count: measurement.selected_token_count,
+        }
+    }
+}
+
+/// Serializable workload measurement snapshot for durable baseline records.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadMeasurementSnapshot {
+    /// Generated workload summary.
+    pub workload: WorkloadSummarySnapshot,
+    /// Ingest operation measurement.
+    pub ingest: MeasuredOperationSnapshot,
+    /// Checkout operation measurement.
+    pub checkout_operation: MeasuredOperationSnapshot,
+    /// Checkout result counts.
+    pub checkout: CheckoutMeasurementSnapshot,
+}
+
+impl WorkloadMeasurementSnapshot {
+    /// Converts an in-memory measurement into a serializable snapshot.
+    pub fn from_measurement(measurement: &WorkloadMeasurement) -> Self {
+        Self {
+            workload: measurement.workload_summary.into(),
+            ingest: measurement.ingest.into(),
+            checkout_operation: measurement.checkout_operation.into(),
+            checkout: measurement.checkout.into(),
+        }
+    }
+}
+
+/// Durable workload measurement baseline record.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadBaselineRecord {
+    /// Timestamp when this baseline was recorded.
+    pub recorded_at: DateTime<Utc>,
+    /// Caller-provided scenario label.
+    pub label: String,
+    /// Caller-provided kernel profile name.
+    pub kernel: String,
+    /// Serializable measurement snapshot.
+    pub snapshot: WorkloadMeasurementSnapshot,
+}
+
+impl WorkloadBaselineRecord {
+    /// Creates a workload baseline record.
+    pub fn new(
+        recorded_at: DateTime<Utc>,
+        label: impl Into<String>,
+        kernel: impl Into<String>,
+        snapshot: WorkloadMeasurementSnapshot,
+    ) -> Self {
+        Self {
+            recorded_at,
+            label: label.into(),
+            kernel: kernel.into(),
+            snapshot,
+        }
+    }
+}
+
 /// Workload generation failure.
 #[derive(Debug, Error)]
 pub enum WorkloadError {
@@ -121,6 +251,84 @@ pub enum MeasurementError {
     /// Checkout failure while materializing a workload slice.
     #[error(transparent)]
     Checkout(#[from] CheckoutError),
+}
+
+/// Workload baseline store failure.
+#[derive(Debug, Error)]
+pub enum WorkloadBaselineError {
+    /// File I/O failure.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// JSON serialization failure.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    /// Baseline JSONL record is corrupt.
+    #[error("baseline record at line {line} is corrupt")]
+    CorruptRecord {
+        /// One-based JSONL line number.
+        line: usize,
+        /// Decode error for the corrupt record.
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
+/// Append-only JSONL store for workload measurement baselines.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileWorkloadBaselineStore {
+    path: PathBuf,
+}
+
+impl FileWorkloadBaselineStore {
+    /// Creates a file-backed workload baseline store at the given path.
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
+    }
+
+    /// Appends one baseline record as a JSONL line.
+    pub fn append(&self, record: &WorkloadBaselineRecord) -> Result<(), WorkloadBaselineError> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        serde_json::to_writer(&mut file, record)?;
+        file.write_all(b"\n")?;
+        file.flush()?;
+        Ok(())
+    }
+
+    /// Lists baseline records in file order.
+    pub fn list(&self) -> Result<Vec<WorkloadBaselineRecord>, WorkloadBaselineError> {
+        match File::open(&self.path) {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                let mut records = Vec::new();
+                for (index, line) in reader.lines().enumerate() {
+                    let line = line?;
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+
+                    let record = serde_json::from_str(&line).map_err(|source| {
+                        WorkloadBaselineError::CorruptRecord {
+                            line: index + 1,
+                            source,
+                        }
+                    })?;
+                    records.push(record);
+                }
+                Ok(records)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(error.into()),
+        }
+    }
 }
 
 /// Generates a deterministic world-model workload for benchmarks and engine comparisons.
@@ -286,6 +494,7 @@ mod tests {
     use continuitydb_checkout::CheckoutRequest;
     use continuitydb_core::{ActivationState, CellDependencyKind, Confidence, Scope};
     use continuitydb_memory::MemoryKernel;
+    use std::fs;
 
     fn sample_config() -> Result<WorkloadConfig, Box<dyn std::error::Error>> {
         let valid_from = Utc
@@ -490,5 +699,101 @@ mod tests {
             ))
         ));
         Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_snapshot_preserves_counts_and_elapsed_nanos(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let measurement = sample_measurement()?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement(&measurement);
+
+        assert_eq!(snapshot.workload.cell_count, 8);
+        assert_eq!(snapshot.workload.frontier_count, 2);
+        assert_eq!(snapshot.ingest.operation_count, 8);
+        assert!(snapshot.ingest.elapsed_nanos > 0);
+        assert_eq!(snapshot.checkout.matched_count, 8);
+        assert_eq!(snapshot.checkout.selected_count, 3);
+        assert_eq!(snapshot.checkout.alternative_count, 5);
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_store_appends_and_lists_in_order() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_baseline_path("continuitydb-workload-baseline-order");
+        let store = FileWorkloadBaselineStore::new(&path);
+        let recorded_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 2, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement(&sample_measurement()?);
+        let first =
+            WorkloadBaselineRecord::new(recorded_at, "small-memory", "memory", snapshot.clone());
+        let second = WorkloadBaselineRecord::new(recorded_at, "small-file", "file", snapshot);
+
+        store.append(&first)?;
+        store.append(&second)?;
+        let records = store.list()?;
+
+        assert_eq!(records, vec![first, second]);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_store_lists_missing_file_as_empty(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_baseline_path("continuitydb-workload-baseline-missing");
+        let store = FileWorkloadBaselineStore::new(&path);
+
+        assert!(store.list()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_store_reports_corrupt_jsonl_line() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_baseline_path("continuitydb-workload-baseline-corrupt");
+        fs::write(&path, "{not-json}\n")?;
+        let store = FileWorkloadBaselineStore::new(&path);
+
+        assert!(matches!(
+            store.list(),
+            Err(WorkloadBaselineError::CorruptRecord { line: 1, .. })
+        ));
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    fn sample_measurement() -> Result<WorkloadMeasurement, Box<dyn std::error::Error>> {
+        let workload = generate_world_model_workload(sample_config()?)?;
+        let mut kernel = MemoryKernel::default();
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let request = CheckoutRequest {
+            semantic_anchor: None,
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: None,
+            system_at: None,
+            commit_id: None,
+            activation: None,
+            answerability_question: None,
+            evidence_source: None,
+            dependency_target: None,
+            dependency_kind: None,
+            minimum_confidence: Confidence::new(0.0)?,
+            token_budget: 400,
+        };
+
+        measure_ingest_and_checkout(&mut kernel, &workload, committed_at, request)
+            .map_err(Into::into)
+    }
+
+    fn temp_baseline_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("{name}-{:?}.jsonl", StateCellId::new()))
     }
 }
