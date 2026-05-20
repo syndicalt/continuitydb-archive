@@ -9,6 +9,7 @@ use continuitydb_kernel::{
     CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelStatus,
     KernelCapabilities, KernelError, KernelRequirements, StorageKernel,
 };
+use continuitydb_query::{CheckoutQuery, ContinuityQuery, QueryError};
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
@@ -32,6 +33,9 @@ pub enum ContinuityError {
     /// Checkout operation failure.
     #[error(transparent)]
     Checkout(#[from] CheckoutError),
+    /// Query compilation failure.
+    #[error(transparent)]
+    Query(#[from] QueryError),
     /// Requested StateCell was not found in the backing kernel.
     #[error("state cell not found")]
     CellNotFound {
@@ -294,6 +298,19 @@ impl<K: StorageKernel> ContinuityDb<K> {
     /// Materializes a deterministic continuity slice.
     pub fn checkout(&self, request: CheckoutRequest) -> Result<CheckoutSlice, ContinuityError> {
         checkout(&self.kernel, request).map_err(Into::into)
+    }
+
+    /// Materializes a deterministic continuity slice from a typed checkout query.
+    pub fn checkout_query(&self, query: CheckoutQuery) -> Result<CheckoutSlice, ContinuityError> {
+        self.checkout(query.compile_checkout()?)
+    }
+
+    /// Materializes a deterministic continuity slice from a top-level typed query.
+    pub fn checkout_continuity_query(
+        &self,
+        query: ContinuityQuery,
+    ) -> Result<CheckoutSlice, ContinuityError> {
+        self.checkout(query.compile_checkout()?)
     }
 
     /// Returns the manifest for a database commit boundary when it exists.
@@ -672,6 +689,10 @@ mod tests {
         KernelRequirements, StorageKernel,
     };
     use continuitydb_memory::MemoryKernel;
+    use continuitydb_query::{
+        CheckoutQuery, ContinuityQuery, QueryError, QueryOptimization, QueryRequirements,
+        QueryReturnShape, QueryTask,
+    };
     use std::{fs, path::Path};
 
     use super::{
@@ -941,6 +962,123 @@ mod tests {
         assert_eq!(slice.cells[0].id, cell_id);
         assert_eq!(slice.cells[0].system_time.from(), committed_at);
         Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_materializes_slice() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:api-query", 0.91, 12)?;
+        let cell_id = cell.id;
+        db.ingest_cell_at(cell, committed_at)?;
+
+        let query = CheckoutQuery::new(QueryTask::new("api-query", "what should the agent know?"))
+            .with_requirements(QueryRequirements {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: Some(committed_at),
+                system_at: Some(committed_at),
+                minimum_confidence: Confidence::new(0.8)?,
+                token_budget: 100,
+                ..QueryRequirements::default()
+            });
+        let slice = db.checkout_query(query)?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(slice.cells[0].id, cell_id);
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_applies_token_budget_to_alternatives(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:api-query-budget-first", 0.91, 80)?;
+        let second = sample_cell("project:continuitydb:api-query-budget-second", 0.9, 80)?;
+        db.ingest_cells_at(vec![first, second], committed_at)?;
+
+        let query = CheckoutQuery::new(QueryTask::new(
+            "api-query-budget",
+            "what should the agent know?",
+        ))
+        .with_requirements(QueryRequirements {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            minimum_confidence: Confidence::new(0.8)?,
+            token_budget: 100,
+            ..QueryRequirements::default()
+        });
+        let slice = db.checkout_query(query)?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(slice.alternatives.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_continuity_query_delegates_top_level_query(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:api-continuity-query", 0.91, 12)?;
+        let cell_id = cell.id;
+        db.ingest_cell_at(cell, committed_at)?;
+
+        let query = ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+            "api-continuity-query",
+            "what should the agent know?",
+        )));
+        let slice = db.checkout_continuity_query(query)?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(slice.cells[0].id, cell_id);
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_returns_unsupported_shape_error() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let query = CheckoutQuery::new(QueryTask::new(
+            "api-query-shape",
+            "what should the agent know?",
+        ))
+        .with_return_shape(QueryReturnShape::CellsOnly);
+
+        let result = db.checkout_query(query);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Query(QueryError::UnsupportedReturnShape(
+                QueryReturnShape::CellsOnly
+            )))
+        ));
+    }
+
+    #[test]
+    fn api_checkout_query_returns_unsupported_optimization_error() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let query = CheckoutQuery::new(QueryTask::new(
+            "api-query-optimization",
+            "what should the agent know?",
+        ))
+        .with_optimization(QueryOptimization::TokenCostOnly);
+
+        let result = db.checkout_query(query);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Query(QueryError::UnsupportedOptimization(
+                QueryOptimization::TokenCostOnly
+            )))
+        ));
     }
 
     #[test]

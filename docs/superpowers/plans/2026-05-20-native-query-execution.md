@@ -24,7 +24,7 @@
 - Modify: `crates/continuitydb-api/Cargo.toml`
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add API dependency on query crate**
+- [x] **Step 1: Add API dependency on query crate**
 
 Add this dependency to `crates/continuitydb-api/Cargo.toml`:
 
@@ -32,7 +32,7 @@ Add this dependency to `crates/continuitydb-api/Cargo.toml`:
 continuitydb-query = { path = "../continuitydb-query" }
 ```
 
-- [ ] **Step 2: Add failing API tests**
+- [x] **Step 2: Add failing API tests**
 
 In `crates/continuitydb-api/src/lib.rs`, add this import in the test module:
 
@@ -167,7 +167,7 @@ fn api_checkout_query_returns_unsupported_optimization_error() {
 }
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run:
 
@@ -182,7 +182,7 @@ Expected: FAIL because `ContinuityError::Query`, `checkout_query`, and `checkout
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add query imports and error variant**
+- [x] **Step 1: Add query imports and error variant**
 
 At the top of `crates/continuitydb-api/src/lib.rs`, add:
 
@@ -198,7 +198,7 @@ Add this `ContinuityError` variant:
 Query(#[from] QueryError),
 ```
 
-- [ ] **Step 2: Add API methods**
+- [x] **Step 2: Add API methods**
 
 Add these methods near `checkout` in `impl<K: StorageKernel> ContinuityDb<K>`:
 
@@ -217,7 +217,7 @@ pub fn checkout_continuity_query(
 }
 ```
 
-- [ ] **Step 3: Run focused tests and verify GREEN**
+- [x] **Step 3: Run focused tests and verify GREEN**
 
 Run:
 

@@ -11,6 +11,7 @@ chrono.workspace = true
 continuitydb-checkout = { path = "../continuitydb-checkout" }
 continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-kernel = { path = "../continuitydb-kernel" }
+continuitydb-query = { path = "../continuitydb-query" }
 continuitydb-revision = { path = "../continuitydb-revision" }
 serde.workspace = true
 serde_json.workspace = true
