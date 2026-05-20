@@ -42,6 +42,7 @@ The first milestone builds:
 - File-kernel secondary indexes for activation states and dependency filters.
 - Typed storage-kernel capability introspection for embedders.
 - Typed storage-kernel requirement checks for production readiness gates.
+- File-backed store status for visible cell/commit counts and durable file size.
 - Line-addressed JSONL file-kernel corruption diagnostics.
 - Headered JSONL file-kernel partial-commit detection.
 - Durable filesystem flush boundaries for JSONL file-kernel writes.
