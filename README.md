@@ -53,6 +53,7 @@ The first milestone builds:
 - Native typed utility feedback revision API.
 - Native read-only conflict analysis API.
 - Native read-only batch conflict analysis API.
+- CLI commit backup and restore commands over versioned export envelopes.
 - A thin CLI over library APIs.
 
 ## Roadmap

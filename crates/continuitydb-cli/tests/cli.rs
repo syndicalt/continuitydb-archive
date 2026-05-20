@@ -2,10 +2,12 @@
 
 use assert_cmd::Command;
 use chrono::{TimeZone, Utc};
+use continuitydb_api::ContinuityDb;
 use continuitydb_core::{
     Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence, Scope,
     SemanticAnchor, SourceId, StateCell, StateCellId, SystemTimeRange, TrustSignal, ValidTimeRange,
 };
+use continuitydb_kernel::{CommitManifestLookup, FileKernel};
 use predicates::str::contains;
 use serde_json::Value;
 use std::{fs, path::PathBuf};
@@ -102,8 +104,92 @@ fn cli_compact_file_fails_for_corrupt_store() -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
+#[test]
+fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-export-source");
+    let target_path = temp_store_path("continuitydb-cli-import-target");
+    let backup_path = temp_store_path("continuitydb-cli-export-backup");
+    write_committed_store(&source_path, "project:continuitydb:cli-backup")?;
+
+    let export_output = Command::cargo_bin("continuitydb")?
+        .arg("export-commits")
+        .arg(&source_path)
+        .arg(&backup_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let export_json: Value = serde_json::from_slice(&export_output)?;
+    let envelope_json: Value = serde_json::from_slice(&fs::read(&backup_path)?)?;
+
+    assert_eq!(export_json["path"].as_str(), source_path.to_str());
+    assert_eq!(export_json["output"].as_str(), backup_path.to_str());
+    assert_eq!(export_json["exported_commits"].as_u64(), Some(1));
+    assert!(export_json["next_after"].is_string());
+    assert_eq!(
+        envelope_json["format"].as_str(),
+        Some("continuitydb.commit_export")
+    );
+    assert_eq!(envelope_json["version"].as_u64(), Some(1));
+
+    let import_output = Command::cargo_bin("continuitydb")?
+        .arg("import-commits")
+        .arg(&target_path)
+        .arg(&backup_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let import_json: Value = serde_json::from_slice(&import_output)?;
+    let source_batch = ContinuityDb::new(FileKernel::open(&source_path)?)
+        .export_commits(CommitManifestLookup::default())?;
+    let target_batch = ContinuityDb::new(FileKernel::open(&target_path)?)
+        .export_commits(CommitManifestLookup::default())?;
+
+    assert_eq!(import_json["path"].as_str(), target_path.to_str());
+    assert_eq!(import_json["input"].as_str(), backup_path.to_str());
+    assert_eq!(import_json["imported_commits"].as_u64(), Some(1));
+    assert_eq!(target_batch, source_batch);
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(target_path)?;
+    fs::remove_file(backup_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_import_commits_fails_for_invalid_envelope() -> Result<(), Box<dyn std::error::Error>> {
+    let target_path = temp_store_path("continuitydb-cli-import-invalid-target");
+    let backup_path = temp_store_path("continuitydb-cli-import-invalid-backup");
+    fs::write(&backup_path, "{not valid json}\n")?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("import-commits")
+        .arg(&target_path)
+        .arg(&backup_path)
+        .assert()
+        .failure();
+
+    let _ = fs::remove_file(target_path);
+    fs::remove_file(backup_path)?;
+    Ok(())
+}
+
 fn temp_store_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{name}-{:?}.jsonl", StateCellId::new()))
+}
+
+fn write_committed_store(path: &PathBuf, anchor: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let committed_at = Utc
+        .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let commit_id = CommitId::new();
+    let mut db = ContinuityDb::new(FileKernel::open(path)?);
+    db.ingest_cells_at_with_commit_id(vec![test_cell(anchor)?], committed_at, commit_id)?;
+    Ok(())
 }
 
 fn write_legacy_store(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {

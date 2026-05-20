@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-cli/tests/cli.rs`
 
-- [ ] **Step 1: Add test imports**
+- [x] **Step 1: Add test imports**
 
 Add these imports near the existing imports:
 
@@ -32,7 +32,7 @@ use continuitydb_api::ContinuityDb;
 use continuitydb_kernel::{CommitManifestLookup, FileKernel};
 ```
 
-- [ ] **Step 2: Add committed file-store helper**
+- [x] **Step 2: Add committed file-store helper**
 
 Add this helper near `write_legacy_store`:
 
@@ -52,7 +52,7 @@ fn write_committed_store(
 }
 ```
 
-- [ ] **Step 3: Add export/import roundtrip test**
+- [x] **Step 3: Add export/import roundtrip test**
 
 Add this test near the existing CLI file-store tests:
 
@@ -79,7 +79,7 @@ fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Err
     assert_eq!(export_json["path"].as_str(), source_path.to_str());
     assert_eq!(export_json["output"].as_str(), backup_path.to_str());
     assert_eq!(export_json["exported_commits"].as_u64(), Some(1));
-    assert!(export_json["next_after"].is_null());
+    assert!(export_json["next_after"].is_string());
     assert_eq!(
         envelope_json["format"].as_str(),
         Some("continuitydb.commit_export")
@@ -113,7 +113,7 @@ fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Err
 }
 ```
 
-- [ ] **Step 4: Add invalid import test**
+- [x] **Step 4: Add invalid import test**
 
 Add:
 
@@ -137,7 +137,7 @@ fn cli_import_commits_fails_for_invalid_envelope() -> Result<(), Box<dyn std::er
 }
 ```
 
-- [ ] **Step 5: Run targeted CLI tests and verify RED**
+- [x] **Step 5: Run targeted CLI tests and verify RED**
 
 Run:
 
@@ -152,7 +152,7 @@ Expected: tests fail because `export-commits` and `import-commits` are not recog
 **Files:**
 - Modify: `crates/continuitydb-cli/src/main.rs`
 
-- [ ] **Step 1: Add imports**
+- [x] **Step 1: Add imports**
 
 Change the imports to include `CommitManifestLookup` and `fs`:
 
@@ -161,7 +161,7 @@ use continuitydb_kernel::{CommitManifestLookup, FileKernel, StorageKernel};
 use std::{fs, path::PathBuf};
 ```
 
-- [ ] **Step 2: Add command variants**
+- [x] **Step 2: Add command variants**
 
 Add these variants to `enum Command` after `CompactFile`:
 
@@ -182,7 +182,7 @@ ImportCommits {
 },
 ```
 
-- [ ] **Step 3: Add match arms**
+- [x] **Step 3: Add match arms**
 
 Add these arms to the `match cli.command` block:
 
@@ -222,7 +222,7 @@ Some(Command::ImportCommits {
 }
 ```
 
-- [ ] **Step 4: Run targeted CLI tests and verify GREEN**
+- [x] **Step 4: Run targeted CLI tests and verify GREEN**
 
 Run:
 
@@ -239,7 +239,7 @@ Expected: commit backup/restore CLI tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-cli-commit-backup-restore.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope near the existing CLI bullet:
 
@@ -247,7 +247,7 @@ Add to Current Scope near the existing CLI bullet:
 - CLI commit backup and restore commands over versioned export envelopes.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add a CLI milestone after compaction:
 
@@ -255,7 +255,7 @@ Add a CLI milestone after compaction:
 3. Expose commit backup and restore from the CLI. Implemented `continuitydb export-commits <store-path> <output-path>` and `continuitydb import-commits <store-path> <input-path>` over the versioned commit export envelope so file-backed stores can be copied through a validated portable backup file.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -269,7 +269,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 

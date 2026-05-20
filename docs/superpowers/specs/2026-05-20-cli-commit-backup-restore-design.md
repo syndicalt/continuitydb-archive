@@ -24,7 +24,7 @@ continuitydb import-commits <store-path> <input-path>
   "path": "/path/to/store.jsonl",
   "output": "/path/to/backup.json",
   "exported_commits": 1,
-  "next_after": null
+  "next_after": "commit-id-for-next-cursor"
 }
 ```
 

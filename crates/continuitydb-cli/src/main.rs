@@ -8,9 +8,9 @@ use continuitydb_core::{
     ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
     SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
 };
-use continuitydb_kernel::{FileKernel, StorageKernel};
+use continuitydb_kernel::{CommitManifestLookup, FileKernel, StorageKernel};
 use continuitydb_memory::MemoryKernel;
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 /// ContinuityDB command-line interface.
 #[derive(Debug, Parser)]
@@ -36,6 +36,20 @@ enum Command {
         /// Path to the JSONL file-backed store.
         path: PathBuf,
     },
+    /// Export all file-backed commit slices to a versioned JSON backup envelope.
+    ExportCommits {
+        /// Path to the JSONL file-backed store.
+        store_path: PathBuf,
+        /// Path to write the versioned JSON commit export envelope.
+        output_path: PathBuf,
+    },
+    /// Import a versioned JSON commit backup envelope into a file-backed store.
+    ImportCommits {
+        /// Path to the JSONL file-backed store.
+        store_path: PathBuf,
+        /// Path to read the versioned JSON commit export envelope from.
+        input_path: PathBuf,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -55,6 +69,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let output = serde_json::json!({
                 "path": path.display().to_string(),
                 "compacted": true,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        Some(Command::ExportCommits {
+            store_path,
+            output_path,
+        }) => {
+            let db = ContinuityDb::new(FileKernel::open(&store_path)?);
+            let batch = db.export_commits(CommitManifestLookup::default())?;
+            let exported_commits = batch.slices.len();
+            let next_after = batch.next_after;
+            let encoded = ContinuityDb::<FileKernel>::encode_commit_export_json(batch)?;
+            fs::write(&output_path, encoded)?;
+            let output = serde_json::json!({
+                "path": store_path.display().to_string(),
+                "output": output_path.display().to_string(),
+                "exported_commits": exported_commits,
+                "next_after": next_after,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        Some(Command::ImportCommits {
+            store_path,
+            input_path,
+        }) => {
+            let encoded = fs::read(&input_path)?;
+            let batch = ContinuityDb::<FileKernel>::decode_commit_export_json(&encoded)?;
+            let mut db = ContinuityDb::new(FileKernel::open(&store_path)?);
+            let imported_commits = db.import_commit_batch(batch)?;
+            let output = serde_json::json!({
+                "path": store_path.display().to_string(),
+                "input": input_path.display().to_string(),
+                "imported_commits": imported_commits,
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
