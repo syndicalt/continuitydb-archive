@@ -15,7 +15,6 @@ use continuitydb_kernel::{
     StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
-use continuitydb_query::parse_query_text;
 #[cfg(feature = "local-model")]
 use continuitydb_steward::{
     default_steward_evaluation_suite, local_model_prompt_fingerprint_for_suite,
@@ -425,13 +424,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let status = file_status_json(&db)?;
             let health = file_health_json(&db);
             let lookup = if lookup_plan {
-                Some(CellLookup::default())
+                Some(db.file_lookup_plan(&CellLookup::default()))
             } else if let Some(query) = lookup_query.as_deref() {
-                Some(parse_lookup_query(query)?)
+                Some(db.file_lookup_plan_for_query_text(query)?)
             } else {
                 None
             };
-            let lookup_plan = lookup.map(|lookup| file_lookup_plan_json(&db, &lookup));
+            let lookup_plan = lookup.map(file_lookup_plan_json);
             let required = require.map(profile_name);
             let satisfies = require
                 .map(|profile| db.kernel_satisfies(requirements_for_profile(profile)))
@@ -1786,36 +1785,11 @@ fn file_health_value(health: continuitydb_kernel::FileKernelHealth) -> serde_jso
     })
 }
 
-fn file_lookup_plan_json(
-    db: &ContinuityDb<continuitydb_kernel::FileKernel>,
-    lookup: &CellLookup,
-) -> serde_json::Value {
-    let plan = db.file_lookup_plan(lookup);
+fn file_lookup_plan_json(plan: continuitydb_kernel::FileKernelLookupPlan) -> serde_json::Value {
     serde_json::json!({
         "indexed_constraint_count": plan.indexed_constraint_count,
         "candidate_count": plan.candidate_count,
         "full_scan": plan.full_scan,
-    })
-}
-
-fn parse_lookup_query(input: &str) -> Result<CellLookup, Box<dyn std::error::Error>> {
-    let request = parse_query_text(input)?.compile_checkout()?;
-    Ok(CellLookup {
-        semantic_anchor: request
-            .semantic_anchor
-            .map(|anchor| anchor.as_str().to_string()),
-        scope: request.scope,
-        valid_at: request.valid_at,
-        system_at: request.system_at,
-        commit_id: request.commit_id,
-        activation: request.activation,
-        answerability_question: request.answerability_question,
-        evidence_source: request.evidence_source,
-        dependency_target: request.dependency_target,
-        dependency_kind: request.dependency_kind,
-        minimum_confidence: (request.minimum_confidence.value() > 0.0)
-            .then_some(request.minimum_confidence),
-        ..CellLookup::default()
     })
 }
 

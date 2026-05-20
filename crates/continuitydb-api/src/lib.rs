@@ -1306,6 +1306,26 @@ fn query_text_input(bytes: &[u8]) -> Option<&str> {
     }
 }
 
+fn cell_lookup_from_checkout_request(request: CheckoutRequest) -> CellLookup {
+    CellLookup {
+        semantic_anchor: request
+            .semantic_anchor
+            .map(|anchor| anchor.as_str().to_string()),
+        scope: request.scope,
+        valid_at: request.valid_at,
+        system_at: request.system_at,
+        commit_id: request.commit_id,
+        activation: request.activation,
+        answerability_question: request.answerability_question,
+        evidence_source: request.evidence_source,
+        dependency_target: request.dependency_target,
+        dependency_kind: request.dependency_kind,
+        minimum_confidence: (request.minimum_confidence.value() > 0.0)
+            .then_some(request.minimum_confidence),
+        ..CellLookup::default()
+    }
+}
+
 fn is_query_envelope_shape(bytes: &[u8]) -> Result<bool, ContinuityError> {
     let value = serde_json::from_slice::<serde_json::Value>(bytes)
         .map_err(|_error| ContinuityError::QueryJson)?;
@@ -1377,6 +1397,32 @@ impl ContinuityDb<FileKernel> {
     /// Returns the file-kernel lookup candidate plan for the supplied constraints.
     pub fn file_lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
         self.kernel.lookup_plan(lookup)
+    }
+
+    /// Returns the file-kernel lookup candidate plan for a typed checkout query.
+    pub fn file_lookup_plan_for_query(
+        &self,
+        query: CheckoutQuery,
+    ) -> Result<FileKernelLookupPlan, ContinuityError> {
+        let request = query.compile_checkout()?;
+        Ok(self.file_lookup_plan(&cell_lookup_from_checkout_request(request)))
+    }
+
+    /// Returns the file-kernel lookup candidate plan for a top-level typed query.
+    pub fn file_lookup_plan_for_continuity_query(
+        &self,
+        query: ContinuityQuery,
+    ) -> Result<FileKernelLookupPlan, ContinuityError> {
+        let request = query.compile_checkout()?;
+        Ok(self.file_lookup_plan(&cell_lookup_from_checkout_request(request)))
+    }
+
+    /// Returns the file-kernel lookup candidate plan for strict text query syntax.
+    pub fn file_lookup_plan_for_query_text(
+        &self,
+        input: &str,
+    ) -> Result<FileKernelLookupPlan, ContinuityError> {
+        self.file_lookup_plan_for_continuity_query(parse_query_text(input)?)
     }
 
     /// Ensures the file-backed store does not require compaction.
@@ -1715,6 +1761,36 @@ mod tests {
         };
 
         let plan = db.file_lookup_plan(&lookup);
+
+        assert_eq!(plan.indexed_constraint_count, 2);
+        assert_eq!(plan.candidate_count, 1);
+        assert!(!plan.full_scan);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_reports_file_lookup_plan_for_text_query() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-lookup-plan-text-query");
+        let mut db = ContinuityDb::open_file(&path)?;
+        let mut matching =
+            sample_cell("project:continuitydb:api-lookup-plan-text-match", 0.91, 12)?;
+        matching.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let broad = sample_cell("project:continuitydb:api-lookup-plan-text-broad", 0.83, 15)?;
+        let mut wrong_scope = sample_cell(
+            "project:continuitydb:api-lookup-plan-text-wrong-scope",
+            0.89,
+            11,
+        )?;
+        wrong_scope.scope = Scope::Team("platform".to_string());
+        wrong_scope.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        db.ingest_cells(vec![broad, matching, wrong_scope])?;
+
+        let plan = db.file_lookup_plan_for_query_text(
+            r#"CHECKOUT "inspect" ANSWER "what changed?"
+WHERE scope = project("continuitydb")"#,
+        )?;
 
         assert_eq!(plan.indexed_constraint_count, 2);
         assert_eq!(plan.candidate_count, 1);

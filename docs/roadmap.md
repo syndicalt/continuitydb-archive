@@ -217,6 +217,7 @@ Storage kernel
 42. Add native conflict-resolution Steward audit/application. Implemented `resolve_conflicts_with_steward_at` so embedders can run deterministic conflict stewardship, persist proposal audit records, and apply accepted results through the typed dispatcher in proposal order.
 43. Add native frontier/watch Steward audit/application. Implemented `resolve_frontier_watch_with_steward_at` so embedders can run subscribed frontier stewardship, persist proposal audit records, and apply accepted verification or frontier-maintenance results through the typed dispatcher.
 44. Add native file-kernel lookup-plan introspection. Implemented `ContinuityDb<FileKernel>::file_lookup_plan` so embedders can inspect file-backed indexed lookup candidate planning through the native API without reaching into the concrete kernel.
+45. Add native query-constrained file lookup-plan introspection. Implemented typed, top-level, and strict text query lookup-plan helpers so embedders can inspect file-backed candidate planning for real checkout semantics without duplicating query-to-lookup translation or executing materialization.
 
 ## Steward Milestones
 

@@ -166,6 +166,7 @@ The first milestone builds:
 - Native file-backed compaction API.
 - Native file-backed open helpers with requirement enforcement.
 - Native file-backed lookup-plan introspection API.
+- Native query-constrained file-backed lookup-plan introspection API.
 - CLI file-backed lookup-plan inspection.
 - CLI query-constrained lookup-plan inspection.
 - CLI file-backed compaction command.
