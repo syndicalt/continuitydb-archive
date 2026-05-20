@@ -84,6 +84,7 @@ Storage kernel
 28. Add file-kernel secondary indexes for revision-link lookups. Implemented derived in-process indexes for revision-link source, target, kind, source-kind, target-kind, source-target, and source-target-kind filters while preserving append-order results and the canonical log as source of truth.
 29. Add revision-link-aware file-store status. Extended `FileKernelStatus` and inspection surfaces with visible revision-link counts so native revision graph records are operationally visible alongside cells and commits.
 30. Add duplicate revision-link append rejection. Implemented exact duplicate `RevisionLinkRecord` rejection across memory and file kernels, including pre-write file append checks and duplicate durable-log detection during file-kernel reopen.
+31. Add file-kernel secondary indexes for scope lookups. Implemented a derived scope-to-cell-position index rebuilt from the JSONL log and maintained after append so scope-constrained checkout can start from indexed candidates while preserving append-order results.
 
 ## Checkout Milestones
 

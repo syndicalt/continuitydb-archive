@@ -169,7 +169,7 @@ impl SemanticAnchor {
 }
 
 /// Visibility or applicability scope for a StateCell.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Scope {
     /// Personal scope.
     Personal(String),

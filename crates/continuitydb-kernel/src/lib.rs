@@ -392,6 +392,7 @@ struct FileKernelIndex {
     cells: Vec<StateCell>,
     ids: HashMap<StateCellId, usize>,
     anchors: HashMap<String, Vec<usize>>,
+    scopes: HashMap<Scope, Vec<usize>>,
     answerability_questions: HashMap<String, Vec<usize>>,
     evidence_sources: HashMap<String, Vec<usize>>,
     activations: HashMap<ActivationState, Vec<usize>>,
@@ -452,6 +453,10 @@ impl FileKernelIndex {
                 .or_default()
                 .push(position);
         }
+        self.scopes
+            .entry(cell.scope.clone())
+            .or_default()
+            .push(position);
         for question in cell.answerability.questions() {
             self.answerability_questions
                 .entry(question.clone())
@@ -1178,6 +1183,17 @@ impl StorageKernel for FileKernel {
             self.index
                 .commits
                 .get(&commit_id)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.index.cells[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(scope) = lookup.scope.as_ref() {
+            self.index
+                .scopes
+                .get(scope)
                 .map(|positions| {
                     positions
                         .iter()
@@ -3403,6 +3419,66 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(indexed, vec![reviewed]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rebuilds_scope_index() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-scope-index-reopen");
+        let mut project = sample_cell("project:continuitydb:scope-index-project", 0.91, 12)?;
+        let mut team = sample_cell("project:continuitydb:scope-index-team", 0.83, 15)?;
+        project.scope = Scope::Project("continuitydb".to_string());
+        team.scope = Scope::Team("storage".to_string());
+        let expected_project;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            expected_project = append_committed(&mut kernel, project)?;
+            append_committed(&mut kernel, team)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let positions = reopened
+            .index
+            .scopes
+            .get(&Scope::Project("continuitydb".to_string()))
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+        let lookup_results = reopened.lookup_cells(CellLookup {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(indexed, vec![expected_project.clone()]);
+        assert_eq!(lookup_results, vec![expected_project]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_scope_index_after_append() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-scope-index-append");
+        let mut task = sample_cell("project:continuitydb:scope-index-task", 0.83, 15)?;
+        task.scope = Scope::Task("production-storage".to_string());
+        let mut kernel = FileKernel::open(&path)?;
+
+        let expected = append_committed(&mut kernel, task)?;
+        let positions = kernel
+            .index
+            .scopes
+            .get(&Scope::Task("production-storage".to_string()))
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![expected]);
         fs::remove_file(path)?;
         Ok(())
     }

@@ -145,6 +145,7 @@ The first milestone builds:
 - Per-record JSONL file-kernel checksums for cell and commit records.
 - File-kernel secondary indexes for answerability questions and evidence sources.
 - File-kernel secondary indexes for activation states and dependency filters.
+- File-kernel secondary indexes for scope lookups.
 - File-kernel secondary indexes for revision-link lookups.
 - Typed storage-kernel capability introspection for embedders.
 - Typed storage-kernel requirement checks for production readiness gates.
