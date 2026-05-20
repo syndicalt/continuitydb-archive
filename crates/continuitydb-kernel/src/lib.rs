@@ -88,6 +88,20 @@ pub enum KernelDurability {
     IndexedEmbedded,
 }
 
+impl KernelDurability {
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Ephemeral => 0,
+            Self::AppendLog => 1,
+            Self::IndexedEmbedded => 2,
+        }
+    }
+
+    const fn satisfies(self, minimum: Self) -> bool {
+        self.rank() >= minimum.rank()
+    }
+}
+
 /// Observable storage guarantees reported by a storage kernel.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KernelCapabilities {
@@ -105,6 +119,66 @@ pub struct KernelCapabilities {
     pub durable_flush: bool,
     /// Kernel can rewrite storage into a canonical compacted representation.
     pub compaction: bool,
+}
+
+/// Required storage guarantees for an embedder or operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KernelRequirements {
+    /// Minimum acceptable persistence level.
+    pub minimum_durability: KernelDurability,
+    /// Requires immutable append-only writes.
+    pub append_only: bool,
+    /// Requires derived in-process indexes.
+    pub derived_indexes: bool,
+    /// Requires durable persistent indexes.
+    pub persistent_indexes: bool,
+    /// Requires explicit commit manifest records.
+    pub explicit_commit_records: bool,
+    /// Requires writes to flush through the filesystem boundary.
+    pub durable_flush: bool,
+    /// Requires storage compaction support.
+    pub compaction: bool,
+}
+
+impl KernelRequirements {
+    /// Requirements for correctness tests and temporary in-process stores.
+    pub const fn ephemeral() -> Self {
+        Self {
+            minimum_durability: KernelDurability::Ephemeral,
+            append_only: true,
+            derived_indexes: false,
+            persistent_indexes: false,
+            explicit_commit_records: false,
+            durable_flush: false,
+            compaction: false,
+        }
+    }
+
+    /// Requirements for durable local append-log storage.
+    pub const fn durable_append_log() -> Self {
+        Self {
+            minimum_durability: KernelDurability::AppendLog,
+            append_only: true,
+            derived_indexes: false,
+            persistent_indexes: false,
+            explicit_commit_records: true,
+            durable_flush: true,
+            compaction: false,
+        }
+    }
+
+    /// Requirements for future production indexed embedded storage.
+    pub const fn indexed_embedded() -> Self {
+        Self {
+            minimum_durability: KernelDurability::IndexedEmbedded,
+            append_only: true,
+            derived_indexes: false,
+            persistent_indexes: true,
+            explicit_commit_records: true,
+            durable_flush: true,
+            compaction: false,
+        }
+    }
 }
 
 impl KernelCapabilities {
@@ -132,6 +206,17 @@ impl KernelCapabilities {
             durable_flush: true,
             compaction: true,
         }
+    }
+
+    /// Returns true when these capabilities meet all required guarantees.
+    pub const fn satisfies(self, requirements: KernelRequirements) -> bool {
+        self.durability.satisfies(requirements.minimum_durability)
+            && (!requirements.append_only || self.append_only)
+            && (!requirements.derived_indexes || self.derived_indexes)
+            && (!requirements.persistent_indexes || self.persistent_indexes)
+            && (!requirements.explicit_commit_records || self.explicit_commit_records)
+            && (!requirements.durable_flush || self.durable_flush)
+            && (!requirements.compaction || self.compaction)
     }
 }
 
@@ -957,7 +1042,7 @@ impl StorageKernel for FileKernel {
 mod tests {
     use super::{
         sync_parent_directory, write_all_durable, CellLookup, CommitManifestLookup, FileKernel,
-        KernelCapabilities, KernelDurability, KernelError, StorageKernel,
+        KernelCapabilities, KernelDurability, KernelError, KernelRequirements, StorageKernel,
     };
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
@@ -1057,6 +1142,30 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
         Ok(())
+    }
+
+    #[test]
+    fn ephemeral_capabilities_satisfy_ephemeral_requirements() {
+        assert!(KernelCapabilities::ephemeral().satisfies(KernelRequirements::ephemeral()));
+    }
+
+    #[test]
+    fn ephemeral_capabilities_do_not_satisfy_durable_append_log_requirements() {
+        assert!(!KernelCapabilities::ephemeral().satisfies(KernelRequirements::durable_append_log()));
+    }
+
+    #[test]
+    fn file_append_log_capabilities_satisfy_durable_append_log_requirements() {
+        assert!(
+            KernelCapabilities::file_append_log().satisfies(KernelRequirements::durable_append_log())
+        );
+    }
+
+    #[test]
+    fn file_append_log_capabilities_do_not_satisfy_indexed_embedded_requirements() {
+        assert!(
+            !KernelCapabilities::file_append_log().satisfies(KernelRequirements::indexed_embedded())
+        );
     }
 
     #[test]
