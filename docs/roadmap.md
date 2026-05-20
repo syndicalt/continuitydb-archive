@@ -359,6 +359,7 @@ Storage kernel
 95. Add CLI local-model response artifact metadata validation. Extended `validate-local-model-bundle --artifact-dir` to parse nested response manifests and validate each captured raw response artifact path, fingerprint, and byte-count metadata against archived response files.
 96. Add CLI local-model changed-case report content validation. Extended `validate-local-model-bundle --artifact-dir` to parse archived `changed-cases.json` and verify its candidate identity, baseline path, canonical report path, and compact comparison projection still match the archived benchmark report.
 97. Add CLI local-model response artifact manifest content validation. Extended `validate-local-model-bundle --artifact-dir` to parse archived `responses/local-model-responses.manifest.json` and verify its response artifact list still matches the archived benchmark report.
+98. Add CLI local-model response artifact manifest content mismatch diagnostics. Extended response artifact manifest content validation errors with deterministic mismatch labels for format, format version, and artifact-list drift so CI can diagnose archived response manifest changes without manually diffing bundle files.
 
 ## Small Embeddable Model Track
 

@@ -1756,12 +1756,23 @@ fn validate_local_model_response_artifact_manifest_content(
     response_manifest: &serde_json::Value,
     benchmark_report: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if response_manifest["format"].as_str() != Some("continuitydb.local_model.responses")
-        || response_manifest["format_version"].as_u64() != Some(1)
-        || response_manifest["artifacts"] != benchmark_report["response_artifacts"]
-    {
+    if response_manifest["format"].as_str() != Some("continuitydb.local_model.responses") {
         return Err(std::io::Error::other(
-            "local model response artifact manifest content mismatch",
+            "local model response artifact manifest content mismatch: format",
+        )
+        .into());
+    }
+
+    if response_manifest["format_version"].as_u64() != Some(1) {
+        return Err(std::io::Error::other(
+            "local model response artifact manifest content mismatch: format_version",
+        )
+        .into());
+    }
+
+    if response_manifest["artifacts"] != benchmark_report["response_artifacts"] {
+        return Err(std::io::Error::other(
+            "local model response artifact manifest content mismatch: artifacts",
         )
         .into());
     }

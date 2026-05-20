@@ -3407,7 +3407,7 @@ fn cli_validate_local_model_bundle_rejects_response_manifest_case_name_mismatch(
         .assert()
         .failure()
         .stderr(contains(
-            "local model response artifact manifest content mismatch",
+            "local model response artifact manifest content mismatch: artifacts",
         ));
 
     fs::remove_file(executable_path)?;

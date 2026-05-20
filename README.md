@@ -165,6 +165,7 @@ The first milestone builds:
 - CLI local model response artifact manifests.
 - CLI local model response artifact manifest metadata validation.
 - CLI local model response artifact manifest content validation.
+- CLI local model response artifact manifest content mismatch diagnostics.
 - CLI local model response artifact metadata validation.
 - CLI local model benchmark artifact bundle directory.
 - CLI local model benchmark bundle manifests.
