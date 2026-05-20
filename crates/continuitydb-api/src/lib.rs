@@ -5,7 +5,9 @@ use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
 use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
-use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
+use continuitydb_kernel::{
+    CellLookup, CommitManifestLookup, FileKernel, KernelError, StorageKernel,
+};
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
@@ -285,6 +287,13 @@ impl<K: StorageKernel> ContinuityDb<K> {
     }
 }
 
+impl ContinuityDb<FileKernel> {
+    /// Rewrites a file-backed store into the current canonical durable record format.
+    pub fn compact_file_store(&mut self) -> Result<(), ContinuityError> {
+        self.kernel.compact().map_err(Into::into)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
@@ -294,7 +303,9 @@ mod tests {
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
         ValidTimeRange,
     };
-    use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
+    use continuitydb_kernel::{
+        CellLookup, CommitManifestLookup, FileKernel, KernelError, StorageKernel,
+    };
     use continuitydb_memory::MemoryKernel;
 
     use super::{ContinuityDb, ContinuityError};
@@ -305,6 +316,10 @@ mod tests {
         tokens: i64,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
         sample_cell_with_payload_day_and_confidence(anchor, anchor, 20, confidence, tokens)
+    }
+
+    fn temp_file_kernel_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("{name}-{:?}.jsonl", StateCellId::new()))
     }
 
     fn sample_cell_with_payload_day_and_confidence(
@@ -675,6 +690,71 @@ mod tests {
         let slices = db.commit_slices(CommitManifestLookup::default())?;
 
         assert!(slices.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn api_compacts_file_store_to_canonical_records() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("continuitydb-api-file-compact");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let cell = sample_cell("project:continuitydb:api-file-compact", 0.91, 12)?;
+        let cell_id = cell.id;
+        let mut db = ContinuityDb::new(FileKernel::open(&path)?);
+        db.ingest_cell_at_with_commit_id(cell, committed_at, commit_id)?;
+
+        db.compact_file_store()?;
+
+        let records = std::fs::read_to_string(&path)?
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(records.len(), 3);
+        assert!(records[0].contains(r#""type":"header""#));
+        assert!(records[1].contains(r#""type":"cell""#));
+        assert!(records[1].contains(r#""checksum":"continuitydb-fnv1a64:"#));
+        assert!(records[2].contains(r#""type":"commit""#));
+        assert!(records[2].contains(r#""checksum":"continuitydb-fnv1a64:"#));
+        assert_eq!(db.commit_cells(commit_id)?[0].id, cell_id);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_file_compaction_preserves_commit_slices_after_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("continuitydb-api-file-compact-slices");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:api-file-compact-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:api-file-compact-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+        {
+            let mut db = ContinuityDb::new(FileKernel::open(&path)?);
+            db.ingest_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+            db.compact_file_store()?;
+        }
+
+        let reopened = ContinuityDb::new(FileKernel::open(&path)?);
+        let slices = reopened.commit_slices(CommitManifestLookup::default())?;
+
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].manifest.commit_id, commit_id);
+        assert_eq!(
+            slices[0]
+                .cells
+                .iter()
+                .map(|cell| cell.id)
+                .collect::<Vec<_>>(),
+            expected_ids
+        );
+        std::fs::remove_file(path)?;
         Ok(())
     }
 

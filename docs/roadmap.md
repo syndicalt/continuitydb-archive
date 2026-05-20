@@ -114,6 +114,7 @@ Storage kernel
 4. Add typed read-only batch conflict analysis operations. Implemented `ContinuityDb::detect_conflicts` and `recommend_conflict_resolutions` so applications can analyze deterministic conflict frontiers across ordered stored cell sets through the native API.
 5. Add ordered commit cell materialization. Implemented `ContinuityDb::commit_cells` so callers can hydrate the StateCells written by one commit in manifest order, with unknown commits reported as `CommitNotFound`.
 6. Add cursor-based commit slice materialization. Implemented `CommitSlice` and `ContinuityDb::commit_slices` so callers can materialize cursor-selected commit manifests with their ordered StateCells for audit, backup, sync, and replay flows.
+7. Add native file-backed compaction API. Implemented `ContinuityDb<FileKernel>::compact_file_store` so embedders can run JSONL store compaction through the native API without expanding the generic storage-kernel trait.
 
 ## Steward Milestones
 
