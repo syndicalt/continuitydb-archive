@@ -245,6 +245,7 @@ Storage kernel
 33. Add default local-model conflict-classification evaluation. Expanded the fixed Steward benchmark suite with a deterministic `ConflictsWith` revision-link case so local model baselines test classification behavior beyond thin-evidence verification.
 34. Add local-model evaluation suite introspection. Implemented read-only accessors for fixed evaluation cases, inputs, expectations, required citations, and rationale constraints so embedders can inspect benchmark contracts before running local models.
 35. Add CLI local-model evaluation suite export. Implemented a feature-gated `local-model-evaluation-suite` command that prints the fixed benchmark case contracts as JSON using the public evaluation introspection API.
+36. Add local-model evaluation suite fingerprints. Persisted deterministic evaluation-suite fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
 
 ## Small Embeddable Model Track
 

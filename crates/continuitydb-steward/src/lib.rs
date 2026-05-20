@@ -193,6 +193,23 @@ mod tests {
     }
 
     #[cfg(feature = "local-model")]
+    fn local_model_suite_baseline(
+        candidate: SmallModelCandidate,
+        recorded_at: chrono::DateTime<Utc>,
+        suite: StewardEvaluationSuite,
+    ) -> Result<LocalModelBenchmarkBaseline, StewardError> {
+        Ok(LocalModelBenchmarkBaseline::from_report(
+            LocalModelBenchmark::new(
+                candidate,
+                LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("sh")),
+                suite,
+            )
+            .run(steward()?),
+            recorded_at,
+        ))
+    }
+
+    #[cfg(feature = "local-model")]
     fn local_model_file_backed_benchmark(
         cell_id: StateCellId,
         script_name: &str,
@@ -1066,6 +1083,36 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn steward_evaluation_suite_fingerprint_changes_with_case_contract() {
+        let base = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier {
+            cell_id: StateCellId::from_u128(7),
+        })
+        .require_citation("test://frontier")]);
+        let same = base.clone();
+        let changed = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier {
+            cell_id: StateCellId::from_u128(7),
+        })
+        .require_citation("test://different")]);
+
+        assert_eq!(base.fingerprint(), same.fingerprint());
+        assert_ne!(base.fingerprint(), changed.fingerprint());
+        assert!(base.fingerprint().starts_with("fnv1a64:"));
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn steward_evaluation_reports_missing_required_rationale_term(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let cell_id = StateCellId::new();
@@ -1407,6 +1454,26 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn local_model_benchmark_report_and_baseline_preserve_suite_fingerprint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let suite = default_steward_evaluation_suite();
+        let expected = suite.fingerprint();
+        let benchmark = LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("llama-cli")),
+            suite,
+        );
+
+        let report = benchmark.run(steward()?);
+        let baseline = LocalModelBenchmarkBaseline::from_report(report.clone(), created_at());
+
+        assert_eq!(report.evaluation_suite_fingerprint(), expected);
+        assert_eq!(baseline.evaluation_suite_fingerprint(), expected);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_benchmark_baseline_decodes_legacy_json_without_runtime_manifest(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let encoded = serde_json::json!({
@@ -1421,6 +1488,25 @@ mod tests {
         assert_eq!(baseline.runtime().executable(), "");
         assert!(baseline.runtime().arguments().is_empty());
         assert_eq!(baseline.response_schema_version(), 0);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_baseline_decodes_legacy_json_without_suite_fingerprint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let encoded = serde_json::json!({
+            "candidate_model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "candidate_role": "default-feasibility",
+            "response_schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+            "runtime": { "executable": "sh", "arguments": [] },
+            "evaluation": { "case_reports": [] },
+            "recorded_at": created_at(),
+        });
+
+        let baseline: LocalModelBenchmarkBaseline = serde_json::from_value(encoded)?;
+
+        assert_eq!(baseline.evaluation_suite_fingerprint(), "");
         Ok(())
     }
 
@@ -1779,6 +1865,43 @@ mod tests {
         let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
 
         assert_eq!(latest, None);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn latest_compatible_local_model_baseline_requires_suite_fingerprint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let old_compatible = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let incompatible_suite = local_model_suite_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 3, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+            StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+                "different suite",
+                created_at(),
+                "different task",
+            )]),
+        )?;
+        let current = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 4, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(old_compatible.clone())?;
+        store.append_baseline(incompatible_suite)?;
+
+        let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
+
+        assert_eq!(latest, Some(old_compatible));
         Ok(())
     }
 

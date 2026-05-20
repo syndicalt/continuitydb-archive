@@ -657,6 +657,36 @@ impl StewardEvaluationSuite {
         self.cases.is_empty()
     }
 
+    /// Returns a deterministic fingerprint for the ordered case contract.
+    pub fn fingerprint(&self) -> String {
+        let mut fields = vec!["continuitydb.local_model.evaluation_suite.v1".to_string()];
+        for case in &self.cases {
+            fields.push(format!("case.name={}", case.name()));
+            fields.push(format!("case.created_at={}", case.input().created_at()));
+            fields.push(format!("case.task={}", case.input().task()));
+            for evidence in case.input().evidence() {
+                fields.push(format!("evidence.locator={}", evidence.locator()));
+                fields.push(format!("evidence.text={}", evidence.text()));
+            }
+            for action in case.expected_actions() {
+                let encoded =
+                    serde_json::to_string(action).unwrap_or_else(|_error| format!("{action:?}"));
+                fields.push(format!("expected_action={encoded}"));
+            }
+            for citation in case.required_citations() {
+                fields.push(format!("required_citation={citation}"));
+            }
+            for term in case.required_rationale_terms() {
+                fields.push(format!("required_rationale_term={term}"));
+            }
+            for term in case.forbidden_rationale_terms() {
+                fields.push(format!("forbidden_rationale_term={term}"));
+            }
+        }
+
+        fingerprint_fields(&fields)
+    }
+
     /// Evaluates a local model Steward against all cases.
     pub fn evaluate<B>(&self, steward: &LocalModelSteward<B>) -> StewardEvaluationReport
     where
@@ -955,6 +985,7 @@ impl LocalModelBenchmark {
         LocalModelBenchmarkReport {
             candidate: self.candidate,
             response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+            evaluation_suite_fingerprint: self.suite.fingerprint(),
             runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
             evaluation: self.suite.evaluate(&steward),
         }
@@ -966,6 +997,7 @@ impl LocalModelBenchmark {
 pub struct LocalModelBenchmarkReport {
     candidate: SmallModelCandidate,
     response_schema_version: u32,
+    evaluation_suite_fingerprint: String,
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
 }
@@ -979,6 +1011,11 @@ impl LocalModelBenchmarkReport {
     /// Returns the local model response schema version used for decoding.
     pub fn response_schema_version(&self) -> u32 {
         self.response_schema_version
+    }
+
+    /// Returns the deterministic fingerprint for the evaluated suite contract.
+    pub fn evaluation_suite_fingerprint(&self) -> &str {
+        &self.evaluation_suite_fingerprint
     }
 
     /// Returns the runtime manifest for the evaluated local model invocation.
@@ -1010,6 +1047,8 @@ pub struct LocalModelBenchmarkBaseline {
     #[serde(default)]
     response_schema_version: u32,
     #[serde(default)]
+    evaluation_suite_fingerprint: String,
+    #[serde(default)]
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
     recorded_at: DateTime<Utc>,
@@ -1022,6 +1061,7 @@ impl LocalModelBenchmarkBaseline {
             candidate_model_id: report.candidate.model_id().to_string(),
             candidate_role: report.candidate.role().to_string(),
             response_schema_version: report.response_schema_version,
+            evaluation_suite_fingerprint: report.evaluation_suite_fingerprint,
             runtime: report.runtime,
             evaluation: report.evaluation,
             recorded_at,
@@ -1041,6 +1081,11 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the local model response schema version used for this baseline.
     pub fn response_schema_version(&self) -> u32 {
         self.response_schema_version
+    }
+
+    /// Returns the deterministic fingerprint for the evaluated suite contract.
+    pub fn evaluation_suite_fingerprint(&self) -> &str {
+        &self.evaluation_suite_fingerprint
     }
 
     /// Returns the runtime manifest that produced this baseline.
@@ -1249,8 +1294,24 @@ where
         .filter(|baseline| baseline.candidate_model_id() == current.candidate_model_id())
         .filter(|baseline| baseline.candidate_role() == current.candidate_role())
         .filter(|baseline| baseline.response_schema_version() == current.response_schema_version())
+        .filter(|baseline| {
+            baseline.evaluation_suite_fingerprint() == current.evaluation_suite_fingerprint()
+        })
         .filter(|baseline| baseline.runtime() == current.runtime())
         .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
+}
+
+fn fingerprint_fields(fields: &[String]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for field in fields {
+        for byte in field.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
 }
 
 /// Storage contract for append-only local model benchmark baselines.

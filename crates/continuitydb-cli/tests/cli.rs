@@ -264,6 +264,9 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         Some(0)
     );
     assert_eq!(json["response_schema_version"].as_u64(), Some(1));
+    assert!(json["evaluation_suite_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert_eq!(
         json["baseline_path"].as_str(),
         Some(baseline_path.display().to_string().as_str())
@@ -287,6 +290,10 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(records[0]["runtime"]["arguments"][3].as_str(), Some("0"));
     assert_eq!(records[0]["response_schema_version"].as_u64(), Some(1));
+    assert_eq!(
+        records[0]["evaluation_suite_fingerprint"].as_str(),
+        json["evaluation_suite_fingerprint"].as_str()
+    );
 
     fs::remove_file(executable_path)?;
     fs::remove_file(baseline_path)?;
