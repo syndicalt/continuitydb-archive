@@ -236,6 +236,75 @@ fn cli_measure_workload_report_path_writes_json_artifact() -> Result<(), Box<dyn
     Ok(())
 }
 
+#[test]
+fn cli_measure_workload_artifact_dir_writes_bundle() -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-measure-workload-artifact-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout_json: Value = serde_json::from_slice(&output)?;
+    let report_path = artifact_dir.join("workload-report.json");
+    let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let bundle_manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+
+    assert_eq!(stdout_json, report_json);
+    assert_eq!(stdout_json["kernel"].as_str(), Some("memory"));
+    assert_eq!(stdout_json["workload"]["cell_count"].as_u64(), Some(8));
+    assert_eq!(
+        stdout_json["artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        stdout_json["bundle_manifest"]["manifest_path"].as_str(),
+        Some(bundle_manifest_path.display().to_string().as_str())
+    );
+    assert!(stdout_json["bundle_manifest"]["manifest_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(stdout_json["bundle_manifest"]["manifest_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+
+    let bundle_manifest_json: Value =
+        serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+    assert_eq!(
+        bundle_manifest_json["format"].as_str(),
+        Some("continuitydb.workload.bundle")
+    );
+    assert_eq!(bundle_manifest_json["format_version"].as_u64(), Some(1));
+    assert_eq!(
+        bundle_manifest_json["workload_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert_eq!(bundle_manifest_json["kernel"].as_str(), Some("memory"));
+    assert_eq!(
+        bundle_manifest_json["baseline_comparison"],
+        serde_json::Value::Null
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error::Error>> {
@@ -3175,6 +3244,87 @@ fn cli_measure_workload_failure_report_path_records_regression(
 
     fs::remove_file(baseline_path)?;
     fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_measure_workload_artifact_dir_writes_regression_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-measure-workload-artifact-regression-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-measure-workload-artifact-regression-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("memory-compare")
+        .assert()
+        .success();
+
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    let mut record: Value = serde_json::from_str(
+        baseline_text
+            .lines()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing baseline record"))?,
+    )?;
+    record["snapshot"]["workload"]["cell_count"] = Value::from(7);
+    fs::write(
+        &baseline_path,
+        format!("{}\n", serde_json::to_string(&record)?),
+    )?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("memory-compare")
+        .arg("--compare-baseline")
+        .arg("--fail-on-regression")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--max-elapsed-growth-percent")
+        .arg("1000000000000")
+        .assert()
+        .failure()
+        .stderr(contains("workload baseline regression detected"));
+
+    let report_path = artifact_dir.join("workload-report.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let bundle_manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    assert_eq!(
+        report["baseline_comparison"]["passed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        report["bundle_manifest"]["manifest_path"].as_str(),
+        Some(bundle_manifest_path.display().to_string().as_str())
+    );
+    let bundle_manifest: Value = serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+    assert_eq!(
+        bundle_manifest["baseline_comparison"]["passed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        bundle_manifest["workload_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert_eq!(fs::read_to_string(&baseline_path)?.lines().count(), 1);
+
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
     Ok(())
 }
 

@@ -16,6 +16,7 @@ The first milestone builds:
 - JSONL workload measurement baseline recording.
 - Durable file workload lookup-plan baseline snapshots.
 - File workload lookup-plan baseline regression detection.
+- CLI workload artifact bundle directory.
 - CLI workload measurement report artifact output.
 - CLI workload regression failure report artifact output.
 - CLI workload measurement baseline recording.

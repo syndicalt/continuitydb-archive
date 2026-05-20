@@ -48,6 +48,7 @@ struct Cli {
 struct WorkloadMeasureOptions<'a> {
     kernel: WorkloadKernelProfile,
     store_path: Option<&'a PathBuf>,
+    artifact_dir: Option<&'a PathBuf>,
     report_path: Option<&'a PathBuf>,
     failure_report_path: Option<&'a PathBuf>,
     cells: usize,
@@ -82,6 +83,12 @@ struct LocalModelBenchmarkOptions<'a> {
     dry_run: bool,
     compare_baseline: bool,
     fail_on_regression: bool,
+}
+
+struct WorkloadBundleManifest {
+    manifest_path: PathBuf,
+    manifest_fingerprint: String,
+    manifest_bytes: usize,
 }
 
 #[cfg(feature = "local-model")]
@@ -181,6 +188,9 @@ enum Command {
         /// Path to the JSONL file-backed store when measuring the file kernel.
         #[arg(long = "store-path")]
         store_path: Option<PathBuf>,
+        /// Directory where a workload measurement artifact bundle is written.
+        #[arg(long = "artifact-dir")]
+        artifact_dir: Option<PathBuf>,
         /// Optional path to write the successful workload measurement JSON report.
         #[arg(long = "report-path")]
         report_path: Option<PathBuf>,
@@ -386,6 +396,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::MeasureWorkload {
             kernel,
             store_path,
+            artifact_dir,
             report_path,
             failure_report_path,
             cells,
@@ -401,6 +412,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let output = measure_workload_json(WorkloadMeasureOptions {
                 kernel,
                 store_path: store_path.as_ref(),
+                artifact_dir: artifact_dir.as_ref(),
                 report_path: report_path.as_ref(),
                 failure_report_path: failure_report_path.as_ref(),
                 cells,
@@ -1058,6 +1070,15 @@ fn write_pretty_json_file(
     Ok(())
 }
 
+fn fnv1a64_fingerprint(text: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
+}
+
 #[cfg(feature = "local-model")]
 fn local_model_stability_preflight_json(
     trials: usize,
@@ -1117,12 +1138,7 @@ fn local_model_baseline_preflight_json(
 
 #[cfg(feature = "local-model")]
 fn local_model_contract_fingerprint(text: &str) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in text.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("fnv1a64:{hash:016x}")
+    fnv1a64_fingerprint(text)
 }
 
 #[cfg(feature = "local-model")]
@@ -1654,7 +1670,7 @@ fn measure_workload_json(
         options.max_elapsed_growth_percent,
     )?;
 
-    let output = workload_measurement_json(
+    let mut output = workload_measurement_json(
         &options,
         comparison.as_ref(),
         lookup_plan.clone(),
@@ -1665,6 +1681,9 @@ fn measure_workload_json(
         None => false,
     };
     if options.fail_on_regression && regression_detected {
+        if let Some(artifact_dir) = options.artifact_dir {
+            output = write_workload_artifact_bundle_report(artifact_dir, output)?;
+        }
         if let Some(path) = options.failure_report_path {
             write_pretty_json_file(path, &output)?;
         }
@@ -1680,6 +1699,10 @@ fn measure_workload_json(
         )?;
     }
 
+    if let Some(artifact_dir) = options.artifact_dir {
+        output = write_workload_artifact_bundle_report(artifact_dir, output)?;
+    }
+
     Ok(output)
 }
 
@@ -1692,8 +1715,10 @@ fn workload_measurement_json(
     serde_json::json!({
         "kernel": workload_kernel_name(options.kernel),
         "store_path": options.store_path.map(|path| path.display().to_string()),
+        "artifact_dir": options.artifact_dir.map(|path| path.display().to_string()),
         "report_path": options.report_path.map(|path| path.display().to_string()),
         "failure_report_path": options.failure_report_path.map(|path| path.display().to_string()),
+        "bundle_manifest": serde_json::Value::Null,
         "baseline_path": options.baseline_path.map(|path| path.display().to_string()),
         "baseline_label": options.baseline_path.map(|_| options.label),
         "baseline_comparison": comparison.map(workload_baseline_comparison_json),
@@ -1720,6 +1745,56 @@ fn workload_measurement_json(
             "selected_token_count": measurement.checkout.selected_token_count,
         },
     })
+}
+
+fn write_workload_bundle_manifest(
+    artifact_dir: &Path,
+    report_path: &Path,
+    report: &serde_json::Value,
+) -> Result<WorkloadBundleManifest, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(artifact_dir)?;
+    let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let manifest = serde_json::json!({
+        "format": "continuitydb.workload.bundle",
+        "format_version": 1,
+        "workload_report_path": report_path.display().to_string(),
+        "kernel": report["kernel"].clone(),
+        "store_path": report["store_path"].clone(),
+        "artifact_dir": report["artifact_dir"].clone(),
+        "baseline_path": report["baseline_path"].clone(),
+        "baseline_label": report["baseline_label"].clone(),
+        "baseline_comparison": report["baseline_comparison"].clone(),
+        "lookup_plan": report["lookup_plan"].clone(),
+        "workload": report["workload"].clone(),
+    });
+    let manifest_text = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, &manifest_text)?;
+
+    Ok(WorkloadBundleManifest {
+        manifest_path,
+        manifest_fingerprint: fnv1a64_fingerprint(&manifest_text),
+        manifest_bytes: manifest_text.len(),
+    })
+}
+
+fn workload_bundle_manifest_json(manifest: &WorkloadBundleManifest) -> serde_json::Value {
+    serde_json::json!({
+        "manifest_path": manifest.manifest_path.display().to_string(),
+        "manifest_fingerprint": manifest.manifest_fingerprint,
+        "manifest_bytes": manifest.manifest_bytes,
+    })
+}
+
+fn write_workload_artifact_bundle_report(
+    artifact_dir: &Path,
+    mut report: serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let report_path = artifact_dir.join("workload-report.json");
+    write_pretty_json_file(&report_path, &report)?;
+    let bundle_manifest = write_workload_bundle_manifest(artifact_dir, &report_path, &report)?;
+    report["bundle_manifest"] = workload_bundle_manifest_json(&bundle_manifest);
+    write_pretty_json_file(&report_path, &report)?;
+    Ok(report)
 }
 
 fn workload_baseline_comparison(
