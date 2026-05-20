@@ -354,6 +354,7 @@ pub struct StewardEvaluationCase {
     input: LocalModelStewardInput,
     expected_actions: Vec<StewardAction>,
     required_citations: Vec<String>,
+    required_rationale_terms: Vec<String>,
     forbidden_rationale_terms: Vec<String>,
 }
 
@@ -369,6 +370,7 @@ impl StewardEvaluationCase {
             input: LocalModelStewardInput::new(created_at, task),
             expected_actions: Vec::new(),
             required_citations: Vec::new(),
+            required_rationale_terms: Vec::new(),
             forbidden_rationale_terms: Vec::new(),
         }
     }
@@ -388,6 +390,12 @@ impl StewardEvaluationCase {
     /// Requires emitted proposals to include this citation locator.
     pub fn require_citation(mut self, locator: impl Into<String>) -> Self {
         self.required_citations.push(locator.into());
+        self
+    }
+
+    /// Requires emitted proposal rationales to include this term.
+    pub fn require_rationale_term(mut self, term: impl Into<String>) -> Self {
+        self.required_rationale_terms.push(term.into());
         self
     }
 
@@ -483,6 +491,11 @@ pub enum StewardEvaluationFailure {
     MissingCitation {
         /// Missing citation locator.
         locator: String,
+    },
+    /// Required rationale term was not found in emitted proposal rationales.
+    MissingRationaleTerm {
+        /// Required term missing from rationale text.
+        term: String,
     },
     /// A proposal was rejected by deterministic policy.
     PolicyRejected {
@@ -946,6 +959,15 @@ where
         .iter()
         .map(|proposal| proposal.rationale().to_ascii_lowercase())
         .collect();
+    for term in &case.required_rationale_terms {
+        let normalized = term.to_ascii_lowercase();
+        if rationales
+            .iter()
+            .all(|rationale| !rationale.contains(&normalized))
+        {
+            failures.push(StewardEvaluationFailure::MissingRationaleTerm { term: term.clone() });
+        }
+    }
     for term in &case.forbidden_rationale_terms {
         let normalized = term.to_ascii_lowercase();
         if rationales

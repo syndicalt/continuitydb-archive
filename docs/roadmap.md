@@ -97,7 +97,7 @@ Before adding a real model dependency, create fixed test corpora and score propo
 - Evidence citation preservation.
 - No unsupported claims beyond source evidence.
 - Stable output under low temperature.
-- Explicit uncertainty when evidence is insufficient.
+- Explicit uncertainty when evidence is insufficient; scoreable through required rationale terms.
 - Deterministic policy rejection of invalid proposals.
 
 ## Research Sources

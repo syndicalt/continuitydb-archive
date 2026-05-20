@@ -771,6 +771,91 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn steward_evaluation_passes_required_rationale_term() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "request_verification",
+                    "cell_id": cell_id,
+                    "request": "Gather additional source evidence."
+                },
+                "rationale": "The evidence is insufficient, so uncertainty remains.",
+                "citations": ["test://thin-evidence"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "insufficient evidence uncertainty",
+            created_at(),
+            "explain uncertainty",
+        )
+        .with_evidence(
+            "test://thin-evidence",
+            "One weak source mentions the claim.",
+        )
+        .expect_action(StewardAction::RequestVerification {
+            cell_id: Some(cell_id),
+            request: "Gather additional source evidence.".to_string(),
+        })
+        .require_citation("test://thin-evidence")
+        .require_rationale_term("uncertainty")]);
+
+        let report = suite.evaluate(&steward);
+
+        assert!(report.passed());
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_reports_missing_required_rationale_term(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "request_verification",
+                    "cell_id": cell_id,
+                    "request": "Gather additional source evidence."
+                },
+                "rationale": "The evidence needs another source.",
+                "citations": ["test://thin-evidence"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "missing uncertainty language",
+            created_at(),
+            "explain uncertainty",
+        )
+        .with_evidence(
+            "test://thin-evidence",
+            "One weak source mentions the claim.",
+        )
+        .expect_action(StewardAction::RequestVerification {
+            cell_id: Some(cell_id),
+            request: "Gather additional source evidence.".to_string(),
+        })
+        .require_citation("test://thin-evidence")
+        .require_rationale_term("uncertainty")]);
+
+        let report = suite.evaluate(&steward);
+
+        assert_eq!(
+            report.case_reports()[0].failures(),
+            &[StewardEvaluationFailure::MissingRationaleTerm {
+                term: "uncertainty".to_string(),
+            }]
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn small_model_candidates_include_default_feasibility_model() {
         let candidates = small_model_candidates();
 
