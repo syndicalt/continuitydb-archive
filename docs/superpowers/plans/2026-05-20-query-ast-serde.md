@@ -24,7 +24,7 @@
 - Modify: `crates/continuitydb-query/Cargo.toml`
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add serde_json as a dev dependency**
+- [x] **Step 1: Add serde_json as a dev dependency**
 
 Add this to `crates/continuitydb-query/Cargo.toml`:
 
@@ -33,7 +33,7 @@ Add this to `crates/continuitydb-query/Cargo.toml`:
 serde_json.workspace = true
 ```
 
-- [ ] **Step 2: Add failing serialization tests**
+- [x] **Step 2: Add failing serialization tests**
 
 Add these tests to the existing test module in `crates/continuitydb-query/src/lib.rs`:
 
@@ -114,7 +114,7 @@ fn unsupported_query_semantics_survive_json_round_trip(
 }
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run:
 
@@ -130,7 +130,7 @@ Expected: FAIL because query AST types do not implement serde traits.
 - Modify: `crates/continuitydb-query/Cargo.toml`
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add serde dependency**
+- [x] **Step 1: Add serde dependency**
 
 Add this dependency to `crates/continuitydb-query/Cargo.toml`:
 
@@ -138,7 +138,7 @@ Add this dependency to `crates/continuitydb-query/Cargo.toml`:
 serde.workspace = true
 ```
 
-- [ ] **Step 2: Add serde imports and derives**
+- [x] **Step 2: Add serde imports and derives**
 
 In `crates/continuitydb-query/src/lib.rs`, add:
 
@@ -171,7 +171,7 @@ pub enum QueryReturnShape { ... }
 pub enum QueryOptimization { ... }
 ```
 
-- [ ] **Step 3: Run focused tests and verify GREEN**
+- [x] **Step 3: Run focused tests and verify GREEN**
 
 Run:
 

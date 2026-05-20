@@ -3,10 +3,12 @@
 use chrono::{DateTime, Utc};
 use continuitydb_checkout::CheckoutRequest;
 use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCellId};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Top-level typed ContinuityDB query.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ContinuityQuery {
     /// Materialize a continuity checkout slice.
     Checkout(CheckoutQuery),
@@ -22,7 +24,7 @@ impl ContinuityQuery {
 }
 
 /// Structured checkout query.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CheckoutQuery {
     task: QueryTask,
     requirements: QueryRequirements,
@@ -84,7 +86,7 @@ impl CheckoutQuery {
 }
 
 /// Query task identity and answerability intent.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct QueryTask {
     /// Stable task name or identifier.
     pub name: String,
@@ -103,7 +105,7 @@ impl QueryTask {
 }
 
 /// Deterministic requirements accepted by the first checkout query compiler.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueryRequirements {
     /// Optional scope filter.
     pub scope: Option<Scope>,
@@ -146,7 +148,8 @@ fn zero_confidence() -> Confidence {
 }
 
 /// Requested checkout materialization shape.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QueryReturnShape {
     /// Current full checkout slice shape.
     PackedContextWithMetadata,
@@ -155,7 +158,8 @@ pub enum QueryReturnShape {
 }
 
 /// Requested checkout optimization policy.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QueryOptimization {
     /// Current deterministic utility-aware ranking.
     DeterministicUtility,
@@ -316,6 +320,78 @@ mod tests {
         assert_eq!(
             error,
             QueryError::UnsupportedOptimization(QueryOptimization::TokenCostOnly)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_query_round_trips_json_and_compiles() -> Result<(), Box<dyn std::error::Error>> {
+        let valid_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 10, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let task = QueryTask::new("release-readiness", "what is the release status?");
+        let query = CheckoutQuery::new(task).with_requirements(QueryRequirements {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: Some(valid_at),
+            minimum_confidence: Confidence::new(0.7)?,
+            token_budget: 1200,
+            ..QueryRequirements::default()
+        });
+
+        let encoded = serde_json::to_vec(&query)?;
+        let decoded: CheckoutQuery = serde_json::from_slice(&encoded)?;
+        let request = decoded.compile_checkout()?;
+
+        assert_eq!(
+            request.scope,
+            Some(Scope::Project("continuitydb".to_string()))
+        );
+        assert_eq!(request.valid_at, Some(valid_at));
+        assert_eq!(request.minimum_confidence, Confidence::new(0.7)?);
+        assert_eq!(request.token_budget, 1200);
+        Ok(())
+    }
+
+    #[test]
+    fn continuity_query_serializes_with_snake_case_checkout_tag(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let query = ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+            "release-readiness",
+            "what is the release status?",
+        )));
+
+        let value = serde_json::to_value(&query)?;
+        let decoded: ContinuityQuery = serde_json::from_value(value.clone())?;
+
+        assert!(value.get("checkout").is_some());
+        assert_eq!(decoded, query);
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_query_semantics_survive_json_round_trip(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let query = CheckoutQuery::new(QueryTask::new(
+            "release-readiness",
+            "what is the release status?",
+        ))
+        .with_return_shape(QueryReturnShape::CellsOnly)
+        .with_optimization(QueryOptimization::TokenCostOnly);
+
+        let value = serde_json::to_value(&query)?;
+        assert_eq!(value["return_shape"].as_str(), Some("cells_only"));
+        assert_eq!(value["optimization"].as_str(), Some("token_cost_only"));
+
+        let decoded: CheckoutQuery = serde_json::from_value(value)?;
+        let error = decoded
+            .compile_checkout()
+            .err()
+            .ok_or_else(|| std::io::Error::other("unsupported return shape should fail"))?;
+
+        assert_eq!(
+            error,
+            QueryError::UnsupportedReturnShape(QueryReturnShape::CellsOnly)
         );
         Ok(())
     }

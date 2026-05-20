@@ -276,6 +276,8 @@ dependencies = [
  "chrono",
  "continuitydb-checkout",
  "continuitydb-core",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
