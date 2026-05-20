@@ -102,6 +102,17 @@ pub struct CommitExportFileSummary {
     pub next_after: Option<CommitId>,
 }
 
+/// Summary of a conditional file-store compaction attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileCompactionSummary {
+    /// Whether the backing store was rewritten.
+    pub compacted: bool,
+    /// File-store health before the maintenance decision.
+    pub before: FileKernelHealth,
+    /// File-store health after the maintenance decision.
+    pub after: FileKernelHealth,
+}
+
 /// Versioned JSON envelope for portable commit export batches.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CommitExportEnvelope {
@@ -507,6 +518,28 @@ impl ContinuityDb<FileKernel> {
     /// Rewrites a file-backed store into the current canonical durable record format.
     pub fn compact_file_store(&mut self) -> Result<(), ContinuityError> {
         self.kernel.compact().map_err(Into::into)
+    }
+
+    /// Rewrites a file-backed store only when health recommends compaction.
+    pub fn compact_file_store_if_needed(
+        &mut self,
+    ) -> Result<FileCompactionSummary, ContinuityError> {
+        let before = self.file_store_health();
+        if !before.compaction_recommended {
+            return Ok(FileCompactionSummary {
+                compacted: false,
+                before,
+                after: before,
+            });
+        }
+
+        self.compact_file_store()?;
+        let after = self.file_store_health();
+        Ok(FileCompactionSummary {
+            compacted: true,
+            before,
+            after,
+        })
     }
 
     /// Returns observable status for the backing file store.
@@ -1568,6 +1601,41 @@ mod tests {
         assert!(records[2].contains(r#""checksum":"continuitydb-fnv1a64:"#));
         assert_eq!(db.commit_cells(commit_id)?[0].id, cell_id);
         std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_skips_file_compaction_when_store_is_canonical(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-compact-if-needed-canonical");
+        let mut db = ContinuityDb::open_file(&path)?;
+
+        let summary = db.compact_file_store_if_needed()?;
+
+        assert!(!summary.compacted);
+        assert_eq!(summary.before, summary.after);
+        assert!(!summary.after.compaction_recommended);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_compacts_file_store_when_health_recommends_it(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-compact-if-needed-legacy");
+        write_legacy_file_store(&path)?;
+        let mut db = ContinuityDb::open_file(&path)?;
+
+        let summary = db.compact_file_store_if_needed()?;
+
+        assert!(summary.compacted);
+        assert!(summary.before.compaction_recommended);
+        assert!(!summary.after.compaction_recommended);
+        assert_eq!(summary.after.legacy_raw_cells, 0);
+        assert!(summary.after.has_header);
+
+        fs::remove_file(path)?;
         Ok(())
     }
 
