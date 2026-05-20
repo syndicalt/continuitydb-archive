@@ -67,6 +67,7 @@ Storage kernel
 11. Add first-class commit manifests. Implemented `CommitManifest` and kernel/API manifest lookup so a commit boundary can expose its commit time and ordered StateCell IDs without reconstructing from checkout results.
 12. Add commit manifest timeline listing. Implemented ordered `list_commit_manifests` support across the storage kernel, memory/file kernels, and native API so audit and sync callers can discover commit boundaries deterministically.
 13. Add cursor-based commit manifest listing. Implemented `CommitManifestLookup` with exclusive commit cursors and limits across memory/file kernels and the native API for incremental audit, backup, and future sync reads.
+14. Add explicit durable commit records to the JSONL file kernel. Implemented backward-compatible `cell` and `commit` file records so new writes persist commit manifests directly while legacy raw StateCell logs remain readable.
 
 ## Checkout Milestones
 
