@@ -242,6 +242,7 @@ Storage kernel
 30. Add local-model evaluation summary metrics. Implemented serializable deterministic evaluation summaries for reports and baselines so embedders can inspect total, passed, failed, and pass-rate metrics without duplicating regression internals.
 31. Add CLI local-model evaluation summary output. Routed `benchmark-local-model` JSON through the public evaluation summary API and exposed failed-case and pass-rate metrics alongside existing pass counts.
 32. Add CLI local-model per-case evaluation detail output. Embedded serialized Steward evaluation reports in `benchmark-local-model` JSON so operator artifacts carry case names and deterministic failure reasons alongside aggregate metrics.
+33. Add default local-model conflict-classification evaluation. Expanded the fixed Steward benchmark suite with a deterministic `ConflictsWith` revision-link case so local model baselines test classification behavior beyond thin-evidence verification.
 
 ## Small Embeddable Model Track
 

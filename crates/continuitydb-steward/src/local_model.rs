@@ -793,22 +793,42 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
         .single()
         .unwrap_or_else(|| DateTime::<Utc>::from(std::time::UNIX_EPOCH));
+    let conflict_source = StateCellId::from_u128(1);
+    let conflict_target = StateCellId::from_u128(2);
 
-    StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
-        "insufficient evidence uncertainty",
-        created_at,
-        "Assess whether thin evidence needs verification.",
-    )
-    .with_evidence(
-        "continuitydb://evaluation/thin-evidence",
-        "One weak source mentions the claim without corroboration.",
-    )
-    .expect_action(StewardAction::RequestVerification {
-        cell_id: None,
-        request: "Gather additional source evidence.".to_string(),
-    })
-    .require_citation("continuitydb://evaluation/thin-evidence")
-    .require_rationale_term("uncertainty")])
+    StewardEvaluationSuite::new(vec![
+        StewardEvaluationCase::new(
+            "insufficient evidence uncertainty",
+            created_at,
+            "Assess whether thin evidence needs verification.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/thin-evidence",
+            "One weak source mentions the claim without corroboration.",
+        )
+        .expect_action(StewardAction::RequestVerification {
+            cell_id: None,
+            request: "Gather additional source evidence.".to_string(),
+        })
+        .require_citation("continuitydb://evaluation/thin-evidence")
+        .require_rationale_term("uncertainty"),
+        StewardEvaluationCase::new(
+            "conflict classification",
+            created_at,
+            "Classify whether contradictory release-status claims conflict.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/conflict-evidence",
+            "The source claim says the release is blocked while the target claim says it shipped.",
+        )
+        .expect_action(StewardAction::LinkRevision {
+            source: conflict_source,
+            kind: RevisionLinkKind::ConflictsWith,
+            target: conflict_target,
+        })
+        .require_citation("continuitydb://evaluation/conflict-evidence")
+        .forbid_rationale_term("verified in production"),
+    ])
 }
 
 /// Reproducible local model executable invocation metadata.

@@ -200,7 +200,7 @@ fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error
     let baseline_path = temp_store_path("continuitydb-cli-local-model-baseline");
     let script = r#"#!/usr/bin/env sh
 cat >/dev/null
-printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]}]}'
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]}]}'
 "#;
     fs::write(&executable_path, script)?;
     let mut permissions = fs::metadata(&executable_path)?.permissions();
@@ -239,9 +239,9 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(json["candidate_role"].as_str(), Some("default-feasibility"));
     assert_eq!(json["passed"].as_bool(), Some(true));
-    assert_eq!(json["passed_cases"].as_u64(), Some(1));
+    assert_eq!(json["passed_cases"].as_u64(), Some(2));
     assert_eq!(json["failed_cases"].as_u64(), Some(0));
-    assert_eq!(json["total_cases"].as_u64(), Some(1));
+    assert_eq!(json["total_cases"].as_u64(), Some(2));
     assert_eq!(json["pass_rate"].as_f64(), Some(1.0));
     assert_eq!(
         json["evaluation"]["case_reports"][0]["name"].as_str(),
@@ -249,6 +249,16 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(
         json["evaluation"]["case_reports"][0]["failures"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        json["evaluation"]["case_reports"][1]["name"].as_str(),
+        Some("conflict classification")
+    );
+    assert_eq!(
+        json["evaluation"]["case_reports"][1]["failures"]
             .as_array()
             .map(Vec::len),
         Some(0)

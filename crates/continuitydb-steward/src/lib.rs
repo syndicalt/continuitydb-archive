@@ -974,16 +974,30 @@ mod tests {
     #[test]
     fn default_steward_evaluation_suite_scores_valid_verification_proposal(
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let source = StateCellId::from_u128(1);
+        let target = StateCellId::from_u128(2);
         let response = serde_json::json!({
-            "proposals": [{
-                "action": {
-                    "type": "request_verification",
-                    "cell_id": null,
-                    "request": "Gather additional source evidence."
+            "proposals": [
+                {
+                    "action": {
+                        "type": "request_verification",
+                        "cell_id": null,
+                        "request": "Gather additional source evidence."
+                    },
+                    "rationale": "The evidence is thin, so uncertainty remains.",
+                    "citations": ["continuitydb://evaluation/thin-evidence"]
                 },
-                "rationale": "The evidence is thin, so uncertainty remains.",
-                "citations": ["continuitydb://evaluation/thin-evidence"]
-            }]
+                {
+                    "action": {
+                        "type": "link_revision",
+                        "source": source,
+                        "kind": "conflicts_with",
+                        "target": target
+                    },
+                    "rationale": "The cited evidence directly contradicts the target claim.",
+                    "citations": ["continuitydb://evaluation/conflict-evidence"]
+                }
+            ]
         })
         .to_string();
         let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
@@ -991,7 +1005,9 @@ mod tests {
         let report = default_steward_evaluation_suite().evaluate(&steward);
 
         assert!(report.passed());
-        assert_eq!(report.case_reports().len(), 1);
+        assert_eq!(report.case_reports().len(), 2);
+        assert!(report.case_reports()[1].passed());
+        assert_eq!(report.case_reports()[1].name(), "conflict classification");
         Ok(())
     }
 
