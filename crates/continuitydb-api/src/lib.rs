@@ -14,8 +14,9 @@ use continuitydb_core::{
     StateCellId, UtilityFeedback,
 };
 use continuitydb_kernel::{
-    CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelStatus,
-    KernelCapabilities, KernelError, KernelRequirements, RevisionLinkLookup, StorageKernel,
+    CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelLookupPlan,
+    FileKernelStatus, KernelCapabilities, KernelError, KernelRequirements, RevisionLinkLookup,
+    StorageKernel,
 };
 use continuitydb_query::{
     decode_query_json, parse_query_text, CheckoutQuery, ContinuityQuery, QueryEnvelopeError,
@@ -1373,6 +1374,11 @@ impl ContinuityDb<FileKernel> {
         self.kernel.health()
     }
 
+    /// Returns the file-kernel lookup candidate plan for the supplied constraints.
+    pub fn file_lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
+        self.kernel.lookup_plan(lookup)
+    }
+
     /// Ensures the file-backed store does not require compaction.
     pub fn ensure_file_store_canonical(&self) -> Result<(), ContinuityError> {
         let health = self.file_store_health();
@@ -1685,6 +1691,34 @@ mod tests {
         assert_eq!(health.checksum_free_records, 0);
         assert_eq!(health.canonical_records, 0);
         assert!(!health.compaction_recommended);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_reports_file_lookup_plan() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-lookup-plan");
+        let mut db = ContinuityDb::open_file(&path)?;
+        let mut matching = sample_cell("project:continuitydb:api-lookup-plan-match", 0.91, 12)?;
+        matching.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let broad = sample_cell("project:continuitydb:api-lookup-plan-broad", 0.83, 15)?;
+        let mut wrong_scope =
+            sample_cell("project:continuitydb:api-lookup-plan-wrong-scope", 0.89, 11)?;
+        wrong_scope.scope = Scope::Team("platform".to_string());
+        wrong_scope.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        db.ingest_cells(vec![broad, matching, wrong_scope])?;
+        let lookup = CellLookup {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            answerability_question: Some("what changed?".to_string()),
+            ..CellLookup::default()
+        };
+
+        let plan = db.file_lookup_plan(&lookup);
+
+        assert_eq!(plan.indexed_constraint_count, 2);
+        assert_eq!(plan.candidate_count, 1);
+        assert!(!plan.full_scan);
 
         fs::remove_file(path)?;
         Ok(())

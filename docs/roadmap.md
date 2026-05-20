@@ -214,6 +214,7 @@ Storage kernel
 41. Add duplicate-safe native revision-link append validation. Native revision-link record operations now surface `KernelError::DuplicateRevisionLink` when a caller attempts to append the same source, target, kind, and recorded time twice.
 42. Add native conflict-resolution Steward audit/application. Implemented `resolve_conflicts_with_steward_at` so embedders can run deterministic conflict stewardship, persist proposal audit records, and apply accepted results through the typed dispatcher in proposal order.
 43. Add native frontier/watch Steward audit/application. Implemented `resolve_frontier_watch_with_steward_at` so embedders can run subscribed frontier stewardship, persist proposal audit records, and apply accepted verification or frontier-maintenance results through the typed dispatcher.
+44. Add native file-kernel lookup-plan introspection. Implemented `ContinuityDb<FileKernel>::file_lookup_plan` so embedders can inspect file-backed indexed lookup candidate planning through the native API without reaching into the concrete kernel.
 
 ## Steward Milestones
 
