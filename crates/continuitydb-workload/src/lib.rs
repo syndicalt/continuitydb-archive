@@ -187,6 +187,10 @@ pub struct WorkloadLookupPlanSnapshot {
     pub exact_constraint_count: usize,
     /// Ordered names of exact lookup constraints checked after candidate selection.
     pub exact_constraints: Vec<String>,
+    /// Number of indexed lookup constraints that can over-select candidates.
+    pub lossy_indexed_constraint_count: usize,
+    /// Ordered names of indexed lookup constraints that require exact residual filtering.
+    pub lossy_indexed_constraints: Vec<String>,
     /// Number of StateCell candidates selected before exact predicate filtering.
     pub candidate_count: usize,
     /// Number of selected candidates that satisfy the exact lookup predicate.
@@ -219,6 +223,12 @@ impl From<FileKernelLookupPlan> for WorkloadLookupPlanSnapshot {
             exact_constraint_count: plan.exact_constraint_count,
             exact_constraints: plan
                 .exact_constraints
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            lossy_indexed_constraint_count: plan.lossy_indexed_constraint_count,
+            lossy_indexed_constraints: plan
+                .lossy_indexed_constraints
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
@@ -450,6 +460,13 @@ pub enum WorkloadBaselineRegression {
         /// Baseline ordered exact constraint names.
         previous: Vec<String>,
         /// Current ordered exact constraint names.
+        current: Vec<String>,
+    },
+    /// Ordered lossy indexed lookup constraints changed.
+    LookupPlanLossyIndexedConstraintsChanged {
+        /// Baseline ordered lossy indexed constraint names.
+        previous: Vec<String>,
+        /// Current ordered lossy indexed constraint names.
         current: Vec<String>,
     },
     /// Final lookup-plan candidate count changed.
@@ -821,6 +838,17 @@ fn push_lookup_plan_regressions(
                 |previous, current| WorkloadBaselineRegression::LookupPlanExactConstraintsChanged {
                     previous: previous.to_vec(),
                     current: current.to_vec(),
+                },
+            );
+            push_if_changed(
+                regressions,
+                previous.lossy_indexed_constraints.as_slice(),
+                current.lossy_indexed_constraints.as_slice(),
+                |previous, current| {
+                    WorkloadBaselineRegression::LookupPlanLossyIndexedConstraintsChanged {
+                        previous: previous.to_vec(),
+                        current: current.to_vec(),
+                    }
                 },
             );
             push_if_changed(
@@ -1319,6 +1347,8 @@ mod tests {
                 ],
                 exact_constraint_count: 2,
                 exact_constraints: vec!["scope", "minimum_confidence"],
+                lossy_indexed_constraint_count: 0,
+                lossy_indexed_constraints: Vec::new(),
                 candidate_count: 8,
                 exact_match_count: 8,
                 filtered_candidate_count: 0,
@@ -1358,6 +1388,8 @@ mod tests {
                 ],
                 exact_constraint_count: 1,
                 exact_constraints: vec!["valid_at"],
+                lossy_indexed_constraint_count: 1,
+                lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 8,
                 exact_match_count: 5,
                 filtered_candidate_count: 3,
@@ -1388,6 +1420,8 @@ mod tests {
                 ],
                 exact_constraint_count: 1,
                 exact_constraints: vec!["valid_at"],
+                lossy_indexed_constraint_count: 1,
+                lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 8,
                 exact_match_count: 5,
                 filtered_candidate_count: 3,
@@ -1421,6 +1455,8 @@ mod tests {
                 ],
                 exact_constraint_count: 1,
                 exact_constraints: vec!["valid_at"],
+                lossy_indexed_constraint_count: 1,
+                lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 8,
                 exact_match_count: 5,
                 filtered_candidate_count: 3,
@@ -1458,6 +1494,8 @@ mod tests {
                 ],
                 exact_constraint_count: 2,
                 exact_constraints: vec!["scope", "valid_at"],
+                lossy_indexed_constraint_count: 1,
+                lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 5,
                 exact_match_count: 4,
                 filtered_candidate_count: 1,
@@ -1474,6 +1512,53 @@ mod tests {
         assert_eq!(
             json["lookup_plan"]["exact_constraints"],
             serde_json::json!(["scope", "valid_at"])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_snapshot_preserves_lookup_plan_lossy_indexed_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let measurement = sample_measurement()?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement_with_lookup_plan(
+            &measurement,
+            Some(continuitydb_kernel::FileKernelLookupPlan {
+                indexed_constraint_count: 3,
+                indexed_constraints: vec!["scope", "system_at", "valid_at"],
+                indexed_constraint_plans: vec![
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "scope",
+                        candidate_count: 5,
+                    },
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "system_at",
+                        candidate_count: 8,
+                    },
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "valid_at",
+                        candidate_count: 8,
+                    },
+                ],
+                exact_constraint_count: 3,
+                exact_constraints: vec!["scope", "system_at", "valid_at"],
+                lossy_indexed_constraint_count: 2,
+                lossy_indexed_constraints: vec!["system_at", "valid_at"],
+                candidate_count: 5,
+                exact_match_count: 4,
+                filtered_candidate_count: 1,
+                candidate_selectivity_basis_points: 8000,
+                full_scan: false,
+            }),
+        );
+        let json = serde_json::to_value(snapshot)?;
+
+        assert_eq!(
+            json["lookup_plan"]["lossy_indexed_constraint_count"].as_u64(),
+            Some(2)
+        );
+        assert_eq!(
+            json["lookup_plan"]["lossy_indexed_constraints"],
+            serde_json::json!(["system_at", "valid_at"])
         );
         Ok(())
     }
@@ -1789,6 +1874,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            lossy_indexed_constraint_count: 1,
+            lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 3,
@@ -1805,6 +1892,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            lossy_indexed_constraint_count: 1,
+            lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 4,
@@ -1843,6 +1932,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["scope".to_string()],
+            lossy_indexed_constraint_count: 0,
+            lossy_indexed_constraints: Vec::new(),
             candidate_count: 8,
             exact_match_count: 8,
             filtered_candidate_count: 0,
@@ -1859,6 +1950,8 @@ mod tests {
             }],
             exact_constraint_count: 2,
             exact_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            lossy_indexed_constraint_count: 1,
+            lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
             exact_match_count: 8,
             filtered_candidate_count: 0,
@@ -1878,9 +1971,74 @@ mod tests {
                 WorkloadBaselineRegression::LookupPlanExactConstraintsChanged {
                     previous: vec!["scope".to_string()],
                     current: vec!["scope".to_string(), "valid_at".to_string()],
+                },
+                WorkloadBaselineRegression::LookupPlanLossyIndexedConstraintsChanged {
+                    previous: Vec::new(),
+                    current: vec!["valid_at".to_string()],
                 }
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_detects_lookup_plan_lossy_constraint_change(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut previous = baseline_record("current", "file", 100, 100)?;
+        previous.snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["scope".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "scope".to_string(),
+                candidate_count: 8,
+            }],
+            exact_constraint_count: 1,
+            exact_constraints: vec!["scope".to_string()],
+            lossy_indexed_constraint_count: 0,
+            lossy_indexed_constraints: Vec::new(),
+            candidate_count: 8,
+            exact_match_count: 8,
+            filtered_candidate_count: 0,
+            candidate_selectivity_basis_points: 10000,
+            full_scan: false,
+        });
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 2,
+            indexed_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            indexed_constraint_plans: vec![
+                WorkloadIndexedConstraintPlanSnapshot {
+                    name: "scope".to_string(),
+                    candidate_count: 8,
+                },
+                WorkloadIndexedConstraintPlanSnapshot {
+                    name: "valid_at".to_string(),
+                    candidate_count: 8,
+                },
+            ],
+            exact_constraint_count: 2,
+            exact_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            lossy_indexed_constraint_count: 1,
+            lossy_indexed_constraints: vec!["valid_at".to_string()],
+            candidate_count: 8,
+            exact_match_count: 8,
+            filtered_candidate_count: 0,
+            candidate_selectivity_basis_points: 10000,
+            full_scan: false,
+        });
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert!(comparison.regressions.contains(
+            &WorkloadBaselineRegression::LookupPlanLossyIndexedConstraintsChanged {
+                previous: Vec::new(),
+                current: vec!["valid_at".to_string()],
+            }
+        ));
         Ok(())
     }
 
@@ -1897,6 +2055,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            lossy_indexed_constraint_count: 1,
+            lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 3,
@@ -1913,6 +2073,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            lossy_indexed_constraint_count: 1,
+            lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 3,
@@ -2032,6 +2194,15 @@ mod tests {
             exact_constraint_count: constraints.len(),
             exact_constraints: constraints
                 .iter()
+                .map(|constraint| constraint.to_string())
+                .collect(),
+            lossy_indexed_constraint_count: constraints
+                .iter()
+                .filter(|constraint| **constraint == "system_at" || **constraint == "valid_at")
+                .count(),
+            lossy_indexed_constraints: constraints
+                .iter()
+                .filter(|constraint| **constraint == "system_at" || **constraint == "valid_at")
                 .map(|constraint| constraint.to_string())
                 .collect(),
             candidate_count,

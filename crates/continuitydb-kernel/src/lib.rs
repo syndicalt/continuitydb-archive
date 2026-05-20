@@ -699,6 +699,17 @@ impl FileKernelIndex {
         constraints
     }
 
+    fn lossy_indexed_constraint_names(lookup: &CellLookup) -> Vec<&'static str> {
+        let mut constraints = Vec::new();
+        if lookup.system_at.is_some() {
+            constraints.push("system_at");
+        }
+        if lookup.valid_at.is_some() {
+            constraints.push("valid_at");
+        }
+        constraints
+    }
+
     fn candidate_positions(&self, lookup: &CellLookup) -> Vec<usize> {
         let mut candidates = self
             .indexed_candidate_constraints(lookup)
@@ -790,6 +801,7 @@ impl FileKernelIndex {
     fn lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
         let indexed_candidate_constraints = self.indexed_candidate_constraints(lookup);
         let exact_constraints = Self::exact_constraint_names(lookup);
+        let lossy_indexed_constraints = Self::lossy_indexed_constraint_names(lookup);
         let indexed_constraints = indexed_candidate_constraints
             .iter()
             .map(|constraint| constraint.name)
@@ -817,6 +829,8 @@ impl FileKernelIndex {
             indexed_constraint_plans,
             exact_constraint_count: exact_constraints.len(),
             exact_constraints,
+            lossy_indexed_constraint_count: lossy_indexed_constraints.len(),
+            lossy_indexed_constraints,
             candidate_count,
             exact_match_count,
             filtered_candidate_count,
@@ -1081,6 +1095,10 @@ pub struct FileKernelLookupPlan {
     pub exact_constraint_count: usize,
     /// Ordered names of exact lookup constraints checked after candidate selection.
     pub exact_constraints: Vec<&'static str>,
+    /// Number of indexed lookup constraints that can over-select candidates.
+    pub lossy_indexed_constraint_count: usize,
+    /// Ordered names of indexed lookup constraints that require exact residual filtering.
+    pub lossy_indexed_constraints: Vec<&'static str>,
     /// Number of StateCell candidates selected before exact predicate filtering.
     pub candidate_count: usize,
     /// Number of selected candidates that satisfy the exact lookup predicate.
@@ -4259,6 +4277,43 @@ mod tests {
 
         assert_eq!(plan.exact_constraint_count, 2);
         assert_eq!(plan.exact_constraints, vec!["scope", "valid_at"]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_lookup_plan_reports_lossy_indexed_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-lookup-plan-lossy-constraints");
+        let valid_from = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let as_of = Utc
+            .with_ymd_and_hms(2026, 5, 22, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut matching = sample_cell(
+            "project:continuitydb:lookup-plan-lossy-constraints",
+            0.91,
+            12,
+        )?;
+        matching.valid_time = ValidTimeRange::new(valid_from, None)?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, matching)?;
+
+        let plan = kernel.lookup_plan(&CellLookup {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            system_at: Some(as_of),
+            valid_at: Some(as_of),
+            ..CellLookup::default()
+        });
+
+        assert_eq!(plan.lossy_indexed_constraint_count, 2);
+        assert_eq!(
+            plan.lossy_indexed_constraints,
+            vec!["system_at", "valid_at"]
+        );
         fs::remove_file(path)?;
         Ok(())
     }
