@@ -3063,6 +3063,73 @@ fn cli_validate_local_model_bundle_failure_report_records_changed_case_metadata(
     Ok(())
 }
 
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_validate_local_model_bundle_failure_report_records_response_manifest_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-failure-runner");
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-failure-baseline");
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-failure-report")
+            .with_extension("json");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-failure-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if failure_report_path.exists() {
+        fs::remove_file(&failure_report_path)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["benchmark_report_bytes"] = Value::from(1);
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model benchmark manifest byte count mismatch",
+        ));
+
+    let failure_report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    assert_eq!(
+        failure_report["response_artifact_manifest"]["manifest_path"].as_str(),
+        Some(response_manifest_path.display().to_string().as_str())
+    );
+    assert!(
+        failure_report["response_artifact_manifest"]["manifest_fingerprint"]
+            .as_str()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:"))
+    );
+    assert!(
+        failure_report["response_artifact_manifest"]["manifest_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0)
+    );
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_validate_local_model_bundle_rejects_report_byte_count_mismatch(

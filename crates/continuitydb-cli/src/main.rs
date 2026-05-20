@@ -1668,6 +1668,8 @@ fn write_local_model_bundle_validation_failure_report(
     let manifest = local_model_validation_failure_manifest_json(artifact_dir);
     let benchmark_report = local_model_validation_failure_report_json(artifact_dir);
     let changed_case_report = local_model_validation_failure_changed_case_report_json(artifact_dir);
+    let response_artifact_manifest =
+        local_model_validation_failure_response_artifact_manifest_json(artifact_dir);
     let output = serde_json::json!({
         "artifact_dir": artifact_dir.display().to_string(),
         "report_path": report_path.map(|path| path.display().to_string()),
@@ -1675,7 +1677,7 @@ fn write_local_model_bundle_validation_failure_report(
         "manifest": manifest,
         "benchmark_report": benchmark_report,
         "changed_case_report": changed_case_report,
-        "response_artifact_manifest": serde_json::Value::Null,
+        "response_artifact_manifest": response_artifact_manifest,
         "failure": {
             "stage": "local_model_bundle_validation",
             "message": message,
@@ -1730,6 +1732,24 @@ fn local_model_validation_failure_changed_case_report_json(
         "report_path": report_path.display().to_string(),
         "report_fingerprint": local_model_contract_fingerprint(&report_text),
         "report_bytes": report_text.len(),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_validation_failure_response_artifact_manifest_json(
+    artifact_dir: &Path,
+) -> serde_json::Value {
+    let manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let Ok(manifest_text) = std::fs::read_to_string(&manifest_path) else {
+        return serde_json::Value::Null;
+    };
+
+    serde_json::json!({
+        "manifest_path": manifest_path.display().to_string(),
+        "manifest_fingerprint": local_model_contract_fingerprint(&manifest_text),
+        "manifest_bytes": manifest_text.len(),
     })
 }
 
