@@ -70,6 +70,7 @@ Storage kernel
 14. Add explicit durable commit records to the JSONL file kernel. Implemented backward-compatible `cell` and `commit` file records so new writes persist commit manifests directly while legacy raw StateCell logs remain readable.
 15. Add versioned JSONL file-kernel format headers. Implemented a supported `header` record for new stores while preserving legacy non-header logs and rejecting unsupported or misplaced headers.
 16. Add per-record JSONL file-kernel checksums. Implemented deterministic checksum fields for new cell and commit records, validation on reopen, and compatibility with checksum-free legacy envelope records.
+17. Add JSONL file-kernel compaction. Implemented `FileKernel::compact` to rewrite stored cells and commit manifests into the latest header plus checksummed cell and commit record format while preserving lookup and manifest listing behavior.
 
 ## Checkout Milestones
 

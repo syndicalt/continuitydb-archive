@@ -382,6 +382,39 @@ impl FileKernel {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Rewrites the backing JSONL log into the current canonical record format.
+    pub fn compact(&mut self) -> Result<(), KernelError> {
+        let manifests = self.index.list_manifests();
+        let encoded = encode_canonical_log(self.index.cells.iter(), manifests.iter())?;
+        let temp_path = compact_temp_path(&self.path);
+        {
+            let mut temp_file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temp_path)
+                .map_err(|_error| KernelError::StoreIo)?;
+            temp_file
+                .write_all(encoded.as_bytes())
+                .map_err(|_error| KernelError::StoreIo)?;
+            temp_file.flush().map_err(|_error| KernelError::StoreIo)?;
+        }
+
+        let compacted_log = read_log_from_path(&temp_path)?;
+        let compacted_index = FileKernelIndex::rebuild(compacted_log)?;
+        fs::rename(&temp_path, &self.path).map_err(|_error| KernelError::StoreIo)?;
+        self.index = compacted_index;
+        Ok(())
+    }
+}
+
+fn compact_temp_path(path: &Path) -> PathBuf {
+    let suffix = format!("compact-{}", Utc::now().timestamp_micros());
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "continuitydb.jsonl".to_string());
+    path.with_file_name(format!("{file_name}.{suffix}"))
 }
 
 fn ensure_file_header(path: &Path) -> Result<(), KernelError> {
@@ -426,6 +459,46 @@ fn validate_file_record_checksum<T: serde::Serialize>(
         }
     }
     Ok(())
+}
+
+fn encode_canonical_log<'a>(
+    cells: impl IntoIterator<Item = &'a StateCell>,
+    manifests: impl IntoIterator<Item = &'a CommitManifest>,
+) -> Result<String, KernelError> {
+    let header = FileKernelHeader::current();
+    let mut encoded = String::new();
+    encoded.push_str(
+        &serde_json::to_string(&FileKernelRecord::Header {
+            format: header.format,
+            version: header.version,
+        })
+        .map_err(|_error| KernelError::StoreCorrupt)?,
+    );
+    encoded.push('\n');
+
+    for cell in cells {
+        encoded.push_str(
+            &serde_json::to_string(&FileKernelRecord::Cell {
+                cell: Box::new(cell.clone()),
+                checksum: Some(file_record_checksum(cell)?),
+            })
+            .map_err(|_error| KernelError::StoreCorrupt)?,
+        );
+        encoded.push('\n');
+    }
+
+    for manifest in manifests {
+        encoded.push_str(
+            &serde_json::to_string(&FileKernelRecord::Commit {
+                manifest: manifest.clone(),
+                checksum: Some(file_record_checksum(manifest)?),
+            })
+            .map_err(|_error| KernelError::StoreCorrupt)?,
+        );
+        encoded.push('\n');
+    }
+
+    Ok(encoded)
 }
 
 fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
@@ -1300,6 +1373,138 @@ mod tests {
 
         assert_eq!(kernel.lookup_cells(CellLookup::default())?.len(), 1);
         assert!(kernel.lookup_commit_manifest(commit_id)?.is_some());
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_compacts_legacy_raw_log_to_canonical_records(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-compact-legacy");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut first = sample_cell("project:continuitydb:compact-first", 0.91, 12)?;
+        let mut second = sample_cell("project:continuitydb:compact-second", 0.83, 15)?;
+        first.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        first.commit_id = commit_id;
+        second.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        second.commit_id = commit_id;
+        let expected_ids = vec![first.id, second.id];
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&first)?,
+                serde_json::to_string(&second)?
+            ),
+        )?;
+
+        let mut kernel = FileKernel::open(&path)?;
+        kernel.compact()?;
+
+        let records = fs::read_to_string(&path)?
+            .lines()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[0]["type"], "header");
+        assert_eq!(records[1]["type"], "cell");
+        assert!(records[1]["checksum"].as_str().is_some());
+        assert_eq!(records[2]["type"], "cell");
+        assert!(records[2]["checksum"].as_str().is_some());
+        assert_eq!(records[3]["type"], "commit");
+        assert!(records[3]["checksum"].as_str().is_some());
+        assert_eq!(
+            records[3]["manifest"]["cell_ids"],
+            serde_json::to_value(expected_ids)?
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_compaction_preserves_lookup_and_manifest_listing(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-compact-preserve");
+        let first_time = test_commit_time()?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let first = sample_cell("project:continuitydb:compact-list-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:compact-list-second", 0.83, 15)?;
+        let second_id = second.id;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at_with_commit_id(vec![first], first_time, first_commit)?;
+            kernel.append_cells_at_with_commit_id(vec![second], second_time, second_commit)?;
+            kernel.compact()?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let manifests = reopened.list_commit_manifests()?;
+        let second_lookup = reopened.lookup_cells(CellLookup {
+            cell_id: Some(second_id),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(
+            manifests
+                .iter()
+                .map(|manifest| manifest.commit_id)
+                .collect::<Vec<_>>(),
+            vec![first_commit, second_commit]
+        );
+        assert_eq!(second_lookup.len(), 1);
+        assert_eq!(second_lookup[0].id, second_id);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_compaction_preserves_cursor_manifest_listing(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-compact-cursor");
+        let first_time = test_commit_time()?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at_with_commit_id(
+                vec![sample_cell(
+                    "project:continuitydb:compact-cursor-first",
+                    0.91,
+                    12,
+                )?],
+                first_time,
+                first_commit,
+            )?;
+            kernel.append_cells_at_with_commit_id(
+                vec![sample_cell(
+                    "project:continuitydb:compact-cursor-second",
+                    0.83,
+                    15,
+                )?],
+                second_time,
+                second_commit,
+            )?;
+            kernel.compact()?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let manifests = reopened.list_commit_manifests_matching(CommitManifestLookup {
+            after: Some(first_commit),
+            limit: Some(1),
+        })?;
+
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].commit_id, second_commit);
         fs::remove_file(path)?;
         Ok(())
     }
