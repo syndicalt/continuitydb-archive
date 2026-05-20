@@ -1,7 +1,7 @@
 //! In-memory StorageKernel implementation for correctness tests.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{StateCell, SystemTimeRange};
+use continuitydb_core::{CommitId, StateCell, SystemTimeRange};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use std::collections::HashSet;
 
@@ -20,6 +20,18 @@ impl StorageKernel for MemoryKernel {
     where
         I: IntoIterator<Item = StateCell>,
     {
+        self.append_cells_at_with_commit_id(cells, committed_at, CommitId::new())
+    }
+
+    fn append_cells_at_with_commit_id<I>(
+        &mut self,
+        cells: I,
+        committed_at: DateTime<Utc>,
+        commit_id: CommitId,
+    ) -> Result<(), KernelError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
         let mut batch_ids = HashSet::new();
         let mut stamped = Vec::new();
         for mut cell in cells {
@@ -28,6 +40,7 @@ impl StorageKernel for MemoryKernel {
             }
 
             cell.system_time = SystemTimeRange::open_from(committed_at);
+            cell.commit_id = commit_id;
             stamped.push(cell);
         }
 
@@ -62,6 +75,11 @@ impl StorageKernel for MemoryKernel {
                 lookup
                     .system_at
                     .map_or(true, |system_at| cell.system_time.contains(system_at))
+            })
+            .filter(|cell| {
+                lookup
+                    .commit_id
+                    .map_or(true, |commit_id| cell.commit_id == commit_id)
             })
             .filter(|cell| {
                 lookup
@@ -117,8 +135,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-        Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
-        TrustSignal, ValidTimeRange,
+        Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
+        StateCellId, TrustSignal, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 
@@ -135,8 +153,10 @@ mod tests {
         mut cell: StateCell,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
         let committed_at = test_commit_time()?;
-        kernel.append_cell_at(cell.clone(), committed_at)?;
+        let commit_id = CommitId::new();
+        kernel.append_cell_at_with_commit_id(cell.clone(), committed_at, commit_id)?;
         cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
         Ok(cell)
     }
 
@@ -227,6 +247,33 @@ mod tests {
 
         assert!(matches!(result, Err(KernelError::DuplicateCell)));
         assert!(kernel.lookup_cells(CellLookup::default())?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_stamps_batch_with_explicit_commit_id() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut kernel = MemoryKernel::default();
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:commit-first", 0.9, 12)?;
+        let second = sample_cell("project:continuitydb:commit-second", 0.8, 15)?;
+        let expected_ids = vec![first.id, second.id];
+
+        kernel.append_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            commit_id: Some(commit_id),
+            ..CellLookup::default()
+        })?;
+        assert_eq!(
+            results.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            expected_ids
+        );
+        assert!(results.iter().all(|cell| cell.commit_id == commit_id));
+        assert!(results
+            .iter()
+            .all(|cell| cell.system_time.from() == committed_at));
         Ok(())
     }
 

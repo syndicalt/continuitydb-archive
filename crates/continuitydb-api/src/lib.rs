@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
-use continuitydb_core::{StateCell, StateCellId, UtilityFeedback};
+use continuitydb_core::{CommitId, StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
@@ -77,6 +77,19 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(cell_id)
     }
 
+    /// Appends an immutable StateCell version at a deterministic system time and commit ID.
+    pub fn ingest_cell_at_with_commit_id(
+        &mut self,
+        cell: StateCell,
+        committed_at: DateTime<Utc>,
+        commit_id: CommitId,
+    ) -> Result<StateCellId, ContinuityError> {
+        let cell_id = cell.id;
+        self.kernel
+            .append_cell_at_with_commit_id(cell, committed_at, commit_id)?;
+        Ok(cell_id)
+    }
+
     /// Appends immutable StateCell versions as one batch and returns their identifiers.
     pub fn ingest_cells<I>(&mut self, cells: I) -> Result<Vec<StateCellId>, ContinuityError>
     where
@@ -97,6 +110,23 @@ impl<K: StorageKernel> ContinuityDb<K> {
         let cells = cells.into_iter().collect::<Vec<_>>();
         let cell_ids = cells.iter().map(|cell| cell.id).collect::<Vec<_>>();
         self.kernel.append_cells_at(cells, committed_at)?;
+        Ok(cell_ids)
+    }
+
+    /// Appends immutable StateCell versions as one batch at a deterministic system time and commit ID.
+    pub fn ingest_cells_at_with_commit_id<I>(
+        &mut self,
+        cells: I,
+        committed_at: DateTime<Utc>,
+        commit_id: CommitId,
+    ) -> Result<Vec<StateCellId>, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
+        let cells = cells.into_iter().collect::<Vec<_>>();
+        let cell_ids = cells.iter().map(|cell| cell.id).collect::<Vec<_>>();
+        self.kernel
+            .append_cells_at_with_commit_id(cells, committed_at, commit_id)?;
         Ok(cell_ids)
     }
 
@@ -204,7 +234,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_checkout::CheckoutRequest;
     use continuitydb_core::{
-        Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
+        Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence, Scope,
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
         ValidTimeRange,
     };
@@ -325,6 +355,35 @@ mod tests {
             Err(ContinuityError::Kernel(KernelError::DuplicateCell))
         ));
         assert!(db.kernel().lookup_cells(CellLookup::default())?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn api_commit_id_batch_ingest_stamps_lookup_boundary() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:commit-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:commit-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+
+        let returned_ids =
+            db.ingest_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+
+        assert_eq!(returned_ids, expected_ids);
+        let stored = db.kernel().lookup_cells(CellLookup {
+            commit_id: Some(commit_id),
+            ..CellLookup::default()
+        })?;
+        assert_eq!(
+            stored.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            expected_ids
+        );
+        assert!(stored.iter().all(|cell| cell.commit_id == commit_id));
         Ok(())
     }
 

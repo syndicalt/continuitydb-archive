@@ -272,8 +272,8 @@ mod tests {
     use chrono::{DateTime, TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-        Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
-        SystemTimeRange, TrustSignal, UtilityFeedback, ValidTimeRange,
+        Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
+        StateCellId, SystemTimeRange, TrustSignal, UtilityFeedback, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
@@ -331,10 +331,11 @@ mod tests {
     }
 
     impl StorageKernel for RecordingKernel {
-        fn append_cells_at<I>(
+        fn append_cells_at_with_commit_id<I>(
             &mut self,
             _cells: I,
             _committed_at: DateTime<Utc>,
+            _commit_id: CommitId,
         ) -> Result<(), KernelError>
         where
             I: IntoIterator<Item = StateCell>,
@@ -359,8 +360,10 @@ mod tests {
         mut cell: StateCell,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
         let committed_at = test_commit_time()?;
-        kernel.append_cell_at(cell.clone(), committed_at)?;
+        let commit_id = CommitId::new();
+        kernel.append_cell_at_with_commit_id(cell.clone(), committed_at, commit_id)?;
         cell.system_time = SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
         Ok(cell)
     }
 

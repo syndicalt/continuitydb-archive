@@ -22,6 +22,33 @@ impl Default for StateCellId {
     }
 }
 
+/// Immutable identifier for a database commit boundary.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct CommitId(Uuid);
+
+impl CommitId {
+    /// Creates a random commit identifier.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    /// Returns the nil commit identifier used for legacy or uncommitted cells.
+    pub fn nil() -> Self {
+        Self(Uuid::nil())
+    }
+
+    /// Returns true when this is the nil commit identifier.
+    pub fn is_nil(self) -> bool {
+        self.0.is_nil()
+    }
+}
+
+impl Default for CommitId {
+    fn default() -> Self {
+        Self::nil()
+    }
+}
+
 /// Semantic anchor used to address a StateCell by meaning.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SemanticAnchor(String);
@@ -208,6 +235,9 @@ pub struct StateCell {
     /// Database transaction-time interval for this observed version.
     #[serde(default)]
     pub system_time: SystemTimeRange,
+    /// Database commit boundary that wrote this version.
+    #[serde(default)]
+    pub commit_id: CommitId,
     /// Scope for visibility and applicability.
     pub scope: Scope,
     /// Questions this cell can help answer.
@@ -254,6 +284,7 @@ impl StateCell {
             anchors,
             valid_time,
             system_time: SystemTimeRange::default(),
+            commit_id: CommitId::nil(),
             scope,
             answerability,
             activation: ActivationState::Active,

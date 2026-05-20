@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
-    ActivationState, CellDependencyKind, Confidence, Scope, StateCell, StateCellId, SystemTimeRange,
+    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCell, StateCellId,
+    SystemTimeRange,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -39,6 +40,8 @@ pub struct CellLookup {
     pub valid_at: Option<DateTime<Utc>>,
     /// Optional system transaction-time as-of filter.
     pub system_at: Option<DateTime<Utc>>,
+    /// Optional database commit identifier filter.
+    pub commit_id: Option<CommitId>,
     /// Optional activation-state filter.
     pub activation: Option<ActivationState>,
     /// Optional exact answerability question filter.
@@ -66,7 +69,17 @@ pub trait StorageKernel {
         cell: StateCell,
         committed_at: DateTime<Utc>,
     ) -> Result<(), KernelError> {
-        self.append_cells_at(std::iter::once(cell), committed_at)
+        self.append_cell_at_with_commit_id(cell, committed_at, CommitId::new())
+    }
+
+    /// Appends an immutable StateCell version at a deterministic system time and commit ID.
+    fn append_cell_at_with_commit_id(
+        &mut self,
+        cell: StateCell,
+        committed_at: DateTime<Utc>,
+        commit_id: CommitId,
+    ) -> Result<(), KernelError> {
+        self.append_cells_at_with_commit_id(std::iter::once(cell), committed_at, commit_id)
     }
 
     /// Appends immutable StateCell versions as one batch.
@@ -84,6 +97,19 @@ pub trait StorageKernel {
         committed_at: DateTime<Utc>,
     ) -> Result<(), KernelError>
     where
+        I: IntoIterator<Item = StateCell>,
+    {
+        self.append_cells_at_with_commit_id(cells, committed_at, CommitId::new())
+    }
+
+    /// Appends immutable StateCell versions as one batch at a deterministic system time and commit ID.
+    fn append_cells_at_with_commit_id<I>(
+        &mut self,
+        cells: I,
+        committed_at: DateTime<Utc>,
+        commit_id: CommitId,
+    ) -> Result<(), KernelError>
+    where
         I: IntoIterator<Item = StateCell>;
 
     /// Looks up StateCells matching deterministic constraints.
@@ -95,6 +121,7 @@ struct FileKernelIndex {
     cells: Vec<StateCell>,
     ids: HashMap<StateCellId, usize>,
     anchors: HashMap<String, Vec<usize>>,
+    commits: HashMap<CommitId, Vec<usize>>,
 }
 
 impl FileKernelIndex {
@@ -119,6 +146,10 @@ impl FileKernelIndex {
                 .or_default()
                 .push(position);
         }
+        self.commits
+            .entry(cell.commit_id)
+            .or_default()
+            .push(position);
         self.cells.push(cell);
         Ok(())
     }
@@ -202,6 +233,18 @@ impl StorageKernel for FileKernel {
     where
         I: IntoIterator<Item = StateCell>,
     {
+        self.append_cells_at_with_commit_id(cells, committed_at, CommitId::new())
+    }
+
+    fn append_cells_at_with_commit_id<I>(
+        &mut self,
+        cells: I,
+        committed_at: DateTime<Utc>,
+        commit_id: CommitId,
+    ) -> Result<(), KernelError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
         let mut batch_ids = HashSet::new();
         let mut stamped = Vec::new();
         for mut cell in cells {
@@ -210,6 +253,7 @@ impl StorageKernel for FileKernel {
             }
 
             cell.system_time = SystemTimeRange::open_from(committed_at);
+            cell.commit_id = commit_id;
             stamped.push(cell);
         }
 
@@ -255,6 +299,17 @@ impl StorageKernel for FileKernel {
                         .collect()
                 })
                 .unwrap_or_default()
+        } else if let Some(commit_id) = lookup.commit_id {
+            self.index
+                .commits
+                .get(&commit_id)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.index.cells[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
         } else {
             self.index.cells.iter().collect()
         };
@@ -284,6 +339,11 @@ impl StorageKernel for FileKernel {
                 lookup
                     .system_at
                     .map_or(true, |system_at| cell.system_time.contains(system_at))
+            })
+            .filter(|cell| {
+                lookup
+                    .commit_id
+                    .map_or(true, |commit_id| cell.commit_id == commit_id)
             })
             .filter(|cell| {
                 lookup
@@ -340,8 +400,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-        Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
-        TrustSignal, ValidTimeRange,
+        Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
+        StateCellId, TrustSignal, ValidTimeRange,
     };
     use std::{fs, path::PathBuf};
 
@@ -360,8 +420,10 @@ mod tests {
         mut cell: StateCell,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
         let committed_at = test_commit_time()?;
-        kernel.append_cell_at(cell.clone(), committed_at)?;
+        let commit_id = CommitId::new();
+        kernel.append_cell_at_with_commit_id(cell.clone(), committed_at, commit_id)?;
         cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
         Ok(cell)
     }
 
@@ -462,6 +524,38 @@ mod tests {
             results.iter().map(|cell| cell.id).collect::<Vec<_>>(),
             vec![first_id, second_id]
         );
+        assert!(results
+            .iter()
+            .all(|cell| cell.system_time.from() == committed_at));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_persists_batch_with_explicit_commit_id() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-commit-id");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let first = sample_cell("project:continuitydb:commit-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:commit-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            commit_id: Some(commit_id),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(
+            results.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            expected_ids
+        );
+        assert!(results.iter().all(|cell| cell.commit_id == commit_id));
         assert!(results
             .iter()
             .all(|cell| cell.system_time.from() == committed_at));

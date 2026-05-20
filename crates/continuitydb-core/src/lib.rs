@@ -7,7 +7,7 @@ mod time;
 
 pub use cell::{
     ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-    Scope, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
+    CommitId, Scope, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
 };
 pub use error::CoreError;
 pub use evidence::{Citation, Confidence, Evidence, SourceId, TrustSignal};
@@ -186,6 +186,39 @@ mod tests {
 
         assert_eq!(cell.system_time.from(), epoch);
         assert!(cell.system_time.contains(epoch));
+        Ok(())
+    }
+
+    #[test]
+    fn state_cell_starts_with_nil_commit_id() -> Result<(), Box<dyn std::error::Error>> {
+        let cell = sample_state_cell("project:continuitydb:commit-id")?;
+
+        assert_eq!(cell.commit_id, CommitId::nil());
+        assert!(cell.commit_id.is_nil());
+        Ok(())
+    }
+
+    #[test]
+    fn commit_id_new_is_not_nil() {
+        let commit_id = CommitId::new();
+
+        assert!(!commit_id.is_nil());
+        assert_ne!(commit_id, CommitId::nil());
+    }
+
+    #[test]
+    fn state_cell_deserializes_missing_commit_id_as_nil() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let cell = sample_state_cell("project:continuitydb:legacy-commit-id")?;
+        let mut value = serde_json::to_value(cell)?;
+        value
+            .as_object_mut()
+            .ok_or_else(|| std::io::Error::other("state cell did not serialize as object"))?
+            .remove("commit_id");
+
+        let decoded: StateCell = serde_json::from_value(value)?;
+
+        assert_eq!(decoded.commit_id, CommitId::nil());
         Ok(())
     }
 
