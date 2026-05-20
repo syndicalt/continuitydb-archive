@@ -13,8 +13,10 @@ use continuitydb_kernel::{
 };
 use continuitydb_memory::MemoryKernel;
 use continuitydb_workload::{
-    generate_world_model_workload, measure_ingest_and_checkout, FileWorkloadBaselineStore,
+    compare_workload_snapshot_to_baseline, generate_world_model_workload,
+    measure_ingest_and_checkout, FileWorkloadBaselineStore, WorkloadBaselineComparison,
     WorkloadBaselineRecord, WorkloadConfig, WorkloadMeasurement, WorkloadMeasurementSnapshot,
+    WorkloadRegressionThresholds,
 };
 use std::path::PathBuf;
 
@@ -39,6 +41,9 @@ struct WorkloadMeasureOptions<'a> {
     dependency_stride: usize,
     baseline_path: Option<&'a PathBuf>,
     label: &'a str,
+    compare_baseline: bool,
+    max_elapsed_growth_percent: u128,
+    fail_on_regression: bool,
 }
 
 /// Named kernel requirement profiles understood by the CLI.
@@ -101,6 +106,15 @@ enum Command {
         /// Baseline scenario label when recording a measurement.
         #[arg(long = "label", default_value = "default")]
         label: String,
+        /// Compare this measurement with the latest matching baseline before recording.
+        #[arg(long = "compare-baseline")]
+        compare_baseline: bool,
+        /// Maximum elapsed-time growth percentage allowed during baseline comparison.
+        #[arg(long = "max-elapsed-growth-percent", default_value_t = 25)]
+        max_elapsed_growth_percent: u128,
+        /// Exit non-zero when baseline comparison reports regressions.
+        #[arg(long = "fail-on-regression")]
+        fail_on_regression: bool,
     },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
@@ -193,6 +207,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             dependency_stride,
             baseline_path,
             label,
+            compare_baseline,
+            max_elapsed_growth_percent,
+            fail_on_regression,
         }) => {
             let output = measure_workload_json(WorkloadMeasureOptions {
                 kernel,
@@ -203,6 +220,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 dependency_stride,
                 baseline_path: baseline_path.as_ref(),
                 label: &label,
+                compare_baseline,
+                max_elapsed_growth_percent,
+                fail_on_regression,
             })?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -422,6 +442,24 @@ fn measure_workload_json(
         }
     };
 
+    let snapshot = WorkloadMeasurementSnapshot::from_measurement(&measurement);
+    let comparison = workload_baseline_comparison(
+        options.baseline_path,
+        options.label,
+        workload_kernel_name(options.kernel),
+        &snapshot,
+        options.compare_baseline || options.fail_on_regression,
+        options.max_elapsed_growth_percent,
+    )?;
+
+    let regression_detected = match comparison.as_ref() {
+        Some(comparison) => !comparison.passed(),
+        None => false,
+    };
+    if options.fail_on_regression && regression_detected {
+        return Err(std::io::Error::other("workload baseline regression detected").into());
+    }
+
     if let Some(path) = options.baseline_path {
         record_workload_baseline(
             path,
@@ -436,6 +474,7 @@ fn measure_workload_json(
         options.store_path,
         options.baseline_path,
         options.label,
+        comparison.as_ref(),
         measurement,
     ))
 }
@@ -445,6 +484,7 @@ fn workload_measurement_json(
     store_path: Option<&PathBuf>,
     baseline_path: Option<&PathBuf>,
     label: &str,
+    comparison: Option<&WorkloadBaselineComparison>,
     measurement: WorkloadMeasurement,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -452,6 +492,7 @@ fn workload_measurement_json(
         "store_path": store_path.map(|path| path.display().to_string()),
         "baseline_path": baseline_path.map(|path| path.display().to_string()),
         "baseline_label": baseline_path.map(|_| label),
+        "baseline_comparison": comparison.map(workload_baseline_comparison_json),
         "workload": {
             "cell_count": measurement.workload_summary.cell_count,
             "frontier_count": measurement.workload_summary.frontier_count,
@@ -473,6 +514,39 @@ fn workload_measurement_json(
             "frontier_count": measurement.checkout.frontier_count,
             "selected_token_count": measurement.checkout.selected_token_count,
         },
+    })
+}
+
+fn workload_baseline_comparison(
+    baseline_path: Option<&PathBuf>,
+    label: &str,
+    kernel: &str,
+    snapshot: &WorkloadMeasurementSnapshot,
+    compare_baseline: bool,
+    max_elapsed_growth_percent: u128,
+) -> Result<Option<WorkloadBaselineComparison>, Box<dyn std::error::Error>> {
+    if !compare_baseline {
+        return Ok(None);
+    }
+
+    let path = baseline_path.ok_or_else(|| std::io::Error::other("baseline path is required"))?;
+    let baseline = FileWorkloadBaselineStore::new(path).latest_matching(label, kernel)?;
+    Ok(baseline.map(|baseline| {
+        compare_workload_snapshot_to_baseline(
+            &baseline,
+            snapshot,
+            WorkloadRegressionThresholds {
+                max_elapsed_growth_percent,
+            },
+        )
+    }))
+}
+
+fn workload_baseline_comparison_json(comparison: &WorkloadBaselineComparison) -> serde_json::Value {
+    serde_json::json!({
+        "passed": comparison.passed(),
+        "baseline_recorded_at": comparison.baseline.recorded_at,
+        "regressions": comparison.regressions,
     })
 }
 
