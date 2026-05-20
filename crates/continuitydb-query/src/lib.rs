@@ -635,6 +635,38 @@ WHERE scope = project("continuitydb")
     }
 
     #[test]
+    fn text_query_parses_temporal_and_commit_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let commit_id = CommitId::new();
+        let query = parse_query_text(&format!(
+            r#"CHECKOUT "release" ANSWER "what should ship?"
+WHERE valid_at = "2026-05-20T12:00:00Z"
+  AND system_at = "2026-05-20T12:30:00Z"
+  AND commit_id = "{commit_id}""#
+        ))?;
+
+        let ContinuityQuery::Checkout(checkout) = query;
+        assert_eq!(
+            checkout.requirements().valid_at,
+            Some(
+                Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+                    .single()
+                    .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?
+            )
+        );
+        assert_eq!(
+            checkout.requirements().system_at,
+            Some(
+                Utc.with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+                    .single()
+                    .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?
+            )
+        );
+        assert_eq!(checkout.requirements().commit_id, Some(commit_id));
+        Ok(())
+    }
+
+    #[test]
     fn text_query_keywords_are_case_insensitive() -> Result<(), Box<dyn std::error::Error>> {
         let query = parse_query_text(
             r#"checkout "release" answer "what should ship?" where scope = global"#,
@@ -664,6 +696,18 @@ WHERE scope = project("continuitydb")
         assert_eq!(
             parse_query_text(
                 r#"CHECKOUT "release" ANSWER "what should ship?" WHERE token_budget <= -1"#
+            ),
+            Err(QueryTextError::InvalidValue)
+        );
+        assert_eq!(
+            parse_query_text(
+                r#"CHECKOUT "release" ANSWER "what should ship?" WHERE valid_at = "not-a-time""#
+            ),
+            Err(QueryTextError::InvalidValue)
+        );
+        assert_eq!(
+            parse_query_text(
+                r#"CHECKOUT "release" ANSWER "what should ship?" WHERE commit_id = "not-a-uuid""#
             ),
             Err(QueryTextError::InvalidValue)
         );

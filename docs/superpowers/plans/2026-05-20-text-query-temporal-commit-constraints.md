@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add parser test for temporal and commit constraints**
+- [x] **Step 1: Add parser test for temporal and commit constraints**
 
 Add this test after `text_query_parses_checkout_where_constraints`:
 
@@ -61,7 +61,7 @@ WHERE valid_at = "2026-05-20T12:00:00Z"
 }
 ```
 
-- [ ] **Step 2: Add invalid temporal and commit value tests**
+- [x] **Step 2: Add invalid temporal and commit value tests**
 
 Extend `text_query_rejects_invalid_values` with:
 
@@ -80,7 +80,7 @@ assert_eq!(
 );
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -95,7 +95,7 @@ Expected: FAIL because `valid_at`, `system_at`, and `commit_id` are not supporte
 **Files:**
 - Modify: `crates/continuitydb-query/src/text.rs`
 
-- [ ] **Step 1: Add imports**
+- [x] **Step 1: Add imports**
 
 Change the imports at the top of `text.rs` to:
 
@@ -104,7 +104,7 @@ use chrono::{DateTime, Utc};
 use continuitydb_core::{CommitId, Confidence, Scope};
 ```
 
-- [ ] **Step 2: Add constraint branches**
+- [x] **Step 2: Add constraint branches**
 
 Add these branches to `parse_constraint` after `scope`:
 
@@ -123,7 +123,7 @@ Add these branches to `parse_constraint` after `scope`:
 }
 ```
 
-- [ ] **Step 3: Add parse helpers**
+- [x] **Step 3: Add parse helpers**
 
 Add these methods before `parse_scope`:
 
@@ -141,7 +141,7 @@ fn parse_commit_id(&mut self) -> Result<CommitId, QueryTextError> {
 }
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 

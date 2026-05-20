@@ -1,6 +1,7 @@
 //! Text parser for ContinuityDB queries.
 
-use continuitydb_core::{Confidence, Scope};
+use chrono::{DateTime, Utc};
+use continuitydb_core::{CommitId, Confidence, Scope};
 use thiserror::Error;
 
 use crate::{CheckoutQuery, ContinuityQuery, QueryRequirements, QueryTask};
@@ -202,6 +203,18 @@ impl Parser {
                 self.expect_token(Token::Eq)?;
                 requirements.scope = Some(self.parse_scope()?);
             }
+            "valid_at" => {
+                self.expect_token(Token::Eq)?;
+                requirements.valid_at = Some(self.parse_datetime()?);
+            }
+            "system_at" => {
+                self.expect_token(Token::Eq)?;
+                requirements.system_at = Some(self.parse_datetime()?);
+            }
+            "commit_id" => {
+                self.expect_token(Token::Eq)?;
+                requirements.commit_id = Some(self.parse_commit_id()?);
+            }
             "min_confidence" => {
                 self.expect_token(Token::Gte)?;
                 let value = self
@@ -229,6 +242,18 @@ impl Parser {
             _ => return Err(QueryTextError::InvalidSyntax),
         }
         Ok(())
+    }
+
+    fn parse_datetime(&mut self) -> Result<DateTime<Utc>, QueryTextError> {
+        DateTime::parse_from_rfc3339(&self.expect_string()?)
+            .map(|value| value.with_timezone(&Utc))
+            .map_err(|_error| QueryTextError::InvalidValue)
+    }
+
+    fn parse_commit_id(&mut self) -> Result<CommitId, QueryTextError> {
+        self.expect_string()?
+            .parse::<CommitId>()
+            .map_err(|_error| QueryTextError::InvalidValue)
     }
 
     fn parse_scope(&mut self) -> Result<Scope, QueryTextError> {
