@@ -1014,6 +1014,7 @@ mod tests {
             valid_at: Some(committed_at),
             system_at: Some(committed_at),
             commit_id: None,
+            activation: None,
             answerability_question: None,
             evidence_source: None,
             dependency_target: None,

@@ -351,6 +351,7 @@ fn demo_checkout() -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::
             valid_at: None,
             system_at: None,
             commit_id: None,
+            activation: None,
             answerability_question: None,
             evidence_source: None,
             dependency_target: None,
