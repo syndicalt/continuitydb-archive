@@ -2,7 +2,7 @@
 
 use chrono::{TimeZone, Utc};
 use clap::{Parser, Subcommand};
-use continuitydb_api::ContinuityDb;
+use continuitydb_api::{ContinuityDb, ContinuityError};
 use continuitydb_checkout::{checkout, CheckoutRequest};
 use continuitydb_core::{
     ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
@@ -101,6 +101,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 open_file_database(&store_path)?
             };
             let capabilities = db.kernel_capabilities();
+            let status = file_status_json(&db)?;
             let required = require.map(profile_name);
             let satisfies = require
                 .map(|profile| db.kernel_satisfies(requirements_for_profile(profile)))
@@ -108,6 +109,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let output = serde_json::json!({
                 "path": store_path.display().to_string(),
                 "capabilities": capabilities_json(capabilities),
+                "status": status,
                 "required": required,
                 "satisfies": satisfies,
             });
@@ -189,6 +191,17 @@ fn capabilities_json(capabilities: KernelCapabilities) -> serde_json::Value {
         "durable_flush": capabilities.durable_flush,
         "compaction": capabilities.compaction,
     })
+}
+
+fn file_status_json(
+    db: &ContinuityDb<continuitydb_kernel::FileKernel>,
+) -> Result<serde_json::Value, ContinuityError> {
+    let status = db.file_store_status()?;
+    Ok(serde_json::json!({
+        "cell_count": status.cell_count,
+        "commit_count": status.commit_count,
+        "file_size_bytes": status.file_size_bytes,
+    }))
 }
 
 fn open_file_database(

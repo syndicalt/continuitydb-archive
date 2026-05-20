@@ -140,6 +140,14 @@ fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::err
     );
     assert_eq!(json["capabilities"]["durable_flush"].as_bool(), Some(true));
     assert_eq!(json["capabilities"]["compaction"].as_bool(), Some(true));
+    assert_eq!(json["status"]["cell_count"].as_u64(), Some(0));
+    assert_eq!(json["status"]["commit_count"].as_u64(), Some(0));
+    assert!(
+        json["status"]["file_size_bytes"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
 
     fs::remove_file(path)?;
     Ok(())

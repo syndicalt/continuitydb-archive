@@ -6,8 +6,8 @@ use continuitydb_checkout::{
 };
 use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{
-    CellLookup, CommitManifestLookup, FileKernel, KernelCapabilities, KernelError,
-    KernelRequirements, StorageKernel,
+    CellLookup, CommitManifestLookup, FileKernel, FileKernelStatus, KernelCapabilities,
+    KernelError, KernelRequirements, StorageKernel,
 };
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
@@ -496,6 +496,11 @@ impl ContinuityDb<FileKernel> {
         self.kernel.compact().map_err(Into::into)
     }
 
+    /// Returns observable status for the backing file store.
+    pub fn file_store_status(&self) -> Result<FileKernelStatus, ContinuityError> {
+        self.kernel.status().map_err(Into::into)
+    }
+
     /// Writes a versioned JSON commit export envelope to a file.
     pub fn export_commits_json_file<P: AsRef<Path>>(
         &self,
@@ -635,6 +640,28 @@ mod tests {
 
         assert_eq!(db.kernel().path(), path.as_path());
         assert!(db.kernel_satisfies(KernelRequirements::durable_append_log()));
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_reports_file_store_status() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-store-status");
+        let mut db = ContinuityDb::open_file(&path)?;
+        db.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:file-status", 0.91, 12)?],
+            Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+                .single()
+                .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?,
+            CommitId::new(),
+        )?;
+
+        let status = db.file_store_status()?;
+
+        assert_eq!(status.cell_count, 1);
+        assert_eq!(status.commit_count, 1);
+        assert!(status.file_size_bytes > 0);
 
         fs::remove_file(path)?;
         Ok(())
