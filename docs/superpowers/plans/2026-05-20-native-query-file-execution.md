@@ -269,7 +269,7 @@ git commit -m "refactor: route cli query files through native api"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-native-query-file-execution.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add this current-scope bullet near the native query execution bullets:
 
@@ -277,7 +277,7 @@ Add this current-scope bullet near the native query execution bullets:
 - Native API execution for saved typed query files.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add this Native API milestone after native versioned query-envelope execution:
 
@@ -293,7 +293,7 @@ Update the CLI query-envelope milestone to mention native routing:
 14. Execute versioned typed query envelopes from the CLI. Extended `continuitydb checkout-query` to accept `continuitydb.query` envelope files while preserving raw typed query JSON compatibility, routed through the native query-file API.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -307,7 +307,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-native-query-file-execution.md

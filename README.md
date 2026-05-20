@@ -19,6 +19,7 @@ The first milestone builds:
 - Read-only typed query AST introspection for embedders and bindings.
 - Native typed query execution through the embeddable API.
 - Native API execution for versioned typed query envelopes.
+- Native API execution for saved typed query files.
 - CLI execution for serialized typed query files.
 - CLI execution for versioned typed query envelopes.
 - Commit-scoped checkout.
