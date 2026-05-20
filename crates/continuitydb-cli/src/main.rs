@@ -80,6 +80,7 @@ struct LocalModelBenchmarkOptions<'a> {
     fail_on_unstable: bool,
     fail_on_failed_cases: bool,
     failure_report_path: Option<&'a Path>,
+    changed_case_report_path: Option<&'a Path>,
     dry_run: bool,
     compare_baseline: bool,
     fail_on_regression: bool,
@@ -153,6 +154,7 @@ struct LocalModelBenchmarkDryRunGates {
     stability_preflight: Option<serde_json::Value>,
     fail_on_failed_cases: bool,
     failure_report_path: Option<PathBuf>,
+    changed_case_report_path: Option<PathBuf>,
 }
 
 /// Named kernel requirement profiles understood by the CLI.
@@ -364,6 +366,9 @@ enum Command {
         /// Path to write benchmark JSON when a pre-recording quality gate fails.
         #[arg(long = "failure-report-path")]
         failure_report_path: Option<PathBuf>,
+        /// Path to write compact local-model changed-case comparison JSON.
+        #[arg(long = "changed-case-report-path")]
+        changed_case_report_path: Option<PathBuf>,
         /// Path to write successful benchmark or dry-run JSON output.
         #[arg(long = "report-path")]
         report_path: Option<PathBuf>,
@@ -611,6 +616,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             fail_on_unstable,
             fail_on_failed_cases,
             failure_report_path,
+            changed_case_report_path,
             report_path: explicit_report_path,
             dry_run,
             compare_baseline,
@@ -633,6 +639,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 fail_on_unstable,
                 fail_on_failed_cases,
                 failure_report_path: failure_report_path.as_deref(),
+                changed_case_report_path: changed_case_report_path.as_deref(),
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
@@ -900,6 +907,7 @@ fn benchmark_local_model_json(
                 }),
                 fail_on_failed_cases: options.fail_on_failed_cases,
                 failure_report_path: options.failure_report_path.map(Path::to_path_buf),
+                changed_case_report_path: options.changed_case_report_path.map(Path::to_path_buf),
             },
         ));
     }
@@ -914,7 +922,10 @@ fn benchmark_local_model_json(
             .as_ref()
             .is_some_and(|stability| !stability.stable())
     {
-        if options.artifact_dir.is_some() || options.failure_report_path.is_some() {
+        if options.artifact_dir.is_some()
+            || options.failure_report_path.is_some()
+            || options.changed_case_report_path.is_some()
+        {
             let (report, responses) = if effective_response_dir.is_some() {
                 benchmark.run_with_responses(identity)
             } else {
@@ -946,6 +957,8 @@ fn benchmark_local_model_json(
                 },
                 stability.as_ref(),
             );
+            report =
+                finalize_local_model_benchmark_report(report, options.changed_case_report_path)?;
             if let Some(artifact_dir) = options.artifact_dir {
                 report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
             }
@@ -988,6 +1001,7 @@ fn benchmark_local_model_json(
             },
             stability.as_ref(),
         );
+        report = finalize_local_model_benchmark_report(report, options.changed_case_report_path)?;
         if let Some(artifact_dir) = options.artifact_dir {
             report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
         }
@@ -1030,6 +1044,7 @@ fn benchmark_local_model_json(
             },
             stability.as_ref(),
         );
+        report = finalize_local_model_benchmark_report(report, options.changed_case_report_path)?;
         if let Some(artifact_dir) = options.artifact_dir {
             report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
         }
@@ -1040,7 +1055,7 @@ fn benchmark_local_model_json(
     }
     store.append_baseline(current_baseline.clone())?;
 
-    Ok(local_model_benchmark_json(
+    let report = local_model_benchmark_json(
         options.baseline_path,
         options.compare_baseline,
         &current_baseline,
@@ -1052,7 +1067,8 @@ fn benchmark_local_model_json(
             response_manifest: response_manifest.as_ref(),
         },
         stability.as_ref(),
-    ))
+    );
+    finalize_local_model_benchmark_report(report, options.changed_case_report_path)
 }
 
 #[cfg(feature = "local-model")]
@@ -1077,6 +1093,10 @@ fn local_model_benchmark_dry_run_json(
         "fail_on_failed_cases": gates.fail_on_failed_cases,
         "failure_report_path": gates
             .failure_report_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        "changed_case_report_path": gates
+            .changed_case_report_path
             .as_ref()
             .map(|path| path.display().to_string()),
         "contract_artifacts": local_model_contract_artifacts_json(artifacts.contract),
@@ -1111,6 +1131,52 @@ fn write_pretty_json_file(
     }
     std::fs::write(report_path, serde_json::to_string_pretty(report)?)?;
     Ok(())
+}
+
+#[cfg(feature = "local-model")]
+fn finalize_local_model_benchmark_report(
+    mut report: serde_json::Value,
+    changed_case_report_path: Option<&Path>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    report["changed_case_report_path"] = changed_case_report_path
+        .map(|path| serde_json::Value::String(path.display().to_string()))
+        .unwrap_or(serde_json::Value::Null);
+    if let Some(path) = changed_case_report_path {
+        write_local_model_changed_case_report(path, &report)?;
+    }
+    Ok(report)
+}
+
+#[cfg(feature = "local-model")]
+fn write_local_model_changed_case_report(
+    path: &Path,
+    benchmark_report: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let comparison = benchmark_report
+        .get("baseline_comparison")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let changed_case_report = serde_json::json!({
+        "format": "continuitydb.local_model.changed_cases",
+        "format_version": 1,
+        "candidate_model_id": benchmark_report["candidate_model_id"].clone(),
+        "baseline_path": benchmark_report["baseline_path"].clone(),
+        "changed_case_report_path": path.display().to_string(),
+        "comparison": {
+            "compared": comparison["compared"].as_bool().unwrap_or(false),
+            "regressed": comparison["regressed"].as_bool().unwrap_or(false),
+            "previous_recorded_at": comparison["previous_recorded_at"].clone(),
+            "current_recorded_at": comparison["current_recorded_at"].clone(),
+            "changed_cases": comparison["changed_cases"].as_u64().unwrap_or(0),
+            "outcome_changed_cases": comparison["outcome_changed_cases"].as_u64().unwrap_or(0),
+            "failure_count_changed_cases": comparison["failure_count_changed_cases"].as_u64().unwrap_or(0),
+            "response_changed_cases": comparison["response_changed_cases"].as_u64().unwrap_or(0),
+            "regressed_cases": comparison["regressed_cases"].clone(),
+            "recovered_cases": comparison["recovered_cases"].clone(),
+            "changed_case_summaries": comparison["changed_case_summaries"].clone(),
+        },
+    });
+    write_pretty_json_file(path, &changed_case_report)
 }
 
 fn fnv1a64_fingerprint(text: &str) -> String {

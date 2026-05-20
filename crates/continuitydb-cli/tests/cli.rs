@@ -1887,6 +1887,101 @@ fn cli_benchmark_local_model_reports_passing_response_changes(
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_benchmark_local_model_changed_case_report_path_writes_compact_report(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-changed-report-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-changed-report-baseline");
+    let changed_case_report_path =
+        temp_store_path("continuitydb-cli-local-model-changed-report").with_extension("json");
+    let current_script = passing_local_model_runner_script().replace(
+        "The evidence is thin, so uncertainty remains.",
+        "Uncertainty remains because the evidence is thin.",
+    );
+    fs::write(&executable_path, passing_local_model_runner_script())?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+    fs::write(&executable_path, current_script)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--compare-baseline")
+        .arg("--changed-case-report-path")
+        .arg(&changed_case_report_path)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout_report: Value = serde_json::from_slice(&output)?;
+    assert_eq!(
+        stdout_report["changed_case_report_path"].as_str(),
+        Some(changed_case_report_path.display().to_string().as_str())
+    );
+    let report: Value = serde_json::from_str(&fs::read_to_string(&changed_case_report_path)?)?;
+    assert_eq!(
+        report["format"].as_str(),
+        Some("continuitydb.local_model.changed_cases")
+    );
+    assert_eq!(report["format_version"].as_u64(), Some(1));
+    assert_eq!(
+        report["candidate_model_id"].as_str(),
+        Some("Qwen/Qwen2.5-0.5B-Instruct")
+    );
+    assert_eq!(
+        report["baseline_path"].as_str(),
+        Some(baseline_path.display().to_string().as_str())
+    );
+    assert_eq!(report["comparison"]["changed_cases"].as_u64(), Some(9));
+    assert_eq!(
+        report["comparison"]["outcome_changed_cases"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        report["comparison"]["failure_count_changed_cases"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        report["comparison"]["response_changed_cases"].as_u64(),
+        Some(9)
+    );
+    assert_eq!(
+        report["comparison"]["changed_case_summaries"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_file(changed_case_report_path)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-passing-gate-runner");
