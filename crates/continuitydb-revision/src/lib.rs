@@ -148,6 +148,110 @@ pub fn scan_cell_conflicts(cells: &[StateCell]) -> CellConflictScan {
     }
 }
 
+/// Deterministic recommendation for resolving a detected StateCell conflict.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ConflictResolutionKind {
+    /// Evidence strongly favors one cell superseding the other.
+    CandidateSupersession,
+    /// Evidence confidence is close enough that the later valid-time start wins.
+    LatestEvidenceWins,
+    /// Deterministic policy cannot safely pick a winner.
+    NeedsHumanReview,
+}
+
+/// Non-mutating conflict resolution recommendation.
+pub struct ConflictResolutionRecommendation {
+    /// Conflict being evaluated.
+    pub conflict: CellConflict,
+    /// Recommended resolution class.
+    pub kind: ConflictResolutionKind,
+    /// Winning cell, when deterministic policy can choose one.
+    pub winner: Option<StateCellId>,
+    /// Losing cell, when deterministic policy can choose one.
+    pub loser: Option<StateCellId>,
+    /// Stable machine-readable reason for audit and policy decisions.
+    pub reason: String,
+    /// Proposed revision links for callers to accept or reject.
+    pub revision: RevisionGraph,
+}
+
+/// Recommends a deterministic conflict resolution without mutating committed truth.
+pub fn recommend_conflict_resolution(
+    left: &StateCell,
+    right: &StateCell,
+) -> Option<ConflictResolutionRecommendation> {
+    let conflict = detect_cell_conflict(left, right)?;
+    let left_confidence = max_evidence_confidence(left);
+    let right_confidence = max_evidence_confidence(right);
+    let confidence_gap = (left_confidence - right_confidence).abs();
+
+    if confidence_gap >= 0.20 {
+        let (winner, loser) = if left_confidence > right_confidence {
+            (left.id, right.id)
+        } else {
+            (right.id, left.id)
+        };
+        return Some(recommend_supersession(
+            conflict,
+            ConflictResolutionKind::CandidateSupersession,
+            winner,
+            loser,
+            "resolution:confidence-gap",
+        ));
+    }
+
+    if left.valid_time.from() != right.valid_time.from() {
+        let (winner, loser) = if left.valid_time.from() > right.valid_time.from() {
+            (left.id, right.id)
+        } else {
+            (right.id, left.id)
+        };
+        return Some(recommend_supersession(
+            conflict,
+            ConflictResolutionKind::LatestEvidenceWins,
+            winner,
+            loser,
+            "resolution:latest-valid-time",
+        ));
+    }
+
+    Some(ConflictResolutionRecommendation {
+        conflict,
+        kind: ConflictResolutionKind::NeedsHumanReview,
+        winner: None,
+        loser: None,
+        reason: "resolution:human-review-required".to_string(),
+        revision: RevisionGraph::default(),
+    })
+}
+
+fn recommend_supersession(
+    conflict: CellConflict,
+    kind: ConflictResolutionKind,
+    winner: StateCellId,
+    loser: StateCellId,
+    reason: &str,
+) -> ConflictResolutionRecommendation {
+    let mut revision = RevisionGraph::default();
+    revision.link(winner, RevisionLinkKind::Supersedes, loser);
+
+    ConflictResolutionRecommendation {
+        conflict,
+        kind,
+        winner: Some(winner),
+        loser: Some(loser),
+        reason: reason.to_string(),
+        revision,
+    }
+}
+
+fn max_evidence_confidence(cell: &StateCell) -> f32 {
+    cell.evidence
+        .iter()
+        .map(|evidence| evidence.confidence.value())
+        .fold(0.0, f32::max)
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
@@ -158,8 +262,9 @@ mod tests {
     };
 
     use super::{
-        detect_cell_conflict, revise_utility_feedback, scan_cell_conflicts, CellConflictKind,
-        RevisionGraph, RevisionLinkKind,
+        detect_cell_conflict, recommend_conflict_resolution, revise_utility_feedback,
+        scan_cell_conflicts, CellConflictKind, ConflictResolutionKind, RevisionGraph,
+        RevisionLinkKind,
     };
 
     fn timestamp(day: u32) -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
@@ -183,6 +288,16 @@ mod tests {
         from_day: u32,
         to_day: Option<u32>,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        sample_cell_with_anchor_payload_time_and_confidence(anchor, payload, from_day, to_day, 0.8)
+    }
+
+    fn sample_cell_with_anchor_payload_time_and_confidence(
+        anchor: &str,
+        payload: &str,
+        from_day: u32,
+        to_day: Option<u32>,
+        confidence: f32,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
         let valid_from = timestamp(from_day)?;
         let valid_to = to_day.map(timestamp).transpose()?;
         StateCell::new(
@@ -196,7 +311,7 @@ mod tests {
                 citation: Citation {
                     locator: "test://feedback".to_string(),
                 },
-                confidence: Confidence::new(0.8)?,
+                confidence: Confidence::new(confidence)?,
                 trust: vec![TrustSignal::DirectObservation],
             }],
             CellPayload::Text(payload.to_string()),
@@ -361,6 +476,106 @@ mod tests {
                 .targets(right.id, RevisionLinkKind::ConflictsWith),
             vec![left.id]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_resolution_recommends_candidate_supersession_for_confidence_gap(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let low_confidence = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is blocked.",
+            20,
+            Some(23),
+            0.55,
+        )?;
+        let high_confidence = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is green.",
+            21,
+            Some(23),
+            0.9,
+        )?;
+
+        let recommendation = recommend_conflict_resolution(&low_confidence, &high_confidence)
+            .ok_or_else(|| std::io::Error::other("expected recommendation"))?;
+
+        assert_eq!(
+            recommendation.kind,
+            ConflictResolutionKind::CandidateSupersession
+        );
+        assert_eq!(recommendation.winner, Some(high_confidence.id));
+        assert_eq!(recommendation.loser, Some(low_confidence.id));
+        assert_eq!(
+            recommendation
+                .revision
+                .targets(high_confidence.id, RevisionLinkKind::Supersedes),
+            vec![low_confidence.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_resolution_recommends_latest_evidence_when_confidence_is_close(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let older = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is blocked.",
+            20,
+            Some(23),
+            0.82,
+        )?;
+        let newer = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is green.",
+            21,
+            Some(23),
+            0.8,
+        )?;
+
+        let recommendation = recommend_conflict_resolution(&older, &newer)
+            .ok_or_else(|| std::io::Error::other("expected recommendation"))?;
+
+        assert_eq!(
+            recommendation.kind,
+            ConflictResolutionKind::LatestEvidenceWins
+        );
+        assert_eq!(recommendation.winner, Some(newer.id));
+        assert_eq!(recommendation.loser, Some(older.id));
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_resolution_requires_human_review_for_tied_evidence(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let left = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is blocked.",
+            20,
+            Some(23),
+            0.8,
+        )?;
+        let right = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is green.",
+            20,
+            Some(23),
+            0.8,
+        )?;
+
+        let recommendation = recommend_conflict_resolution(&left, &right)
+            .ok_or_else(|| std::io::Error::other("expected recommendation"))?;
+
+        assert_eq!(
+            recommendation.kind,
+            ConflictResolutionKind::NeedsHumanReview
+        );
+        assert_eq!(recommendation.winner, None);
+        assert_eq!(recommendation.loser, None);
+        assert!(recommendation
+            .revision
+            .targets(left.id, RevisionLinkKind::Supersedes)
+            .is_empty());
         Ok(())
     }
 }

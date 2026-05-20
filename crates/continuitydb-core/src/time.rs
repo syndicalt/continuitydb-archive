@@ -29,6 +29,11 @@ impl ValidTimeRange {
         as_of >= self.from && self.to.map_or(true, |to| as_of < to)
     }
 
+    /// Returns the inclusive start of the valid-time range.
+    pub fn from(&self) -> DateTime<Utc> {
+        self.from
+    }
+
     /// Returns true when this half-open valid-time range overlaps another range.
     pub fn overlaps(&self, other: &Self) -> bool {
         let self_starts_before_other_ends = other.to.map_or(true, |other_to| self.from < other_to);

@@ -261,4 +261,20 @@ mod tests {
         assert!(!current.overlaps(&adjacent));
         Ok(())
     }
+
+    #[test]
+    fn valid_time_exposes_start() -> Result<(), Box<dyn std::error::Error>> {
+        let may_20 = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let may_21 = Utc
+            .with_ymd_and_hms(2026, 5, 21, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let range = ValidTimeRange::new(may_20, Some(may_21))?;
+
+        assert_eq!(range.from(), may_20);
+        Ok(())
+    }
 }
