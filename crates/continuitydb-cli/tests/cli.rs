@@ -491,6 +491,22 @@ fn cli_local_model_candidates_outputs_fixed_registry() -> Result<(), Box<dyn std
     assert!(json["candidates"][0]["notes"]
         .as_str()
         .is_some_and(|notes| !notes.is_empty()));
+    assert_eq!(
+        json["candidates"][0]["recommended_runner_arguments"][0].as_str(),
+        Some("--model")
+    );
+    assert_eq!(
+        json["candidates"][0]["recommended_runner_arguments"][1].as_str(),
+        Some("<model.gguf>")
+    );
+    assert_eq!(
+        json["candidates"][0]["recommended_runner_arguments"][2].as_str(),
+        Some("--ctx-size")
+    );
+    assert_eq!(
+        json["candidates"][0]["recommended_runner_arguments"][5].as_str(),
+        Some("0")
+    );
     assert!(json["candidates"].as_array().is_some_and(|candidates| {
         candidates.iter().any(|candidate| {
             candidate["model_id"].as_str() == Some("HuggingFaceTB/SmolLM2-360M-Instruct")

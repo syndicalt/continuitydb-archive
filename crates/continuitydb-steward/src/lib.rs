@@ -1187,6 +1187,28 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn small_model_candidate_builds_recommended_runner_config() {
+        let config =
+            small_model_candidates()[0].recommended_runner_config("llama-cli", "/models/qwen.gguf");
+
+        assert_eq!(config.executable(), std::path::Path::new("llama-cli"));
+        assert_eq!(
+            config.command_arguments(),
+            vec![
+                "--model".to_string(),
+                "/models/qwen.gguf".to_string(),
+                "--ctx-size".to_string(),
+                "4096".to_string(),
+                "--temp".to_string(),
+                "0".to_string(),
+                "--prompt".to_string(),
+                "-".to_string(),
+            ]
+        );
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_response_json_schema_describes_steward_proposals(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let schema: serde_json::Value = serde_json::from_str(local_model_response_json_schema())?;

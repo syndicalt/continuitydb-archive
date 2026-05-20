@@ -459,6 +459,8 @@ fn local_model_candidates_json() -> serde_json::Value {
         "candidates": candidates
             .iter()
             .map(|candidate| {
+                let recommended_config =
+                    candidate.recommended_runner_config("llama-cli", "<model.gguf>");
                 serde_json::json!({
                     "model_id": candidate.model_id(),
                     "role": candidate.role(),
@@ -466,6 +468,7 @@ fn local_model_candidates_json() -> serde_json::Value {
                     "artifact_format": candidate.artifact_format(),
                     "recommended_temperature": candidate.recommended_temperature(),
                     "requires_grammar": candidate.requires_grammar(),
+                    "recommended_runner_arguments": recommended_config.command_arguments(),
                     "notes": candidate.notes(),
                 })
             })

@@ -252,6 +252,7 @@ Storage kernel
 40. Add CLI local-model contract fingerprints. Added deterministic schema and grammar fingerprints to contract export and benchmark dry-run JSON so operators can connect archived constraint files to preflight artifacts.
 41. Add durable local-model contract fingerprints. Persisted schema and grammar fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
 42. Add small-model candidate runtime metadata. Extended the local Steward candidate registry with recommended runtime, artifact format, temperature, grammar requirement, and operational notes, and exposed the metadata through CLI candidate JSON.
+43. Add small-model benchmark argument templates. Added candidate-recommended runner configuration helpers and exposed deterministic benchmark argument vectors through CLI candidate JSON.
 
 ## Small Embeddable Model Track
 

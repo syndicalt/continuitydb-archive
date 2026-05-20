@@ -883,6 +883,17 @@ impl SmallModelCandidate {
     pub fn notes(&self) -> &'static str {
         self.notes
     }
+
+    /// Builds the recommended local executable runner configuration.
+    pub fn recommended_runner_config(
+        &self,
+        executable: impl Into<PathBuf>,
+        model_path: impl Into<PathBuf>,
+    ) -> LocalExecutableRunnerConfig {
+        LlamaCppRuntimeProfile::new(executable, model_path)
+            .with_temperature(format_temperature(self.recommended_temperature_millis))
+            .runner_config()
+    }
 }
 
 /// Returns the fixed small model candidates for Steward evaluation.
@@ -1390,6 +1401,19 @@ fn fingerprint_text(text: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("fnv1a64:{hash:016x}")
+}
+
+fn format_temperature(temperature_millis: u16) -> String {
+    if temperature_millis == 0 {
+        return "0".to_string();
+    }
+
+    let whole = temperature_millis / 1000;
+    let fractional = temperature_millis % 1000;
+    format!("{whole}.{fractional:03}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
 
 fn fingerprint_fields(fields: &[String]) -> String {
