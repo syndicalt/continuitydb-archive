@@ -101,6 +101,7 @@ Storage kernel
 7. Add frontier/watch integration so the Steward can propose refresh and verification work. Implemented as deterministic frontier watch events that emit `RequestVerification` and `MarkFrontier` proposals, durable frontier subscription records with in-memory and JSONL file-backed stores, and a subscription runner that filters incoming watch events through stored subscriptions in `continuitydb-steward`.
 8. Add conflict-resolution proposal integration. Implemented `ConflictResolutionSteward` to convert deterministic revision conflict recommendations into auditable `LinkRevision` or `RequestVerification` proposals without mutating committed truth.
 9. Add durable conflict-resolution proposal audit. Implemented `ConflictResolutionSteward::propose_and_record` so deterministic conflict-resolution proposals are policy-evaluated and persisted through any existing `StoredProposalLedger`.
+10. Add kernel-backed conflict-resolution audit. Implemented `ConflictResolutionSteward::propose_and_record_to_kernel` so deterministic conflict-resolution proposal audits can be persisted as StateCells through any `StorageKernel`.
 
 ## Small Embeddable Model Track
 

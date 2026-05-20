@@ -1,13 +1,14 @@
 //! Deterministic conflict-resolution Steward integration.
 
 use chrono::{DateTime, Utc};
+use continuitydb_kernel::StorageKernel;
 use continuitydb_revision::{
     ConflictResolutionRecommendation, ConflictResolutionScan, RevisionLinkKind,
 };
 
 use crate::{
-    ProposalId, ProposalLedgerStore, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
-    StewardProposal, StoredProposalLedger,
+    KernelProposalStore, ProposalId, ProposalLedgerStore, ProposalPolicy, StewardAction,
+    StewardError, StewardIdentity, StewardProposal, StoredProposalLedger,
 };
 
 /// Deterministic Steward for revision conflict-resolution recommendations.
@@ -53,6 +54,23 @@ impl ConflictResolutionSteward {
         Ok(proposals)
     }
 
+    /// Converts recommendations into proposals and records audit entries as StateCells.
+    pub fn propose_and_record_to_kernel<K>(
+        &self,
+        scan: ConflictResolutionScan,
+        created_at: DateTime<Utc>,
+        policy: &ProposalPolicy,
+        kernel: K,
+    ) -> Result<(Vec<StewardProposal>, K), StewardError>
+    where
+        K: StorageKernel,
+    {
+        let mut ledger = StoredProposalLedger::new(KernelProposalStore::new(kernel));
+        let proposals = self.propose_and_record(scan, created_at, policy, &mut ledger)?;
+        let store = ledger.into_store();
+        Ok((proposals, store.into_kernel()))
+    }
+
     fn proposal_for_recommendation(
         &self,
         recommendation: ConflictResolutionRecommendation,
@@ -93,6 +111,7 @@ mod tests {
         Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
     };
+    use continuitydb_kernel::{CellLookup, StorageKernel};
     use continuitydb_revision::{recommend_conflict_resolutions, RevisionLinkKind};
 
     use crate::{
@@ -196,6 +215,32 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].proposal().id(), proposals[0].id());
         assert_eq!(records[0].decision().outcome(), ProposalOutcome::Accepted);
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_resolution_steward_records_to_kernel_cells(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let low_confidence = sample_cell("Release is blocked.", 20, 0.55)?;
+        let high_confidence = sample_cell("Release is green.", 21, 0.9)?;
+        let scan =
+            recommend_conflict_resolutions(&[low_confidence.clone(), high_confidence.clone()]);
+        let steward = ConflictResolutionSteward::new(steward()?);
+
+        let (proposals, kernel) = steward.propose_and_record_to_kernel(
+            scan,
+            created_at(),
+            &ProposalPolicy::strict(),
+            continuitydb_memory::MemoryKernel::default(),
+        )?;
+
+        let audit_cells = kernel.lookup_cells(CellLookup {
+            semantic_anchor: Some("continuitydb:steward:proposal-audit".to_string()),
+            ..CellLookup::default()
+        })?;
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(audit_cells.len(), 1);
+        assert!(matches!(audit_cells[0].payload, CellPayload::Json(_)));
         Ok(())
     }
 }
