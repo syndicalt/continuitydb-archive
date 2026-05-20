@@ -22,7 +22,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add these tests in `crates/continuitydb-api/src/lib.rs`:
 
@@ -63,13 +63,13 @@ fn api_commit_cells_reports_unknown_commit() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p continuitydb-api commit_cells`
 
 Expected: FAIL because `ContinuityDb::commit_cells` does not exist.
 
-- [ ] **Step 3: Implement `commit_cells`**
+- [x] **Step 3: Implement `commit_cells`**
 
 Add in the `impl<K: StorageKernel> ContinuityDb<K>` block near commit manifest methods:
 
@@ -83,7 +83,7 @@ pub fn commit_cells(&self, commit_id: CommitId) -> Result<Vec<StateCell>, Contin
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p continuitydb-api commit_cells`
 
@@ -96,7 +96,7 @@ Expected: PASS.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-commit-materialization-api.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 In `README.md`, add:
 
@@ -110,13 +110,13 @@ In `docs/roadmap.md`, add Native API milestone 5:
 5. Add ordered commit cell materialization. Implemented `ContinuityDb::commit_cells` so callers can hydrate the StateCells written by one commit in manifest order, with unknown commits reported as `CommitNotFound`.
 ```
 
-- [ ] **Step 2: Run focused test**
+- [x] **Step 2: Run focused test**
 
 Run: `cargo test -p continuitydb-api commit_cells`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -130,7 +130,7 @@ git diff --check
 
 Expected: all PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 

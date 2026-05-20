@@ -160,6 +160,14 @@ impl<K: StorageKernel> ContinuityDb<K> {
             .map_err(Into::into)
     }
 
+    /// Returns StateCells written by a database commit in manifest order.
+    pub fn commit_cells(&self, commit_id: CommitId) -> Result<Vec<StateCell>, ContinuityError> {
+        let manifest = self
+            .commit_manifest(commit_id)?
+            .ok_or(ContinuityError::Kernel(KernelError::CommitNotFound))?;
+        self.lookup_cells_in_order(manifest.cell_ids)
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -531,6 +539,41 @@ mod tests {
         assert_eq!(manifests.len(), 1);
         assert_eq!(manifests[0].commit_id, second_commit);
         Ok(())
+    }
+
+    #[test]
+    fn api_returns_commit_cells_in_manifest_order() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:commit-cells-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:commit-cells-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+
+        db.ingest_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+
+        let cells = db.commit_cells(commit_id)?;
+        assert_eq!(
+            cells.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            expected_ids
+        );
+        assert!(cells.iter().all(|cell| cell.commit_id == commit_id));
+        Ok(())
+    }
+
+    #[test]
+    fn api_commit_cells_reports_unknown_commit() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let result = db.commit_cells(CommitId::new());
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Kernel(KernelError::CommitNotFound))
+        ));
     }
 
     #[test]

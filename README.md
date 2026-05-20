@@ -35,6 +35,7 @@ The first milestone builds:
 - First-class commit manifests for transaction-boundary inspection.
 - Commit manifest timeline listing.
 - Cursor-based commit manifest listing for incremental audit and sync reads.
+- Native commit cell materialization API.
 - Native typed operation API for ingest, checkout, and audit.
 - Native typed utility feedback revision API.
 - Native read-only conflict analysis API.
