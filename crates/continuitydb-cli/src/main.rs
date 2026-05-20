@@ -12,6 +12,9 @@ use continuitydb_kernel::{
     CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements, StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
+use continuitydb_workload::{
+    generate_world_model_workload, measure_ingest_and_checkout, WorkloadConfig, WorkloadMeasurement,
+};
 use std::path::PathBuf;
 
 /// ContinuityDB command-line interface.
@@ -37,6 +40,15 @@ enum RequirementProfile {
     IndexedEmbedded,
 }
 
+/// Kernel profiles supported by workload measurement.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum WorkloadKernelProfile {
+    /// Use the in-memory correctness kernel.
+    Memory,
+    /// Use the durable JSONL file kernel.
+    File,
+}
+
 /// Supported commands.
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -50,6 +62,27 @@ enum Command {
         store_path: PathBuf,
         /// Path to a serialized ContinuityQuery JSON file.
         query_path: PathBuf,
+    },
+    /// Measure deterministic workload ingest and checkout.
+    MeasureWorkload {
+        /// Kernel profile to measure.
+        #[arg(long = "kernel", default_value = "memory")]
+        kernel: WorkloadKernelProfile,
+        /// Path to the JSONL file-backed store when measuring the file kernel.
+        #[arg(long = "store-path")]
+        store_path: Option<PathBuf>,
+        /// Number of deterministic StateCells to generate.
+        #[arg(long = "cells", default_value_t = 8)]
+        cells: usize,
+        /// Checkout token budget.
+        #[arg(long = "token-budget", default_value_t = 400)]
+        token_budget: i64,
+        /// Every Nth generated cell is marked as frontier.
+        #[arg(long = "frontier-every", default_value_t = 3)]
+        frontier_every: usize,
+        /// Dependency stride for generated cells.
+        #[arg(long = "dependency-stride", default_value_t = 2)]
+        dependency_stride: usize,
     },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
@@ -132,6 +165,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }) => {
             let slice = checkout_query_file(&store_path, &query_path)?;
             println!("{}", serde_json::to_string_pretty(&slice)?);
+        }
+        Some(Command::MeasureWorkload {
+            kernel,
+            store_path,
+            cells,
+            token_budget,
+            frontier_every,
+            dependency_stride,
+        }) => {
+            let output = measure_workload_json(
+                kernel,
+                store_path.as_ref(),
+                cells,
+                token_budget,
+                frontier_every,
+                dependency_stride,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
             store_path,
@@ -269,6 +320,119 @@ fn durability_name(durability: KernelDurability) -> &'static str {
         KernelDurability::AppendLog => "append-log",
         KernelDurability::IndexedEmbedded => "indexed-embedded",
     }
+}
+
+fn workload_kernel_name(kernel: WorkloadKernelProfile) -> &'static str {
+    match kernel {
+        WorkloadKernelProfile::Memory => "memory",
+        WorkloadKernelProfile::File => "file",
+    }
+}
+
+fn workload_config(
+    cells: usize,
+    frontier_every: usize,
+    dependency_stride: usize,
+) -> Result<WorkloadConfig, Box<dyn std::error::Error>> {
+    let valid_from = Utc
+        .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid workload timestamp"))?;
+
+    Ok(WorkloadConfig {
+        cell_count: cells,
+        id_seed: 1_000,
+        anchor_prefix: "bench:world".to_string(),
+        project_scope: "continuitydb".to_string(),
+        valid_from,
+        frontier_every,
+        dependency_stride,
+    })
+}
+
+fn workload_checkout_request(
+    token_budget: i64,
+) -> Result<CheckoutRequest, Box<dyn std::error::Error>> {
+    Ok(CheckoutRequest {
+        semantic_anchor: None,
+        scope: Some(Scope::Project("continuitydb".to_string())),
+        valid_at: None,
+        system_at: None,
+        commit_id: None,
+        activation: None,
+        answerability_question: None,
+        evidence_source: None,
+        dependency_target: None,
+        dependency_kind: None,
+        minimum_confidence: Confidence::new(0.0)?,
+        token_budget,
+    })
+}
+
+fn workload_commit_time() -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
+    Utc.with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid workload commit timestamp").into())
+}
+
+fn measure_workload_json(
+    kernel: WorkloadKernelProfile,
+    store_path: Option<&PathBuf>,
+    cells: usize,
+    token_budget: i64,
+    frontier_every: usize,
+    dependency_stride: usize,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let workload =
+        generate_world_model_workload(workload_config(cells, frontier_every, dependency_stride)?)?;
+    let committed_at = workload_commit_time()?;
+    let request = workload_checkout_request(token_budget)?;
+
+    let measurement = match kernel {
+        WorkloadKernelProfile::Memory => {
+            let mut memory = MemoryKernel::default();
+            measure_ingest_and_checkout(&mut memory, &workload, committed_at, request)?
+        }
+        WorkloadKernelProfile::File => {
+            let path = store_path.ok_or_else(|| std::io::Error::other("store path is required"))?;
+            let mut file = continuitydb_kernel::FileKernel::open(path)?;
+            measure_ingest_and_checkout(&mut file, &workload, committed_at, request)?
+        }
+    };
+
+    Ok(workload_measurement_json(kernel, store_path, measurement))
+}
+
+fn workload_measurement_json(
+    kernel: WorkloadKernelProfile,
+    store_path: Option<&PathBuf>,
+    measurement: WorkloadMeasurement,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kernel": workload_kernel_name(kernel),
+        "store_path": store_path.map(|path| path.display().to_string()),
+        "workload": {
+            "cell_count": measurement.workload_summary.cell_count,
+            "frontier_count": measurement.workload_summary.frontier_count,
+            "dependency_count": measurement.workload_summary.dependency_count,
+            "total_token_cost": measurement.workload_summary.total_token_cost,
+        },
+        "ingest": {
+            "operation_count": measurement.ingest.operation_count,
+            "elapsed_nanos": measurement.ingest.elapsed.as_nanos(),
+        },
+        "checkout_operation": {
+            "operation_count": measurement.checkout_operation.operation_count,
+            "elapsed_nanos": measurement.checkout_operation.elapsed.as_nanos(),
+        },
+        "checkout": {
+            "matched_count": measurement.checkout.matched_count,
+            "selected_count": measurement.checkout.selected_count,
+            "alternative_count": measurement.checkout.alternative_count,
+            "frontier_count": measurement.checkout.frontier_count,
+            "selected_token_count": measurement.checkout.selected_token_count,
+        },
+    })
 }
 
 fn capabilities_json(capabilities: KernelCapabilities) -> serde_json::Value {

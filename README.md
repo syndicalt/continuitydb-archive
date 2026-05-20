@@ -11,6 +11,7 @@ The first milestone builds:
 - Core StateCell domain types.
 - Deterministic StateCell workload generation for benchmark and storage-engine comparisons.
 - Storage-kernel-generic deterministic workload measurement for ingest and checkout.
+- CLI workload measurement for memory and file-backed kernels.
 - A pluggable storage kernel trait.
 - An in-memory kernel for correctness tests.
 - Basic revision links.

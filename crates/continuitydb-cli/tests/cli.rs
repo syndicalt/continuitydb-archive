@@ -63,6 +63,84 @@ fn cli_demo_checkout_outputs_metadata_json() -> Result<(), Box<dyn std::error::E
 }
 
 #[test]
+fn cli_measure_workload_reports_memory_kernel_json() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["kernel"].as_str(), Some("memory"));
+    assert!(json["store_path"].is_null());
+    assert_eq!(json["workload"]["cell_count"].as_u64(), Some(8));
+    assert_eq!(json["workload"]["frontier_count"].as_u64(), Some(2));
+    assert_eq!(json["ingest"]["operation_count"].as_u64(), Some(8));
+    assert_eq!(
+        json["checkout_operation"]["operation_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(json["checkout"]["matched_count"].as_u64(), Some(8));
+    assert_eq!(json["checkout"]["selected_count"].as_u64(), Some(3));
+    assert_eq!(json["checkout"]["alternative_count"].as_u64(), Some(5));
+    Ok(())
+}
+
+#[test]
+fn cli_measure_workload_reports_file_kernel_json() -> Result<(), Box<dyn std::error::Error>> {
+    let store_path = temp_store_path("continuitydb-cli-measure-workload-file");
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("file")
+        .arg("--store-path")
+        .arg(&store_path)
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["kernel"].as_str(), Some("file"));
+    assert_eq!(
+        json["store_path"].as_str(),
+        Some(store_path.display().to_string().as_str())
+    );
+    assert_eq!(json["workload"]["cell_count"].as_u64(), Some(8));
+    assert_eq!(json["checkout"]["matched_count"].as_u64(), Some(8));
+    assert!(store_path.exists());
+
+    fs::remove_file(store_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_measure_workload_requires_file_store_path() -> Result<(), Box<dyn std::error::Error>> {
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("file")
+        .assert()
+        .failure()
+        .stderr(contains("store path is required"));
+
+    Ok(())
+}
+
+#[test]
 fn cli_checkout_query_executes_serialized_typed_query() -> Result<(), Box<dyn std::error::Error>> {
     let store_path = temp_store_path("continuitydb-cli-checkout-query-store");
     let query_path = temp_store_path("continuitydb-cli-checkout-query-query");
