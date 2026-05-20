@@ -64,6 +64,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuitydb-checkout"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "continuitydb-core",
+ "continuitydb-kernel",
+ "continuitydb-memory",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "continuitydb-core"
 version = "0.1.0"
 dependencies = [

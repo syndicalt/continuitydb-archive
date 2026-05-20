@@ -5,6 +5,7 @@ members = [
     "crates/continuitydb-kernel",
     "crates/continuitydb-memory",
     "crates/continuitydb-revision",
+    "crates/continuitydb-checkout",
 ]
 
 [workspace.package]
