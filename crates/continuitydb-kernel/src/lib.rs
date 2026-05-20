@@ -123,6 +123,9 @@ pub trait StorageKernel {
         &self,
         commit_id: CommitId,
     ) -> Result<Option<CommitManifest>, KernelError>;
+
+    /// Lists commit manifests in commit visibility order.
+    fn list_commit_manifests(&self) -> Result<Vec<CommitManifest>, KernelError>;
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -132,6 +135,7 @@ struct FileKernelIndex {
     anchors: HashMap<String, Vec<usize>>,
     commits: HashMap<CommitId, Vec<usize>>,
     manifests: HashMap<CommitId, CommitManifest>,
+    manifest_order: Vec<CommitId>,
 }
 
 impl FileKernelIndex {
@@ -160,6 +164,9 @@ impl FileKernelIndex {
             .entry(cell.commit_id)
             .or_default()
             .push(position);
+        if !self.manifests.contains_key(&cell.commit_id) {
+            self.manifest_order.push(cell.commit_id);
+        }
         self.manifests
             .entry(cell.commit_id)
             .and_modify(|manifest| manifest.cell_ids.push(cell.id))
@@ -184,6 +191,13 @@ impl FileKernelIndex {
 
     fn manifest_by_id(&self, commit_id: CommitId) -> Option<CommitManifest> {
         self.manifests.get(&commit_id).cloned()
+    }
+
+    fn list_manifests(&self) -> Vec<CommitManifest> {
+        self.manifest_order
+            .iter()
+            .filter_map(|commit_id| self.manifests.get(commit_id).cloned())
+            .collect()
     }
 }
 
@@ -427,6 +441,10 @@ impl StorageKernel for FileKernel {
     ) -> Result<Option<CommitManifest>, KernelError> {
         Ok(self.index.manifest_by_id(commit_id))
     }
+
+    fn list_commit_manifests(&self) -> Result<Vec<CommitManifest>, KernelError> {
+        Ok(self.index.list_manifests())
+    }
 }
 
 #[cfg(test)]
@@ -653,6 +671,41 @@ mod tests {
                 .cell_ids,
             vec![first.id]
         );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_reconstructs_commit_manifest_listing_after_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-manifest-list");
+        let first_time = test_commit_time()?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let first = sample_cell("project:continuitydb:list-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:list-second", 0.83, 15)?;
+        let expected_first_ids = vec![first.id];
+        let expected_second_ids = vec![second.id];
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at_with_commit_id(vec![first], first_time, first_commit)?;
+            kernel.append_cells_at_with_commit_id(vec![second], second_time, second_commit)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let manifests = reopened.list_commit_manifests()?;
+
+        assert_eq!(manifests.len(), 2);
+        assert_eq!(manifests[0].commit_id, first_commit);
+        assert_eq!(manifests[0].committed_at, first_time);
+        assert_eq!(manifests[0].cell_ids, expected_first_ids);
+        assert_eq!(manifests[1].commit_id, second_commit);
+        assert_eq!(manifests[1].committed_at, second_time);
+        assert_eq!(manifests[1].cell_ids, expected_second_ids);
         fs::remove_file(path)?;
         Ok(())
     }

@@ -360,6 +360,12 @@ mod tests {
         ) -> Result<Option<continuitydb_core::CommitManifest>, KernelError> {
             Ok(None)
         }
+
+        fn list_commit_manifests(
+            &self,
+        ) -> Result<Vec<continuitydb_core::CommitManifest>, KernelError> {
+            Ok(Vec::new())
+        }
     }
 
     fn test_commit_time() -> Result<DateTime<Utc>, Box<dyn std::error::Error>> {

@@ -145,6 +145,11 @@ impl<K: StorageKernel> ContinuityDb<K> {
             .map_err(Into::into)
     }
 
+    /// Returns commit manifests in database visibility order.
+    pub fn commit_manifests(&self) -> Result<Vec<CommitManifest>, ContinuityError> {
+        self.kernel.list_commit_manifests().map_err(Into::into)
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -426,6 +431,38 @@ mod tests {
         let db = ContinuityDb::new(MemoryKernel::default());
 
         assert!(db.commit_manifest(CommitId::new())?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn api_returns_commit_manifests_in_kernel_order() -> Result<(), Box<dyn std::error::Error>> {
+        let first_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:list-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:list-second", 0.83, 15)?;
+
+        db.ingest_cells_at_with_commit_id(vec![first], first_time, first_commit)?;
+        db.ingest_cells_at_with_commit_id(vec![second], second_time, second_commit)?;
+
+        let manifests = db.commit_manifests()?;
+        assert_eq!(
+            manifests
+                .iter()
+                .map(|manifest| manifest.commit_id)
+                .collect::<Vec<_>>(),
+            vec![first_commit, second_commit]
+        );
+        assert_eq!(manifests[0].committed_at, first_time);
+        assert_eq!(manifests[1].committed_at, second_time);
         Ok(())
     }
 

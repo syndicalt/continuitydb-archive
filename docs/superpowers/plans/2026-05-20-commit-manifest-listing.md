@@ -27,7 +27,7 @@
 - Modify: `crates/continuitydb-memory/src/lib.rs`
 - Modify: `crates/continuitydb-checkout/src/lib.rs`
 
-- [ ] **Step 1: Write failing memory tests**
+- [x] **Step 1: Write failing memory tests**
 
 Add in `crates/continuitydb-memory/src/lib.rs` tests:
 
@@ -74,13 +74,13 @@ fn memory_kernel_omits_empty_batches_from_commit_manifest_listing(
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p continuitydb-memory list_commit_manifests`
 
 Expected: FAIL because `list_commit_manifests` does not exist.
 
-- [ ] **Step 3: Extend trait and memory implementation**
+- [x] **Step 3: Extend trait and memory implementation**
 
 In `crates/continuitydb-kernel/src/lib.rs`, add to `StorageKernel`:
 
@@ -127,7 +127,7 @@ fn list_commit_manifests(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p continuitydb-memory list_commit_manifests`
 
@@ -138,7 +138,7 @@ Expected: PASS.
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Write failing file tests**
+- [x] **Step 1: Write failing file tests**
 
 Add in `crates/continuitydb-kernel/src/lib.rs` tests:
 
@@ -179,13 +179,13 @@ fn file_kernel_reconstructs_commit_manifest_listing_after_reopen(
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p continuitydb-kernel list_commit_manifests`
 
 Expected: FAIL until file index listing is implemented.
 
-- [ ] **Step 3: Implement file index ordering**
+- [x] **Step 3: Implement file index ordering**
 
 Add `manifest_order: Vec<CommitId>` to `FileKernelIndex`.
 
@@ -216,7 +216,7 @@ fn list_commit_manifests(&self) -> Result<Vec<CommitManifest>, KernelError> {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p continuitydb-kernel list_commit_manifests`
 
@@ -227,7 +227,7 @@ Expected: PASS.
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Write failing API test**
+- [x] **Step 1: Write failing API test**
 
 Add in `crates/continuitydb-api/src/lib.rs` tests:
 
@@ -262,13 +262,13 @@ fn api_returns_commit_manifests_in_kernel_order() -> Result<(), Box<dyn std::err
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p continuitydb-api commit_manifests`
 
 Expected: FAIL because `ContinuityDb::commit_manifests` does not exist.
 
-- [ ] **Step 3: Implement API method**
+- [x] **Step 3: Implement API method**
 
 Add:
 
@@ -279,7 +279,7 @@ pub fn commit_manifests(&self) -> Result<Vec<CommitManifest>, ContinuityError> {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p continuitydb-api commit_manifests`
 
@@ -292,7 +292,7 @@ Expected: PASS.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-commit-manifest-listing.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 In `README.md`, add:
 
@@ -306,7 +306,7 @@ In `docs/roadmap.md`, add Storage Kernel milestone 12:
 12. Add commit manifest timeline listing. Implemented ordered `list_commit_manifests` support across the storage kernel, memory/file kernels, and native API so audit and sync callers can discover commit boundaries deterministically.
 ```
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run:
 
@@ -318,7 +318,7 @@ cargo test -p continuitydb-api commit_manifests
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -332,7 +332,7 @@ git diff --check
 
 Expected: all PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
