@@ -5,8 +5,10 @@ use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
 #[cfg(feature = "steward")]
-use continuitydb_core::ActivationState;
-use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
+use continuitydb_core::{ActivationState, Answerability};
+use continuitydb_core::{
+    CommitId, CommitManifest, CoreError, StateCell, StateCellId, UtilityFeedback,
+};
 use continuitydb_kernel::{
     CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelStatus,
     KernelCapabilities, KernelError, KernelRequirements, StorageKernel,
@@ -15,13 +17,13 @@ use continuitydb_query::{
     decode_query_json, parse_query_text, CheckoutQuery, ContinuityQuery, QueryEnvelopeError,
     QueryError, QueryTextError,
 };
-#[cfg(feature = "steward")]
-use continuitydb_revision::revise_activation_state;
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
     ConflictResolutionRecommendation, ConflictResolutionScan,
 };
+#[cfg(feature = "steward")]
+use continuitydb_revision::{revise_activation_state, revise_answerability};
 #[cfg(feature = "steward")]
 use continuitydb_steward::{
     BorrowedKernelProposalStore, ConflictResolutionSteward, FrontierSubscriptionRunner,
@@ -64,6 +66,9 @@ pub enum ContinuityError {
     #[cfg(feature = "steward")]
     #[error("steward proposal action is not supported by this application API")]
     UnsupportedStewardProposalAction,
+    /// Core semantic validation failure.
+    #[error(transparent)]
+    Core(#[from] CoreError),
     /// Raw typed query JSON could not be decoded.
     #[error("query JSON is invalid")]
     QueryJson,
@@ -576,6 +581,30 @@ impl<K: StorageKernel> ContinuityDb<K> {
 
         let previous = self.lookup_one_cell(cell_id)?;
         let revision = revise_activation_state(&previous, ActivationState::Frontier);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        Ok(Some(successor_id))
+    }
+
+    /// Applies an accepted LabelAnswerability Steward proposal as an append-only successor StateCell.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_label_answerability_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Option<StateCellId>, ContinuityError> {
+        if record.decision().outcome() == ProposalOutcome::Rejected {
+            return Ok(None);
+        }
+
+        let (cell_id, questions) = match record.proposal().action() {
+            StewardAction::LabelAnswerability { cell_id, questions } => (*cell_id, questions),
+            _ => return Err(ContinuityError::UnsupportedStewardProposalAction),
+        };
+
+        let answerability = Answerability::new(questions.clone())?;
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_answerability(&previous, answerability);
         let successor_id = revision.cell.id;
         self.kernel.append_cell_at(revision.cell, committed_at)?;
         Ok(Some(successor_id))
@@ -3671,6 +3700,165 @@ WHERE scope = project("continuitydb")
             db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
 
         let result = db.apply_accepted_mark_frontier_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_label_answerability_application_appends_successor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 15, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:apply-answerability", 0.91, 12)?,
+            initial_commit,
+        )?;
+        let questions = vec![
+            "what changed?".to_string(),
+            "what needs review?".to_string(),
+        ];
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LabelAnswerability {
+                cell_id: original_id,
+                questions: questions.clone(),
+            },
+            "The cell can answer updated review questions.",
+            vec!["test://answerability-apply".to_string()],
+            initial_commit,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), initial_commit)?;
+
+        let successor_id = db
+            .apply_accepted_label_answerability_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected successor"))?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(
+            original.answerability.questions(),
+            &["what should the agent know?".to_string()]
+        );
+        assert_eq!(successor.answerability.questions(), questions.as_slice());
+        assert_eq!(successor.system_time.from(), apply_commit);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_label_answerability_application_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-answerability", 0.91, 12)?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LabelAnswerability {
+                cell_id: original_id,
+                questions: vec!["what changed?".to_string()],
+            },
+            "Policy rejected this answerability application.",
+            vec!["test://answerability-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied = db.apply_accepted_label_answerability_proposal_at(&record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_label_answerability_application_rejects_unsupported_accepted_action(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: StateCellId::new(),
+            },
+            "Frontier application belongs to a different method.",
+            vec!["test://unsupported-answerability-apply".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_label_answerability_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::UnsupportedStewardProposalAction)
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_label_answerability_application_reports_missing_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_id = StateCellId::new();
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LabelAnswerability {
+                cell_id: missing_id,
+                questions: vec!["what changed?".to_string()],
+            },
+            "Missing target should be reported before application.",
+            vec!["test://answerability-missing".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_label_answerability_proposal_at(&record, committed_at);
 
         assert!(matches!(
             result,

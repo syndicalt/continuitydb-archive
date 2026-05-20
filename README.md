@@ -40,6 +40,7 @@ The first milestone builds:
 - Native feature-gated Steward conflict-resolution audit API.
 - Native feature-gated Steward frontier/watch audit API.
 - Native feature-gated Steward `MarkFrontier` application API.
+- Native feature-gated Steward `LabelAnswerability` application API.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.

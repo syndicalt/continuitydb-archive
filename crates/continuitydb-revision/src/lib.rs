@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use continuitydb_core::{ActivationState, SemanticAnchor, StateCell, StateCellId, UtilityFeedback};
+use continuitydb_core::{
+    ActivationState, Answerability, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
+};
 use serde::{Deserialize, Serialize};
 
 /// Relationship between two StateCell versions.
@@ -82,6 +84,30 @@ pub fn revise_activation_state(
     revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
 
     ActivationStateRevision { cell, revision }
+}
+
+/// Result of applying answerability labels as an append-only StateCell revision.
+pub struct AnswerabilityRevision {
+    /// New StateCell version carrying the revised answerability labels.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with updated answerability labels.
+pub fn revise_answerability(
+    previous: &StateCell,
+    answerability: Answerability,
+) -> AnswerabilityRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.answerability = answerability;
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    AnswerabilityRevision { cell, revision }
 }
 
 /// Deterministic reason two StateCell versions conflict.
@@ -333,8 +359,9 @@ mod tests {
 
     use super::{
         detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
-        revise_activation_state, revise_utility_feedback, scan_cell_conflicts, CellConflictKind,
-        ConflictResolutionKind, RevisionGraph, RevisionLinkKind,
+        revise_activation_state, revise_answerability, revise_utility_feedback,
+        scan_cell_conflicts, CellConflictKind, ConflictResolutionKind, RevisionGraph,
+        RevisionLinkKind,
     };
 
     fn timestamp(day: u32) -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
@@ -452,6 +479,38 @@ mod tests {
         assert_ne!(revised.cell.id, previous.id);
         assert_eq!(previous.activation, ActivationState::Active);
         assert_eq!(revised.cell.activation, ActivationState::Frontier);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn answerability_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let answerability = Answerability::new(vec![
+            "what changed?".to_string(),
+            "what needs review?".to_string(),
+        ])?;
+
+        let revised = revise_answerability(&previous, answerability.clone());
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(
+            previous.answerability.questions(),
+            &["what feedback applies?".to_string()]
+        );
+        assert_eq!(revised.cell.answerability, answerability);
         assert_eq!(
             revised
                 .revision
