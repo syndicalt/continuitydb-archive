@@ -22,7 +22,7 @@
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add direct accessor test**
+- [x] **Step 1: Add direct accessor test**
 
 Add this test to the existing test module in `crates/continuitydb-query/src/lib.rs`:
 
@@ -54,7 +54,7 @@ fn checkout_query_accessors_expose_typed_semantics() -> Result<(), Box<dyn std::
 }
 ```
 
-- [ ] **Step 2: Add envelope decode accessor test**
+- [x] **Step 2: Add envelope decode accessor test**
 
 Add this test after the direct accessor test:
 
@@ -80,7 +80,7 @@ fn decoded_query_envelope_can_be_inspected_before_compile(
 }
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -95,7 +95,7 @@ Expected: FAIL because `CheckoutQuery` does not have accessor methods.
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add accessor methods**
+- [x] **Step 1: Add accessor methods**
 
 Add these methods inside the existing `impl CheckoutQuery` block after `new`:
 
@@ -121,7 +121,7 @@ Add these methods inside the existing `impl CheckoutQuery` block after `new`:
     }
 ```
 
-- [ ] **Step 2: Verify GREEN**
+- [x] **Step 2: Verify GREEN**
 
 Run:
 
@@ -132,7 +132,7 @@ cargo test -p continuitydb-query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit implementation**
+- [x] **Step 3: Commit implementation**
 
 ```bash
 git add crates/continuitydb-query/src/lib.rs docs/superpowers/plans/2026-05-20-query-introspection.md

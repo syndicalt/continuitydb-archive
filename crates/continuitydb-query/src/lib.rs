@@ -79,6 +79,26 @@ impl CheckoutQuery {
         }
     }
 
+    /// Returns query task identity and answerability intent.
+    pub fn task(&self) -> &QueryTask {
+        &self.task
+    }
+
+    /// Returns deterministic checkout requirements.
+    pub fn requirements(&self) -> &QueryRequirements {
+        &self.requirements
+    }
+
+    /// Returns the requested materialization shape.
+    pub fn return_shape(&self) -> QueryReturnShape {
+        self.return_shape
+    }
+
+    /// Returns the requested optimization policy.
+    pub fn optimization(&self) -> QueryOptimization {
+        self.optimization
+    }
+
     /// Replaces deterministic checkout requirements.
     pub fn with_requirements(mut self, requirements: QueryRequirements) -> Self {
         self.requirements = requirements;
@@ -520,5 +540,55 @@ mod tests {
             decode_query_json(b"{not valid json}\n"),
             Err(QueryEnvelopeError::InvalidJson)
         );
+    }
+
+    #[test]
+    fn checkout_query_accessors_expose_typed_semantics() -> Result<(), Box<dyn std::error::Error>> {
+        let valid_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 10, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let requirements = QueryRequirements {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: Some(valid_at),
+            minimum_confidence: Confidence::new(0.7)?,
+            token_budget: 1200,
+            ..QueryRequirements::default()
+        };
+        let query = CheckoutQuery::new(QueryTask::new("stored-facts", "what is stored?"))
+            .with_requirements(requirements.clone())
+            .with_return_shape(QueryReturnShape::CellsOnly)
+            .with_optimization(QueryOptimization::TokenCostOnly);
+
+        assert_eq!(query.task().name, "stored-facts");
+        assert_eq!(query.task().answerability_question, "what is stored?");
+        assert_eq!(query.requirements(), &requirements);
+        assert_eq!(query.return_shape(), QueryReturnShape::CellsOnly);
+        assert_eq!(query.optimization(), QueryOptimization::TokenCostOnly);
+        Ok(())
+    }
+
+    #[test]
+    fn decoded_query_envelope_can_be_inspected_before_compile(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let query = ContinuityQuery::Checkout(
+            CheckoutQuery::new(QueryTask::new("stored-facts", "what is stored?"))
+                .with_return_shape(QueryReturnShape::CellsOnly),
+        );
+        let encoded = encode_query_json(query)?;
+        let decoded = decode_query_json(&encoded)?;
+
+        let ContinuityQuery::Checkout(checkout) = decoded;
+        assert_eq!(checkout.task().name, "stored-facts");
+        assert_eq!(checkout.return_shape(), QueryReturnShape::CellsOnly);
+        let error = checkout
+            .compile_checkout()
+            .err()
+            .ok_or_else(|| std::io::Error::other("unsupported return shape should fail"))?;
+        assert_eq!(
+            error,
+            QueryError::UnsupportedReturnShape(QueryReturnShape::CellsOnly)
+        );
+        Ok(())
     }
 }
