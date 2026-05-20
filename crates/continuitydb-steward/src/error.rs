@@ -23,6 +23,12 @@ pub enum StewardError {
     /// Local model executable failed to produce a usable response.
     #[error("local model executable failed")]
     LocalModelExecutionFailed,
+    /// Local model benchmark baseline store I/O failed.
+    #[error("local model benchmark baseline store I/O failed")]
+    LocalModelBenchmarkBaselineStoreIo,
+    /// Local model benchmark baseline store content could not be decoded.
+    #[error("local model benchmark baseline store content is corrupt")]
+    LocalModelBenchmarkBaselineStoreCorrupt,
     /// Frontier subscription fields must be non-empty.
     #[error("frontier subscription must include signals and citation")]
     EmptyFrontierSubscription,

@@ -3,10 +3,11 @@
 use chrono::{DateTime, Utc};
 use continuitydb_core::{SemanticAnchor, StateCellId};
 use continuitydb_revision::RevisionLinkKind;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
-    io::Write,
+    fs::{File, OpenOptions},
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -309,7 +310,7 @@ impl StewardEvaluationSuite {
 }
 
 /// Deterministic evaluation report for an entire suite.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StewardEvaluationReport {
     case_reports: Vec<StewardEvaluationCaseReport>,
 }
@@ -329,7 +330,7 @@ impl StewardEvaluationReport {
 }
 
 /// Deterministic evaluation report for one case.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StewardEvaluationCaseReport {
     name: String,
     failures: Vec<StewardEvaluationFailure>,
@@ -353,7 +354,7 @@ impl StewardEvaluationCaseReport {
 }
 
 /// Deterministic local model evaluation failure reason.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum StewardEvaluationFailure {
     /// The local model backend or decoder failed.
     ModelError,
@@ -483,6 +484,152 @@ impl LocalModelBenchmarkReport {
     /// Returns whether every benchmark case passed.
     pub fn passed(&self) -> bool {
         self.evaluation.passed()
+    }
+}
+
+/// Durable baseline record for an executable local model benchmark run.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelBenchmarkBaseline {
+    candidate_model_id: String,
+    candidate_role: String,
+    evaluation: StewardEvaluationReport,
+    recorded_at: DateTime<Utc>,
+}
+
+impl LocalModelBenchmarkBaseline {
+    /// Creates a durable baseline record from a benchmark report and timestamp.
+    pub fn from_report(report: LocalModelBenchmarkReport, recorded_at: DateTime<Utc>) -> Self {
+        Self {
+            candidate_model_id: report.candidate.model_id().to_string(),
+            candidate_role: report.candidate.role().to_string(),
+            evaluation: report.evaluation,
+            recorded_at,
+        }
+    }
+
+    /// Returns the evaluated model identifier.
+    pub fn candidate_model_id(&self) -> &str {
+        &self.candidate_model_id
+    }
+
+    /// Returns the evaluated model role.
+    pub fn candidate_role(&self) -> &str {
+        &self.candidate_role
+    }
+
+    /// Returns the recorded evaluation report.
+    pub fn evaluation(&self) -> &StewardEvaluationReport {
+        &self.evaluation
+    }
+
+    /// Returns when this baseline was recorded.
+    pub fn recorded_at(&self) -> DateTime<Utc> {
+        self.recorded_at
+    }
+
+    /// Returns whether every benchmark case passed.
+    pub fn passed(&self) -> bool {
+        self.evaluation.passed()
+    }
+}
+
+/// Storage contract for append-only local model benchmark baselines.
+pub trait LocalModelBenchmarkBaselineStore {
+    /// Appends a benchmark baseline.
+    fn append_baseline(
+        &mut self,
+        baseline: LocalModelBenchmarkBaseline,
+    ) -> Result<(), StewardError>;
+
+    /// Lists all benchmark baselines in insertion order.
+    fn list_baselines(&self) -> Result<Vec<LocalModelBenchmarkBaseline>, StewardError>;
+}
+
+/// In-memory local model benchmark baseline store for correctness tests.
+#[derive(Default)]
+pub struct MemoryLocalModelBenchmarkBaselineStore {
+    baselines: Vec<LocalModelBenchmarkBaseline>,
+}
+
+impl LocalModelBenchmarkBaselineStore for MemoryLocalModelBenchmarkBaselineStore {
+    fn append_baseline(
+        &mut self,
+        baseline: LocalModelBenchmarkBaseline,
+    ) -> Result<(), StewardError> {
+        self.baselines.push(baseline);
+        Ok(())
+    }
+
+    fn list_baselines(&self) -> Result<Vec<LocalModelBenchmarkBaseline>, StewardError> {
+        Ok(self.baselines.clone())
+    }
+}
+
+/// JSONL file-backed local model benchmark baseline store.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileLocalModelBenchmarkBaselineStore {
+    path: PathBuf,
+}
+
+impl FileLocalModelBenchmarkBaselineStore {
+    /// Opens a JSONL benchmark baseline store at the supplied path.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, StewardError> {
+        let path = path.as_ref().to_path_buf();
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|_error| StewardError::LocalModelBenchmarkBaselineStoreIo)?;
+
+        Ok(Self { path })
+    }
+
+    /// Returns the backing file path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn read_baselines(&self) -> Result<Vec<LocalModelBenchmarkBaseline>, StewardError> {
+        let file = File::open(&self.path)
+            .map_err(|_error| StewardError::LocalModelBenchmarkBaselineStoreIo)?;
+        let reader = BufReader::new(file);
+        let mut baselines = Vec::new();
+
+        for line in reader.lines() {
+            let line = line.map_err(|_error| StewardError::LocalModelBenchmarkBaselineStoreIo)?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            baselines.push(
+                serde_json::from_str(&line)
+                    .map_err(|_error| StewardError::LocalModelBenchmarkBaselineStoreCorrupt)?,
+            );
+        }
+
+        Ok(baselines)
+    }
+}
+
+impl LocalModelBenchmarkBaselineStore for FileLocalModelBenchmarkBaselineStore {
+    fn append_baseline(
+        &mut self,
+        baseline: LocalModelBenchmarkBaseline,
+    ) -> Result<(), StewardError> {
+        let encoded = serde_json::to_string(&baseline)
+            .map_err(|_error| StewardError::LocalModelBenchmarkBaselineStoreCorrupt)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|_error| StewardError::LocalModelBenchmarkBaselineStoreIo)?;
+
+        file.write_all(encoded.as_bytes())
+            .and_then(|()| file.write_all(b"\n"))
+            .map_err(|_error| StewardError::LocalModelBenchmarkBaselineStoreIo)
+    }
+
+    fn list_baselines(&self) -> Result<Vec<LocalModelBenchmarkBaseline>, StewardError> {
+        self.read_baselines()
     }
 }
 

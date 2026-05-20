@@ -21,9 +21,11 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    small_model_candidates, LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend,
-    LocalModelBenchmark, LocalModelBenchmarkReport, LocalModelRequest, LocalModelSteward,
-    LocalModelStewardInput, SmallModelCandidate, StewardEvaluationCase,
+    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
+    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkReport,
+    LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
+    MemoryLocalModelBenchmarkBaselineStore, SmallModelCandidate, StewardEvaluationCase,
     StewardEvaluationCaseReport, StewardEvaluationFailure, StewardEvaluationReport,
     StewardEvaluationSuite,
 };
@@ -35,8 +37,10 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 mod tests {
     #[cfg(feature = "local-model")]
     use super::{
-        small_model_candidates, LocalModelBenchmark, StewardEvaluationCase,
-        StewardEvaluationFailure, StewardEvaluationSuite,
+        small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalModelBenchmark,
+        LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
+        MemoryLocalModelBenchmarkBaselineStore, StewardEvaluationCase, StewardEvaluationFailure,
+        StewardEvaluationSuite,
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
@@ -91,6 +95,11 @@ mod tests {
     }
 
     fn temp_frontier_subscription_store_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{name}-{:?}.jsonl", ProposalId::new()))
+    }
+
+    #[cfg(feature = "local-model")]
+    fn temp_local_model_baseline_store_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("{name}-{:?}.jsonl", ProposalId::new()))
     }
 
@@ -936,6 +945,127 @@ mod tests {
                 },
             ]
         );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_baseline_preserves_report_metadata(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let script = write_local_model_script(
+            "continuitydb-local-model-baseline-ok",
+            &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier baseline",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+
+        let baseline =
+            LocalModelBenchmarkBaseline::from_report(benchmark.run(steward()?), created_at());
+
+        assert!(baseline.passed());
+        assert_eq!(baseline.candidate_model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
+        assert_eq!(baseline.candidate_role(), "default-feasibility");
+        assert_eq!(baseline.recorded_at(), created_at());
+        assert_eq!(baseline.evaluation().case_reports().len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn memory_local_model_benchmark_baseline_store_lists_in_order(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let first = LocalModelBenchmarkBaseline::from_report(
+            LocalModelBenchmark::new(
+                small_model_candidates()[0],
+                LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("sh")),
+                StewardEvaluationSuite::new(Vec::new()),
+            )
+            .run(steward()?),
+            created_at(),
+        );
+        let second = LocalModelBenchmarkBaseline::from_report(
+            LocalModelBenchmark::new(
+                small_model_candidates()[1],
+                LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("sh")),
+                StewardEvaluationSuite::new(Vec::new()),
+            )
+            .run(steward()?),
+            created_at(),
+        );
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+
+        store.append_baseline(first.clone())?;
+        store.append_baseline(second.clone())?;
+
+        let baselines = store.list_baselines()?;
+        assert_eq!(baselines, vec![first, second]);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn file_local_model_benchmark_baseline_store_persists_across_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_local_model_baseline_store_path("continuitydb-local-model-baselines");
+        let baseline = LocalModelBenchmarkBaseline::from_report(
+            LocalModelBenchmark::new(
+                small_model_candidates()[0],
+                LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("sh")),
+                StewardEvaluationSuite::new(Vec::new()),
+            )
+            .run(steward()?),
+            created_at(),
+        );
+
+        {
+            let mut store = FileLocalModelBenchmarkBaselineStore::open(&path)?;
+            store.append_baseline(baseline.clone())?;
+        }
+
+        let reopened = FileLocalModelBenchmarkBaselineStore::open(&path)?;
+        assert_eq!(reopened.list_baselines()?, vec![baseline]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn file_local_model_benchmark_baseline_store_rejects_invalid_jsonl(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path =
+            temp_local_model_baseline_store_path("continuitydb-local-model-baselines-invalid");
+        fs::write(&path, "{not valid json}\n")?;
+        let store = FileLocalModelBenchmarkBaselineStore::open(&path)?;
+
+        let result = store.list_baselines();
+
+        assert!(matches!(
+            result,
+            Err(StewardError::LocalModelBenchmarkBaselineStoreCorrupt)
+        ));
+        fs::remove_file(path)?;
         Ok(())
     }
 
