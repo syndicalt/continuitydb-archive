@@ -11,7 +11,10 @@ mod proposal;
 
 pub use error::StewardError;
 pub use frontier::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
-pub use ledger::{ProposalAuditRecord, ProposalLedger};
+pub use ledger::{
+    MemoryProposalStore, ProposalAuditRecord, ProposalLedger, ProposalLedgerStore,
+    StoredProposalLedger,
+};
 #[cfg(feature = "local-model")]
 pub use local_model::{
     small_model_candidates, LocalModelBackend, LocalModelRequest, LocalModelSteward,
@@ -40,9 +43,9 @@ mod tests {
     #[cfg(feature = "local-model")]
     use super::{LocalModelBackend, LocalModelRequest, LocalModelSteward, LocalModelStewardInput};
     use super::{
-        MockSteward, MockStewardInput, MockStewardRule, ProposalDecision, ProposalId,
-        ProposalLedger, ProposalOutcome, ProposalPolicy, StewardAction, StewardError,
-        StewardIdentity, StewardProposal,
+        MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule, ProposalDecision,
+        ProposalId, ProposalLedger, ProposalOutcome, ProposalPolicy, StewardAction, StewardError,
+        StewardIdentity, StewardProposal, StoredProposalLedger,
     };
 
     fn created_at() -> chrono::DateTime<Utc> {
@@ -845,6 +848,68 @@ mod tests {
         }
 
         assert_eq!(ledger.records().len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn stored_proposal_ledger_records_in_store_order() -> Result<(), Box<dyn std::error::Error>> {
+        let first = valid_link_revision()?;
+        let second = StewardProposal::new(
+            ProposalId::new(),
+            steward()?,
+            StewardAction::RequestVerification {
+                cell_id: Some(StateCellId::new()),
+                request: "Refresh stale evidence.".to_string(),
+            },
+            "The watched cell needs evidence refresh.",
+            vec!["test://stale".to_string()],
+            created_at(),
+        )?;
+        let policy = ProposalPolicy::strict();
+        let mut ledger = StoredProposalLedger::new(MemoryProposalStore::default());
+
+        ledger.record(first.clone(), policy.evaluate(&first, created_at()))?;
+        ledger.record(second.clone(), policy.evaluate(&second, created_at()))?;
+
+        let records = ledger.records()?;
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].proposal().id(), first.id());
+        assert_eq!(records[1].proposal().id(), second.id());
+        Ok(())
+    }
+
+    #[test]
+    fn stored_proposal_ledger_gets_record_by_id() -> Result<(), Box<dyn std::error::Error>> {
+        let proposal = valid_link_revision()?;
+        let decision = ProposalPolicy::strict().evaluate(&proposal, created_at());
+        let mut ledger = StoredProposalLedger::new(MemoryProposalStore::default());
+
+        ledger.record(proposal.clone(), decision)?;
+
+        let record = ledger.record_by_id(proposal.id())?;
+        assert_eq!(
+            record.map(|record| record.proposal().id()),
+            Some(proposal.id())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stored_proposal_ledger_rejects_mismatch_without_mutating_store(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposal = valid_link_revision()?;
+        let mismatched_decision = ProposalDecision::new(
+            ProposalId::new(),
+            ProposalOutcome::Accepted,
+            vec!["policy:structurally-valid".to_string()],
+            created_at(),
+        );
+        let mut ledger = StoredProposalLedger::new(MemoryProposalStore::default());
+
+        let result = ledger.record(proposal, mismatched_decision);
+
+        assert!(matches!(result, Err(StewardError::MismatchedDecision)));
+        assert!(ledger.records()?.is_empty());
         Ok(())
     }
 }

@@ -15,6 +15,7 @@ The first milestone builds:
 - Deterministic checkout.
 - Audit traces.
 - Deterministic Steward proposal substrate.
+- Pluggable proposal audit ledger store contract.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
 - Fixed Steward proposal-quality evaluation harness.
