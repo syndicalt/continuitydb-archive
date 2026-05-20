@@ -157,6 +157,7 @@ struct LocalModelBundleValidation {
     manifest: LocalModelBundleManifest,
     benchmark_report: serde_json::Value,
     changed_case_report: serde_json::Value,
+    response_artifact_manifest: serde_json::Value,
 }
 
 #[cfg(feature = "local-model")]
@@ -713,6 +714,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "manifest": local_model_bundle_manifest_json(Some(&validation.manifest)),
                 "benchmark_report": validation.benchmark_report,
                 "changed_case_report": validation.changed_case_report,
+                "response_artifact_manifest": validation.response_artifact_manifest,
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -1645,6 +1647,8 @@ fn validate_local_model_bundle_manifest(
     }
     let changed_case_report =
         validate_local_model_changed_case_report_manifest(artifact_dir, &manifest)?;
+    let response_artifact_manifest =
+        validate_local_model_response_artifact_manifest(artifact_dir, &manifest)?;
 
     Ok(LocalModelBundleValidation {
         manifest: LocalModelBundleManifest {
@@ -1658,7 +1662,59 @@ fn validate_local_model_bundle_manifest(
             "report_bytes": manifest_report_payload_text.len(),
         }),
         changed_case_report,
+        response_artifact_manifest,
     })
+}
+
+#[cfg(feature = "local-model")]
+fn validate_local_model_response_artifact_manifest(
+    artifact_dir: &Path,
+    manifest: &serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if manifest["response_artifact_manifest"].is_null() {
+        return Ok(serde_json::Value::Null);
+    }
+
+    let manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let expected_manifest_path = manifest_path.display().to_string();
+    let manifest_response_path =
+        required_json_string(&manifest["response_artifact_manifest"], "manifest_path")?;
+    if manifest_response_path != expected_manifest_path {
+        return Err(std::io::Error::other(
+            "local model benchmark manifest response artifact manifest path mismatch",
+        )
+        .into());
+    }
+
+    let manifest_text = std::fs::read_to_string(&manifest_path)?;
+    let manifest_response_bytes =
+        required_json_u64(&manifest["response_artifact_manifest"], "manifest_bytes")?;
+    if manifest_response_bytes != manifest_text.len() as u64 {
+        return Err(std::io::Error::other(
+            "local model benchmark manifest response artifact manifest byte count mismatch",
+        )
+        .into());
+    }
+
+    let manifest_response_fingerprint = required_json_string(
+        &manifest["response_artifact_manifest"],
+        "manifest_fingerprint",
+    )?;
+    let current_response_fingerprint = local_model_contract_fingerprint(&manifest_text);
+    if manifest_response_fingerprint != current_response_fingerprint {
+        return Err(std::io::Error::other(
+            "local model benchmark manifest response artifact manifest fingerprint mismatch",
+        )
+        .into());
+    }
+
+    Ok(serde_json::json!({
+        "manifest_path": manifest_path.display().to_string(),
+        "manifest_fingerprint": current_response_fingerprint,
+        "manifest_bytes": manifest_text.len(),
+    }))
 }
 
 #[cfg(feature = "local-model")]

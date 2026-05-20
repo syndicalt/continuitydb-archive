@@ -158,6 +158,7 @@ The first milestone builds:
 - Durable local model response fingerprints.
 - CLI local model benchmark response artifact directory.
 - CLI local model response artifact manifests.
+- CLI local model response artifact manifest metadata validation.
 - CLI local model benchmark artifact bundle directory.
 - CLI local model benchmark bundle manifests.
 - CLI local model benchmark report artifact metadata.
