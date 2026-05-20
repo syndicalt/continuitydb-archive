@@ -347,6 +347,20 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert_eq!(
+        json["response_fingerprints"][0]["case_name"].as_str(),
+        Some("insufficient evidence uncertainty")
+    );
+    assert_eq!(
+        json["response_fingerprints"][0]["captured"].as_bool(),
+        Some(true)
+    );
+    assert!(json["response_fingerprints"][0]["response_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["response_fingerprints"][0]["response_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    assert_eq!(
         json["baseline_path"].as_str(),
         Some(baseline_path.display().to_string().as_str())
     );
@@ -380,6 +394,14 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert_eq!(
         records[0]["grammar_fingerprint"].as_str(),
         json["grammar_fingerprint"].as_str()
+    );
+    assert_eq!(
+        records[0]["response_fingerprints"].as_array().map(Vec::len),
+        Some(9)
+    );
+    assert_eq!(
+        records[0]["response_fingerprints"][0]["response_fingerprint"].as_str(),
+        json["response_fingerprints"][0]["response_fingerprint"].as_str()
     );
 
     fs::remove_file(executable_path)?;

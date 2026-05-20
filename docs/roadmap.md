@@ -274,6 +274,7 @@ Storage kernel
 62. Add default local-model create-cell-draft evaluation. Expanded the fixed Steward benchmark suite with a deterministic `CreateCellDraft` case so local model baselines test whether new evidence becomes a draft proposal rather than an un-audited truth mutation.
 63. Add CLI local-model benchmark report artifacts. Added `benchmark-local-model --report-path` so successful real runs and dry-run preflights can write the same structured JSON printed to stdout into a durable artifact for CI and reproducible local model trials.
 64. Add CLI local-model benchmark response artifacts. Added `benchmark-local-model --response-dir` so real benchmark runs can persist raw per-case model stdout and report captured response artifact metadata for debugging local Steward model failures.
+65. Add durable local-model response fingerprints. Persisted per-case raw response fingerprints and byte counts in benchmark reports and durable baselines so real model trials can be audited without storing raw model stdout in baseline records.
 
 ## Small Embeddable Model Track
 

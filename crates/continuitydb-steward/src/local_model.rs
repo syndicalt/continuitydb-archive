@@ -788,6 +788,46 @@ impl StewardEvaluationCaseResponse {
     }
 }
 
+/// Durable response identity metadata for one evaluated local Steward model case.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelResponseFingerprint {
+    case_name: String,
+    captured: bool,
+    response_fingerprint: Option<String>,
+    response_bytes: usize,
+}
+
+impl LocalModelResponseFingerprint {
+    fn from_response(response: &StewardEvaluationCaseResponse) -> Self {
+        Self {
+            case_name: response.case_name().to_string(),
+            captured: response.response().is_some(),
+            response_fingerprint: response.response().map(fingerprint_text),
+            response_bytes: response.response_bytes(),
+        }
+    }
+
+    /// Returns the evaluated case name.
+    pub fn case_name(&self) -> &str {
+        &self.case_name
+    }
+
+    /// Returns whether raw stdout was captured for this case.
+    pub fn captured(&self) -> bool {
+        self.captured
+    }
+
+    /// Returns the deterministic raw response fingerprint when captured.
+    pub fn response_fingerprint(&self) -> Option<&str> {
+        self.response_fingerprint.as_deref()
+    }
+
+    /// Returns the captured response byte count.
+    pub fn response_bytes(&self) -> usize {
+        self.response_bytes
+    }
+}
+
 /// Deterministic evaluation report for an entire suite.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StewardEvaluationReport {
@@ -1253,16 +1293,8 @@ impl LocalModelBenchmark {
     /// Runs the benchmark suite with the supplied Steward identity.
     pub fn run(&self, identity: StewardIdentity) -> LocalModelBenchmarkReport {
         let steward = LocalModelSteward::new(identity, self.runner.clone());
-        LocalModelBenchmarkReport {
-            candidate: self.candidate,
-            response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
-            evaluation_suite_fingerprint: self.suite.fingerprint(),
-            schema_fingerprint: fingerprint_text(local_model_response_json_schema()),
-            grammar_fingerprint: fingerprint_text(local_model_response_gbnf_grammar()),
-            prompt_fingerprint: prompt_fingerprint_for_suite(&self.suite),
-            runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
-            evaluation: self.suite.evaluate(&steward),
-        }
+        let (evaluation, responses) = self.suite.evaluate_with_responses(&steward);
+        self.report_from_evaluation(evaluation, &responses)
     }
 
     /// Runs the benchmark suite and returns raw per-case model responses.
@@ -1275,19 +1307,29 @@ impl LocalModelBenchmark {
     ) {
         let steward = LocalModelSteward::new(identity, self.runner.clone());
         let (evaluation, responses) = self.suite.evaluate_with_responses(&steward);
-        (
-            LocalModelBenchmarkReport {
-                candidate: self.candidate,
-                response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
-                evaluation_suite_fingerprint: self.suite.fingerprint(),
-                schema_fingerprint: fingerprint_text(local_model_response_json_schema()),
-                grammar_fingerprint: fingerprint_text(local_model_response_gbnf_grammar()),
-                prompt_fingerprint: prompt_fingerprint_for_suite(&self.suite),
-                runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
-                evaluation,
-            },
-            responses,
-        )
+        let report = self.report_from_evaluation(evaluation, &responses);
+        (report, responses)
+    }
+
+    fn report_from_evaluation(
+        &self,
+        evaluation: StewardEvaluationReport,
+        responses: &[StewardEvaluationCaseResponse],
+    ) -> LocalModelBenchmarkReport {
+        LocalModelBenchmarkReport {
+            candidate: self.candidate,
+            response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+            evaluation_suite_fingerprint: self.suite.fingerprint(),
+            schema_fingerprint: fingerprint_text(local_model_response_json_schema()),
+            grammar_fingerprint: fingerprint_text(local_model_response_gbnf_grammar()),
+            prompt_fingerprint: prompt_fingerprint_for_suite(&self.suite),
+            runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
+            response_fingerprints: responses
+                .iter()
+                .map(LocalModelResponseFingerprint::from_response)
+                .collect(),
+            evaluation,
+        }
     }
 
     /// Re-runs each benchmark case and reports whether decoded proposal output is stable.
@@ -1450,6 +1492,7 @@ pub struct LocalModelBenchmarkReport {
     grammar_fingerprint: String,
     prompt_fingerprint: String,
     runtime: LocalModelRuntimeManifest,
+    response_fingerprints: Vec<LocalModelResponseFingerprint>,
     evaluation: StewardEvaluationReport,
 }
 
@@ -1489,6 +1532,11 @@ impl LocalModelBenchmarkReport {
         &self.runtime
     }
 
+    /// Returns durable per-case raw response fingerprint metadata.
+    pub fn response_fingerprints(&self) -> &[LocalModelResponseFingerprint] {
+        &self.response_fingerprints
+    }
+
     /// Returns the proposal-quality evaluation report.
     pub fn evaluation(&self) -> &StewardEvaluationReport {
         &self.evaluation
@@ -1522,6 +1570,8 @@ pub struct LocalModelBenchmarkBaseline {
     prompt_fingerprint: String,
     #[serde(default)]
     runtime: LocalModelRuntimeManifest,
+    #[serde(default)]
+    response_fingerprints: Vec<LocalModelResponseFingerprint>,
     evaluation: StewardEvaluationReport,
     recorded_at: DateTime<Utc>,
 }
@@ -1538,6 +1588,7 @@ impl LocalModelBenchmarkBaseline {
             grammar_fingerprint: report.grammar_fingerprint,
             prompt_fingerprint: report.prompt_fingerprint,
             runtime: report.runtime,
+            response_fingerprints: report.response_fingerprints,
             evaluation: report.evaluation,
             recorded_at,
         }
@@ -1581,6 +1632,11 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the runtime manifest that produced this baseline.
     pub fn runtime(&self) -> &LocalModelRuntimeManifest {
         &self.runtime
+    }
+
+    /// Returns durable per-case raw response fingerprint metadata.
+    pub fn response_fingerprints(&self) -> &[LocalModelResponseFingerprint] {
+        &self.response_fingerprints
     }
 
     /// Returns the recorded evaluation report.

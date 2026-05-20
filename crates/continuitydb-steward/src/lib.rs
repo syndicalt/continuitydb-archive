@@ -32,12 +32,12 @@ pub use local_model::{
     LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
     LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
-    LocalModelRuntimeManifest, LocalModelStabilityCaseReport, LocalModelStabilityReport,
-    LocalModelSteward, LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore,
-    MistralRsRuntimeProfile, SmallModelCandidate, StewardEvaluationCase,
-    StewardEvaluationCaseReport, StewardEvaluationCaseResponse, StewardEvaluationFailure,
-    StewardEvaluationReport, StewardEvaluationSuite, StewardEvaluationSummary,
-    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    LocalModelResponseFingerprint, LocalModelRuntimeManifest, LocalModelStabilityCaseReport,
+    LocalModelStabilityReport, LocalModelSteward, LocalModelStewardInput,
+    MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
+    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationCaseResponse,
+    StewardEvaluationFailure, StewardEvaluationReport, StewardEvaluationSuite,
+    StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -2044,6 +2044,62 @@ mod tests {
         assert!(report.passed());
         assert_eq!(report.candidate().model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
         assert_eq!(report.evaluation().case_reports().len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_report_preserves_response_fingerprints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let script = write_local_model_script(
+            "continuitydb-local-model-response-fingerprints",
+            &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier response fingerprint",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+
+        let report = benchmark.run(steward()?);
+        let baseline = LocalModelBenchmarkBaseline::from_report(report.clone(), created_at());
+
+        assert_eq!(report.response_fingerprints().len(), 1);
+        assert_eq!(
+            report.response_fingerprints()[0].case_name(),
+            "frontier response fingerprint"
+        );
+        assert!(report.response_fingerprints()[0].captured());
+        assert!(report.response_fingerprints()[0]
+            .response_fingerprint()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+        assert_eq!(
+            report.response_fingerprints()[0].response_bytes(),
+            format!("{response}\n").len()
+        );
+        assert_eq!(
+            baseline.response_fingerprints(),
+            report.response_fingerprints()
+        );
         Ok(())
     }
 

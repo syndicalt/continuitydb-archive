@@ -893,6 +893,7 @@ fn local_model_benchmark_dry_run_json(
             .map(|path| path.display().to_string()),
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
+        "response_fingerprints": [],
         "response_artifacts": local_model_response_artifacts_json(response_artifacts),
         "runtime": {
             "executable": config.executable().display().to_string(),
@@ -1192,6 +1193,7 @@ fn local_model_benchmark_json(
         "schema_fingerprint": baseline.schema_fingerprint(),
         "grammar_fingerprint": baseline.grammar_fingerprint(),
         "prompt_fingerprint": baseline.prompt_fingerprint(),
+        "response_fingerprints": baseline.response_fingerprints(),
         "contract_artifacts": local_model_contract_artifacts_json(artifacts.contract),
         "prompt_artifacts": local_model_prompt_artifacts_json(artifacts.prompts),
         "response_artifacts": local_model_response_artifacts_json(artifacts.responses),
