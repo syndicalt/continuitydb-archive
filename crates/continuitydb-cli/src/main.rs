@@ -448,6 +448,9 @@ enum Command {
         /// Optional path to write successful local-model bundle validation JSON.
         #[arg(long = "report-path")]
         report_path: Option<PathBuf>,
+        /// Optional path to write local-model bundle validation JSON when validation fails.
+        #[arg(long = "failure-report-path")]
+        failure_report_path: Option<PathBuf>,
     },
     /// Write local Steward model JSON Schema and GBNF grammar artifacts.
     #[cfg(feature = "local-model")]
@@ -759,11 +762,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::ValidateLocalModelBundle {
             artifact_dir,
             report_path,
+            failure_report_path,
         }) => {
-            let validation = validate_local_model_bundle_manifest(&artifact_dir)?;
+            let validation = match validate_local_model_bundle_manifest(&artifact_dir) {
+                Ok(validation) => validation,
+                Err(error) => {
+                    if let Some(path) = failure_report_path.as_ref() {
+                        write_local_model_bundle_validation_failure_report(
+                            &artifact_dir,
+                            report_path.as_ref(),
+                            path,
+                            error.to_string(),
+                        )?;
+                    }
+                    return Err(error);
+                }
+            };
             let output = serde_json::json!({
                 "artifact_dir": artifact_dir.display().to_string(),
                 "report_path": report_path.as_ref().map(|path| path.display().to_string()),
+                "failure_report_path": failure_report_path.as_ref().map(|path| path.display().to_string()),
                 "manifest": local_model_bundle_manifest_json(Some(&validation.manifest)),
                 "benchmark_report": validation.benchmark_report,
                 "changed_case_report": validation.changed_case_report,
@@ -1638,6 +1656,30 @@ fn local_model_benchmark_report_manifest_payload_text(
     let mut payload = report.clone();
     payload["bundle_manifest"] = serde_json::Value::Null;
     serde_json::to_string_pretty(&payload)
+}
+
+#[cfg(feature = "local-model")]
+fn write_local_model_bundle_validation_failure_report(
+    artifact_dir: &Path,
+    report_path: Option<&PathBuf>,
+    failure_report_path: &Path,
+    message: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = serde_json::json!({
+        "artifact_dir": artifact_dir.display().to_string(),
+        "report_path": report_path.map(|path| path.display().to_string()),
+        "failure_report_path": failure_report_path.display().to_string(),
+        "manifest": serde_json::Value::Null,
+        "benchmark_report": serde_json::Value::Null,
+        "changed_case_report": serde_json::Value::Null,
+        "response_artifact_manifest": serde_json::Value::Null,
+        "failure": {
+            "stage": "local_model_bundle_validation",
+            "message": message,
+        },
+    });
+    write_pretty_json_file(failure_report_path, &output)?;
+    Ok(())
 }
 
 #[cfg(feature = "local-model")]

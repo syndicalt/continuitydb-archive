@@ -172,6 +172,7 @@ The first milestone builds:
 - CLI local model benchmark report artifact metadata.
 - CLI local model benchmark report artifact metadata validation.
 - CLI local model bundle validation report artifacts.
+- CLI local model bundle validation failure report artifacts.
 - CLI local model changed-case report bundle artifacts.
 - CLI local model changed-case report artifact metadata.
 - CLI local model changed-case report artifact metadata validation.
