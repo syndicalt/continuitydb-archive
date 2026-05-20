@@ -200,7 +200,7 @@ fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error
     let baseline_path = temp_store_path("continuitydb-cli-local-model-baseline");
     let script = r#"#!/usr/bin/env sh
 cat >/dev/null
-printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"request_verification","cell_id":"00000000-0000-0000-0000-000000000007","request":"Refresh the stale high-impact frontier signal."},"rationale":"The stale high-impact frontier signal needs a refresh from current evidence.","citations":["continuitydb://evaluation/targeted-verification-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
 "#;
     fs::write(&executable_path, script)?;
     let mut permissions = fs::metadata(&executable_path)?.permissions();
@@ -239,9 +239,9 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(json["candidate_role"].as_str(), Some("default-feasibility"));
     assert_eq!(json["passed"].as_bool(), Some(true));
-    assert_eq!(json["passed_cases"].as_u64(), Some(7));
+    assert_eq!(json["passed_cases"].as_u64(), Some(8));
     assert_eq!(json["failed_cases"].as_u64(), Some(0));
-    assert_eq!(json["total_cases"].as_u64(), Some(7));
+    assert_eq!(json["total_cases"].as_u64(), Some(8));
     assert_eq!(json["pass_rate"].as_f64(), Some(1.0));
     assert_eq!(
         json["evaluation"]["case_reports"][0]["name"].as_str(),
@@ -295,7 +295,7 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(
         json["evaluation"]["case_reports"][5]["name"].as_str(),
-        Some("multi-source citation preservation")
+        Some("targeted verification request")
     );
     assert_eq!(
         json["evaluation"]["case_reports"][5]["failures"]
@@ -305,10 +305,20 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(
         json["evaluation"]["case_reports"][6]["name"].as_str(),
-        Some("policy rejection avoidance")
+        Some("multi-source citation preservation")
     );
     assert_eq!(
         json["evaluation"]["case_reports"][6]["failures"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        json["evaluation"]["case_reports"][7]["name"].as_str(),
+        Some("policy rejection avoidance")
+    );
+    assert_eq!(
+        json["evaluation"]["case_reports"][7]["failures"]
             .as_array()
             .map(Vec::len),
         Some(0)
@@ -583,7 +593,7 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     let report: Value = serde_json::from_str(&report_text)?;
 
     assert_eq!(report["passed"].as_bool(), Some(false));
-    assert_eq!(report["failed_cases"].as_u64(), Some(6));
+    assert_eq!(report["failed_cases"].as_u64(), Some(7));
     assert_eq!(
         report["baseline_path"].as_str(),
         Some(baseline_path.display().to_string().as_str())
@@ -610,7 +620,7 @@ fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
     let report_path = temp_store_path("continuitydb-cli-local-model-passing-gate-report");
     let script = r#"#!/usr/bin/env sh
 cat >/dev/null
-printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"request_verification","cell_id":"00000000-0000-0000-0000-000000000007","request":"Refresh the stale high-impact frontier signal."},"rationale":"The stale high-impact frontier signal needs a refresh from current evidence.","citations":["continuitydb://evaluation/targeted-verification-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
 "#;
     fs::write(&executable_path, script)?;
     let mut permissions = fs::metadata(&executable_path)?.permissions();
@@ -697,7 +707,7 @@ fn cli_benchmark_local_model_stability_run_outputs_report() -> Result<(), Box<dy
     let baseline_path = temp_store_path("continuitydb-cli-local-model-stability-baseline");
     let script = r#"#!/usr/bin/env sh
 cat >/dev/null
-printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"request_verification","cell_id":"00000000-0000-0000-0000-000000000007","request":"Refresh the stale high-impact frontier signal."},"rationale":"The stale high-impact frontier signal needs a refresh from current evidence.","citations":["continuitydb://evaluation/targeted-verification-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
 "#;
     fs::write(&executable_path, script)?;
     let mut permissions = fs::metadata(&executable_path)?.permissions();
@@ -737,7 +747,7 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert_eq!(json["stability"]["stable"].as_bool(), Some(true));
     assert_eq!(
         json["stability"]["case_reports"].as_array().map(Vec::len),
-        Some(7)
+        Some(8)
     );
     assert_eq!(
         json["stability"]["case_reports"][0]["name"].as_str(),
@@ -1175,7 +1185,7 @@ fn cli_benchmark_local_model_prompt_dir_writes_prompt_artifacts(
         .as_array()
         .ok_or_else(|| std::io::Error::other("missing prompt artifacts"))?;
 
-    assert_eq!(artifacts.len(), 7);
+    assert_eq!(artifacts.len(), 8);
     assert_eq!(
         artifacts[0]["case_name"].as_str(),
         Some("insufficient evidence uncertainty")
@@ -1228,28 +1238,38 @@ fn cli_benchmark_local_model_prompt_dir_writes_prompt_artifacts(
     assert!(fifth_prompt.contains("continuitydb://evaluation/confidence-evidence"));
     assert_eq!(
         artifacts[5]["case_name"].as_str(),
-        Some("multi-source citation preservation")
+        Some("targeted verification request")
     );
     let sixth_prompt_path = artifacts[5]["prompt_path"]
         .as_str()
         .ok_or_else(|| std::io::Error::other("missing prompt path"))?;
     let sixth_prompt = fs::read_to_string(sixth_prompt_path)?;
-    assert!(sixth_prompt
-        .contains("Decide whether a release-status change should stay on the active frontier."));
-    assert!(sixth_prompt.contains("continuitydb://evaluation/release-build-source"));
-    assert!(sixth_prompt.contains("continuitydb://evaluation/release-incident-source"));
+    assert!(sixth_prompt.contains("Request verification for a stale high-impact frontier cell."));
+    assert!(sixth_prompt.contains("continuitydb://evaluation/targeted-verification-evidence"));
     assert_eq!(
         artifacts[6]["case_name"].as_str(),
-        Some("policy rejection avoidance")
+        Some("multi-source citation preservation")
     );
     let seventh_prompt_path = artifacts[6]["prompt_path"]
         .as_str()
         .ok_or_else(|| std::io::Error::other("missing prompt path"))?;
     let seventh_prompt = fs::read_to_string(seventh_prompt_path)?;
-    assert!(seventh_prompt.contains(
+    assert!(seventh_prompt
+        .contains("Decide whether a release-status change should stay on the active frontier."));
+    assert!(seventh_prompt.contains("continuitydb://evaluation/release-build-source"));
+    assert!(seventh_prompt.contains("continuitydb://evaluation/release-incident-source"));
+    assert_eq!(
+        artifacts[7]["case_name"].as_str(),
+        Some("policy rejection avoidance")
+    );
+    let eighth_prompt_path = artifacts[7]["prompt_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing prompt path"))?;
+    let eighth_prompt = fs::read_to_string(eighth_prompt_path)?;
+    assert!(eighth_prompt.contains(
         "Handle invalid answerability-label evidence without emitting an invalid label."
     ));
-    assert!(seventh_prompt.contains("continuitydb://evaluation/invalid-answerability-label"));
+    assert!(eighth_prompt.contains("continuitydb://evaluation/invalid-answerability-label"));
     assert!(!baseline_path.exists());
 
     fs::remove_dir_all(prompt_dir)?;
@@ -1270,7 +1290,7 @@ fn cli_local_model_evaluation_suite_outputs_case_contracts(
     let json: Value = serde_json::from_slice(&output)?;
 
     assert_eq!(json["response_schema_version"].as_u64(), Some(1));
-    assert_eq!(json["total_cases"].as_u64(), Some(7));
+    assert_eq!(json["total_cases"].as_u64(), Some(8));
     assert!(json["evaluation_suite_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
@@ -1416,62 +1436,94 @@ fn cli_local_model_evaluation_suite_outputs_case_contracts(
     );
     assert_eq!(
         json["cases"][5]["name"].as_str(),
-        Some("multi-source citation preservation")
+        Some("targeted verification request")
     );
     assert_eq!(
         json["cases"][5]["task"].as_str(),
-        Some("Decide whether a release-status change should stay on the active frontier.")
+        Some("Request verification for a stale high-impact frontier cell.")
     );
     assert_eq!(
         json["cases"][5]["evidence"][0]["locator"].as_str(),
-        Some("continuitydb://evaluation/release-build-source")
-    );
-    assert_eq!(
-        json["cases"][5]["evidence"][1]["locator"].as_str(),
-        Some("continuitydb://evaluation/release-incident-source")
+        Some("continuitydb://evaluation/targeted-verification-evidence")
     );
     assert_eq!(
         json["cases"][5]["expected_actions"][0]["type"].as_str(),
-        Some("mark_frontier")
-    );
-    assert_eq!(
-        json["cases"][5]["required_citations"][0].as_str(),
-        Some("continuitydb://evaluation/release-build-source")
-    );
-    assert_eq!(
-        json["cases"][5]["required_citations"][1].as_str(),
-        Some("continuitydb://evaluation/release-incident-source")
-    );
-    assert_eq!(
-        json["cases"][5]["required_rationale_terms"][0].as_str(),
-        Some("frontier")
-    );
-    assert_eq!(
-        json["cases"][6]["name"].as_str(),
-        Some("policy rejection avoidance")
-    );
-    assert_eq!(
-        json["cases"][6]["task"].as_str(),
-        Some("Handle invalid answerability-label evidence without emitting an invalid label.")
-    );
-    assert_eq!(
-        json["cases"][6]["evidence"][0]["locator"].as_str(),
-        Some("continuitydb://evaluation/invalid-answerability-label")
-    );
-    assert_eq!(
-        json["cases"][6]["expected_actions"][0]["type"].as_str(),
         Some("request_verification")
     );
     assert_eq!(
+        json["cases"][5]["expected_actions"][0]["cell_id"].as_str(),
+        Some("00000000-0000-0000-0000-000000000007")
+    );
+    assert_eq!(
+        json["cases"][5]["required_citations"][0].as_str(),
+        Some("continuitydb://evaluation/targeted-verification-evidence")
+    );
+    assert_eq!(
+        json["cases"][5]["required_rationale_terms"][0].as_str(),
+        Some("refresh")
+    );
+    assert_eq!(
+        json["cases"][5]["forbidden_rationale_terms"][0].as_str(),
+        Some("no target")
+    );
+    assert_eq!(
+        json["cases"][6]["name"].as_str(),
+        Some("multi-source citation preservation")
+    );
+    assert_eq!(
+        json["cases"][6]["task"].as_str(),
+        Some("Decide whether a release-status change should stay on the active frontier.")
+    );
+    assert_eq!(
+        json["cases"][6]["evidence"][0]["locator"].as_str(),
+        Some("continuitydb://evaluation/release-build-source")
+    );
+    assert_eq!(
+        json["cases"][6]["evidence"][1]["locator"].as_str(),
+        Some("continuitydb://evaluation/release-incident-source")
+    );
+    assert_eq!(
+        json["cases"][6]["expected_actions"][0]["type"].as_str(),
+        Some("mark_frontier")
+    );
+    assert_eq!(
         json["cases"][6]["required_citations"][0].as_str(),
-        Some("continuitydb://evaluation/invalid-answerability-label")
+        Some("continuitydb://evaluation/release-build-source")
+    );
+    assert_eq!(
+        json["cases"][6]["required_citations"][1].as_str(),
+        Some("continuitydb://evaluation/release-incident-source")
     );
     assert_eq!(
         json["cases"][6]["required_rationale_terms"][0].as_str(),
+        Some("frontier")
+    );
+    assert_eq!(
+        json["cases"][7]["name"].as_str(),
+        Some("policy rejection avoidance")
+    );
+    assert_eq!(
+        json["cases"][7]["task"].as_str(),
+        Some("Handle invalid answerability-label evidence without emitting an invalid label.")
+    );
+    assert_eq!(
+        json["cases"][7]["evidence"][0]["locator"].as_str(),
+        Some("continuitydb://evaluation/invalid-answerability-label")
+    );
+    assert_eq!(
+        json["cases"][7]["expected_actions"][0]["type"].as_str(),
+        Some("request_verification")
+    );
+    assert_eq!(
+        json["cases"][7]["required_citations"][0].as_str(),
+        Some("continuitydb://evaluation/invalid-answerability-label")
+    );
+    assert_eq!(
+        json["cases"][7]["required_rationale_terms"][0].as_str(),
         Some("invalid")
     );
     assert_eq!(
-        json["cases"][6]["forbidden_rationale_terms"][0].as_str(),
+        json["cases"][7]["forbidden_rationale_terms"][0].as_str(),
         Some("label applied")
     );
     Ok(())

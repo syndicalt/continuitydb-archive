@@ -960,6 +960,7 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
     let supersession_source = StateCellId::from_u128(4);
     let supersession_target = StateCellId::from_u128(5);
     let confidence_cell = StateCellId::from_u128(6);
+    let targeted_verification_cell = StateCellId::from_u128(7);
 
     StewardEvaluationSuite::new(vec![
         StewardEvaluationCase::new(
@@ -1042,6 +1043,22 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .require_citation("continuitydb://evaluation/confidence-evidence")
         .require_rationale_term("confidence")
         .forbid_rationale_term("fully trusted"),
+        StewardEvaluationCase::new(
+            "targeted verification request",
+            created_at,
+            "Request verification for a stale high-impact frontier cell.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/targeted-verification-evidence",
+            "A high-impact frontier cell has stale evidence and needs a current source refresh before downstream decisions depend on it.",
+        )
+        .expect_action(StewardAction::RequestVerification {
+            cell_id: Some(targeted_verification_cell),
+            request: "Refresh the stale high-impact frontier signal.".to_string(),
+        })
+        .require_citation("continuitydb://evaluation/targeted-verification-evidence")
+        .require_rationale_term("refresh")
+        .forbid_rationale_term("no target"),
         StewardEvaluationCase::new(
             "multi-source citation preservation",
             created_at,
