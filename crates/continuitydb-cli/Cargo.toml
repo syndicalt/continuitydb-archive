@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 chrono.workspace = true
 clap.workspace = true
+continuitydb-api = { path = "../continuitydb-api" }
 continuitydb-checkout = { path = "../continuitydb-checkout" }
 continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-kernel = { path = "../continuitydb-kernel" }

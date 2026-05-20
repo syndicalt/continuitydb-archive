@@ -105,6 +105,7 @@ Storage kernel
 ## CLI Milestones
 
 1. Expose deterministic checkout JSON from the CLI. Implemented as `continuitydb demo-checkout`, showing selected cells, audit traces, uncertainty, frontier recommendations, and alternatives.
+2. Expose JSONL file-store compaction from the CLI. Implemented as `continuitydb compact-file <path>` so operators can compact a file-backed store into the current canonical durable record format.
 
 ## Native API Milestones
 

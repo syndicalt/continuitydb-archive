@@ -226,6 +226,7 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clap",
+ "continuitydb-api",
  "continuitydb-checkout",
  "continuitydb-core",
  "continuitydb-kernel",

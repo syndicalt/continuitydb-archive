@@ -2,13 +2,15 @@
 
 use chrono::{TimeZone, Utc};
 use clap::{Parser, Subcommand};
+use continuitydb_api::ContinuityDb;
 use continuitydb_checkout::{checkout, CheckoutRequest};
 use continuitydb_core::{
     ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
     SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
 };
-use continuitydb_kernel::StorageKernel;
+use continuitydb_kernel::{FileKernel, StorageKernel};
 use continuitydb_memory::MemoryKernel;
+use std::path::PathBuf;
 
 /// ContinuityDB command-line interface.
 #[derive(Debug, Parser)]
@@ -29,6 +31,11 @@ enum Command {
     Scope,
     /// Print deterministic demo checkout JSON.
     DemoCheckout,
+    /// Compact a JSONL file-backed store into the canonical durable record format.
+    CompactFile {
+        /// Path to the JSONL file-backed store.
+        path: PathBuf,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,6 +48,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::DemoCheckout) => {
             let slice = demo_checkout()?;
             println!("{}", serde_json::to_string_pretty(&slice)?);
+        }
+        Some(Command::CompactFile { path }) => {
+            let mut db = ContinuityDb::new(FileKernel::open(&path)?);
+            db.compact_file_store()?;
+            let output = serde_json::json!({
+                "path": path.display().to_string(),
+                "compacted": true,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
         None => {}
     }

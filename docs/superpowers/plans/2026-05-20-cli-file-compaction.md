@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-cli/tests/cli.rs`
 
-- [ ] **Step 1: Add imports and helper functions**
+- [x] **Step 1: Add imports and helper functions**
 
 Add imports:
 
@@ -82,7 +82,7 @@ fn write_legacy_store(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> 
 }
 ```
 
-- [ ] **Step 2: Add compact-file tests**
+- [x] **Step 2: Add compact-file tests**
 
 Add:
 
@@ -134,7 +134,7 @@ fn cli_compact_file_fails_for_corrupt_store() -> Result<(), Box<dyn std::error::
 }
 ```
 
-- [ ] **Step 3: Run targeted tests and verify RED**
+- [x] **Step 3: Run targeted tests and verify RED**
 
 Run:
 
@@ -150,7 +150,7 @@ Expected: tests fail because `compact-file` is not a recognized command.
 - Modify: `crates/continuitydb-cli/Cargo.toml`
 - Modify: `crates/continuitydb-cli/src/main.rs`
 
-- [ ] **Step 1: Add API dependency**
+- [x] **Step 1: Add API dependency**
 
 Add:
 
@@ -158,7 +158,7 @@ Add:
 continuitydb-api = { path = "../continuitydb-api" }
 ```
 
-- [ ] **Step 2: Add imports**
+- [x] **Step 2: Add imports**
 
 Add to `src/main.rs`:
 
@@ -171,7 +171,7 @@ use std::path::PathBuf;
 
 Adjust the existing kernel import so `StorageKernel` is not duplicated.
 
-- [ ] **Step 3: Add command and output type**
+- [x] **Step 3: Add command and output type**
 
 Extend `Command`:
 
@@ -193,7 +193,7 @@ struct CompactFileOutput {
 }
 ```
 
-- [ ] **Step 4: Handle the command**
+- [x] **Step 4: Handle the command**
 
 Add match arm:
 
@@ -209,7 +209,7 @@ Add match arm:
         }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify GREEN**
+- [x] **Step 5: Run targeted tests and verify GREEN**
 
 Run:
 

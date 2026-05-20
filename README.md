@@ -40,6 +40,7 @@ The first milestone builds:
 - Per-record JSONL file-kernel checksums for cell and commit records.
 - JSONL file-kernel compaction into the canonical durable record format.
 - Native file-backed compaction API.
+- CLI file-backed compaction command.
 - Native commit cell materialization API.
 - Native commit slice materialization API for cursor-selected commit replay.
 - Native typed operation API for ingest, checkout, and audit.
