@@ -333,6 +333,11 @@ impl<K: StorageKernel> ContinuityDb<K> {
         self.checkout_continuity_query(decode_query_json(bytes)?)
     }
 
+    /// Materializes a deterministic continuity slice from strict text query syntax.
+    pub fn checkout_query_text(&self, input: &str) -> Result<CheckoutSlice, ContinuityError> {
+        self.checkout_continuity_query(parse_query_text(input)?)
+    }
+
     /// Materializes a deterministic continuity slice from a saved typed query file.
     pub fn checkout_query_file<P: AsRef<Path>>(
         &self,
@@ -1184,6 +1189,38 @@ mod tests {
             ))
         );
         Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_text_materializes_slice() -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell("project:continuitydb:query-text", 0.91, 12)?)?;
+
+        let slice = db.checkout_query_text(
+            r#"CHECKOUT "stored-facts" ANSWER "what should the agent know?"
+WHERE scope = project("continuitydb")
+  AND min_confidence >= 0.7
+  AND token_budget <= 1200"#,
+        )?;
+
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(
+            slice.cells[0].payload,
+            CellPayload::Text("project:continuitydb:query-text".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_text_reports_invalid_text_query() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let result = db.checkout_query_text(r#"CHECKOUT "stored-facts" WHERE scope = global"#);
+
+        assert_eq!(
+            result.err(),
+            Some(ContinuityError::QueryText(QueryTextError::InvalidSyntax))
+        );
     }
 
     #[test]

@@ -22,7 +22,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add direct text execution test**
+- [x] **Step 1: Add direct text execution test**
 
 Add this test after `api_checkout_query_json_reports_invalid_envelope`:
 
@@ -48,7 +48,7 @@ WHERE scope = project("continuitydb")
 }
 ```
 
-- [ ] **Step 2: Add direct text parser error test**
+- [x] **Step 2: Add direct text parser error test**
 
 Add this test after `api_checkout_query_text_materializes_slice`:
 
@@ -66,7 +66,7 @@ fn api_checkout_query_text_reports_invalid_text_query() {
 }
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -81,7 +81,7 @@ Expected: FAIL because `ContinuityDb::checkout_query_text` does not exist.
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add native method**
+- [x] **Step 1: Add native method**
 
 Add this method immediately after `checkout_query_json`:
 
@@ -92,7 +92,7 @@ pub fn checkout_query_text(&self, input: &str) -> Result<CheckoutSlice, Continui
 }
 ```
 
-- [ ] **Step 2: Verify GREEN**
+- [x] **Step 2: Verify GREEN**
 
 Run:
 
