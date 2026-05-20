@@ -876,6 +876,12 @@ fn benchmark_local_model_json(
     if options.fail_on_unstable && options.stability_trials.is_none() {
         return Err(std::io::Error::other("--fail-on-unstable requires --stability-trials").into());
     }
+    if options.changed_case_report_path.is_some() && !options.compare_baseline {
+        return Err(std::io::Error::other(
+            "--changed-case-report-path requires --compare-baseline or --fail-on-regression",
+        )
+        .into());
+    }
     let mut config = if options.candidate_defaults {
         candidate.recommended_runner_config(
             options.executable.to_path_buf(),

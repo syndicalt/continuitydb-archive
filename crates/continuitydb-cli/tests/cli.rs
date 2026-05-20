@@ -1982,6 +1982,38 @@ fn cli_benchmark_local_model_changed_case_report_path_writes_compact_report(
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_benchmark_local_model_changed_case_report_path_requires_comparison(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-changed-report-requirement");
+    let changed_case_report_path =
+        temp_store_path("continuitydb-cli-local-model-changed-report-without-comparison")
+            .with_extension("json");
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--changed-case-report-path")
+        .arg(&changed_case_report_path)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/bin/echo")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "--changed-case-report-path requires --compare-baseline or --fail-on-regression",
+        ));
+
+    assert!(!changed_case_report_path.exists());
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_benchmark_local_model_artifact_dir_writes_changed_case_report(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-changed-bundle-runner");
