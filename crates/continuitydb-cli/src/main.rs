@@ -499,6 +499,7 @@ fn local_model_benchmark_json(
         "failed_cases": summary.failed_cases(),
         "total_cases": summary.total_cases(),
         "pass_rate": summary.pass_rate(),
+        "evaluation": baseline.evaluation(),
         "response_schema_version": baseline.response_schema_version(),
         "runtime": {
             "executable": baseline.runtime().executable(),
