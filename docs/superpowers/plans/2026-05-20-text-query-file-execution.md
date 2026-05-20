@@ -169,7 +169,7 @@ git commit -m "feat: execute text query files through native api"
 **Files:**
 - Modify: `crates/continuitydb-cli/tests/cli.rs`
 
-- [ ] **Step 1: Add CLI text query file test**
+- [x] **Step 1: Add CLI text query file test**
 
 Add this test after `cli_checkout_query_executes_versioned_query_envelope`:
 
@@ -210,7 +210,7 @@ WHERE scope = project("continuitydb")
 }
 ```
 
-- [ ] **Step 2: Verify CLI GREEN**
+- [x] **Step 2: Verify CLI GREEN**
 
 Run:
 
@@ -220,7 +220,7 @@ cargo test -p continuitydb-cli checkout_query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit CLI test**
+- [x] **Step 3: Commit CLI test**
 
 ```bash
 git add crates/continuitydb-cli/tests/cli.rs docs/superpowers/plans/2026-05-20-text-query-file-execution.md
