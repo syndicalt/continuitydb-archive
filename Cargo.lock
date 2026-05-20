@@ -236,6 +236,7 @@ dependencies = [
  "continuitydb-kernel",
  "continuitydb-memory",
  "continuitydb-query",
+ "continuitydb-steward",
  "continuitydb-workload",
  "predicates",
  "serde_json",

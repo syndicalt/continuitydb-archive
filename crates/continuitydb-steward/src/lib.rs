@@ -23,11 +23,11 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
-    local_model_response_json_schema, record_local_model_benchmark_baseline,
-    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
-    FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
-    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    default_steward_evaluation_suite, latest_local_model_benchmark_baseline,
+    local_model_response_gbnf_grammar, local_model_response_json_schema,
+    record_local_model_benchmark_baseline, record_local_model_benchmark_baseline_with_regression,
+    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
+    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
     LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
     LocalModelRuntimeManifest, LocalModelSteward, LocalModelStewardInput,
@@ -43,8 +43,9 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 mod tests {
     #[cfg(feature = "local-model")]
     use super::{
-        latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
-        local_model_response_json_schema, record_local_model_benchmark_baseline,
+        default_steward_evaluation_suite, latest_local_model_benchmark_baseline,
+        local_model_response_gbnf_grammar, local_model_response_json_schema,
+        record_local_model_benchmark_baseline,
         record_local_model_benchmark_baseline_with_regression, small_model_candidates,
         FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
         LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
@@ -871,6 +872,31 @@ mod tests {
         let report = suite.evaluate(&steward);
 
         assert!(report.passed());
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn default_steward_evaluation_suite_scores_valid_verification_proposal(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "request_verification",
+                    "cell_id": null,
+                    "request": "Gather additional source evidence."
+                },
+                "rationale": "The evidence is thin, so uncertainty remains.",
+                "citations": ["continuitydb://evaluation/thin-evidence"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+
+        let report = default_steward_evaluation_suite().evaluate(&steward);
+
+        assert!(report.passed());
+        assert_eq!(report.case_reports().len(), 1);
         Ok(())
     }
 

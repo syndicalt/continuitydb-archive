@@ -18,6 +18,9 @@ use predicates::str::contains;
 use serde_json::Value;
 use std::{fs, path::PathBuf};
 
+#[cfg(all(feature = "local-model", unix))]
+use std::os::unix::fs::PermissionsExt;
+
 #[test]
 fn cli_reports_version() -> Result<(), Box<dyn std::error::Error>> {
     let mut command = Command::cargo_bin("continuitydb")?;
@@ -186,6 +189,82 @@ fn cli_measure_workload_records_baseline_for_memory_kernel(
         Some(8)
     );
 
+    fs::remove_file(baseline_path)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-baseline");
+    let script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]}]}'
+"#;
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--temp")
+        .arg("--arg")
+        .arg("0")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    let records: Vec<Value> = baseline_text
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+
+    assert_eq!(
+        json["candidate_model_id"].as_str(),
+        Some("Qwen/Qwen2.5-0.5B-Instruct")
+    );
+    assert_eq!(json["candidate_role"].as_str(), Some("default-feasibility"));
+    assert_eq!(json["passed"].as_bool(), Some(true));
+    assert_eq!(json["passed_cases"].as_u64(), Some(1));
+    assert_eq!(json["total_cases"].as_u64(), Some(1));
+    assert_eq!(
+        json["baseline_path"].as_str(),
+        Some(baseline_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        json["runtime"]["executable"].as_str(),
+        Some(executable_path.display().to_string().as_str())
+    );
+    assert_eq!(json["runtime"]["arguments"][0].as_str(), Some("--model"));
+    assert_eq!(
+        json["runtime"]["arguments"][1].as_str(),
+        Some("/models/qwen.gguf")
+    );
+    assert_eq!(json["runtime"]["arguments"][2].as_str(), Some("--temp"));
+    assert_eq!(json["runtime"]["arguments"][3].as_str(), Some("0"));
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0]["runtime"]["executable"].as_str(),
+        Some(executable_path.display().to_string().as_str())
+    );
+    assert_eq!(records[0]["runtime"]["arguments"][3].as_str(), Some("0"));
+
+    fs::remove_file(executable_path)?;
     fs::remove_file(baseline_path)?;
     Ok(())
 }

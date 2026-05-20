@@ -12,13 +12,20 @@ use continuitydb_kernel::{
     CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements, StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
+#[cfg(feature = "local-model")]
+use continuitydb_steward::{
+    default_steward_evaluation_suite, record_local_model_benchmark_baseline_with_regression,
+    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
+    LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
+    LocalModelBenchmarkRegression, SmallModelCandidate, StewardIdentity,
+};
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
     measure_ingest_and_checkout, FileWorkloadBaselineStore, WorkloadBaselineComparison,
     WorkloadBaselineRecord, WorkloadConfig, WorkloadMeasurement, WorkloadMeasurementSnapshot,
     WorkloadRegressionThresholds,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// ContinuityDB command-line interface.
 #[derive(Debug, Parser)]
@@ -170,6 +177,31 @@ enum Command {
         /// Validate the import without mutating the target store.
         #[arg(long = "dry-run")]
         dry_run: bool,
+    },
+    /// Run a local Steward model benchmark and append a durable JSONL baseline.
+    #[cfg(feature = "local-model")]
+    BenchmarkLocalModel {
+        /// Candidate model identifier from the fixed small-model list.
+        #[arg(long = "candidate", default_value = "Qwen/Qwen2.5-0.5B-Instruct")]
+        candidate: String,
+        /// Local executable path.
+        #[arg(long = "executable")]
+        executable: PathBuf,
+        /// Model file path passed to the executable as `--model <path>`.
+        #[arg(long = "model-path")]
+        model_path: PathBuf,
+        /// Extra executable argument, repeatable and ordered.
+        #[arg(long = "arg", allow_hyphen_values = true)]
+        arguments: Vec<String>,
+        /// JSONL path to append a benchmark baseline record.
+        #[arg(long = "baseline-path")]
+        baseline_path: PathBuf,
+        /// Compare this run with the latest matching previous baseline.
+        #[arg(long = "compare-baseline")]
+        compare_baseline: bool,
+        /// Exit non-zero when the latest matching previous baseline regresses.
+        #[arg(long = "fail-on-regression")]
+        fail_on_regression: bool,
     },
 }
 
@@ -335,9 +367,127 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
+        #[cfg(feature = "local-model")]
+        Some(Command::BenchmarkLocalModel {
+            candidate,
+            executable,
+            model_path,
+            arguments,
+            baseline_path,
+            compare_baseline,
+            fail_on_regression,
+        }) => {
+            let output = benchmark_local_model_json(
+                &candidate,
+                &executable,
+                &model_path,
+                &arguments,
+                &baseline_path,
+                compare_baseline || fail_on_regression,
+                fail_on_regression,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
         None => {}
     }
     Ok(())
+}
+
+#[cfg(feature = "local-model")]
+fn benchmark_local_model_json(
+    candidate_id: &str,
+    executable: &Path,
+    model_path: &Path,
+    arguments: &[String],
+    baseline_path: &Path,
+    compare_baseline: bool,
+    fail_on_regression: bool,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let candidate = local_model_candidate(candidate_id)?;
+    let mut config = LocalExecutableRunnerConfig::new(executable.to_path_buf())
+        .with_model_path(model_path.to_path_buf());
+    for argument in arguments {
+        config = config.with_argument(argument);
+    }
+    let benchmark = LocalModelBenchmark::new(
+        candidate,
+        LocalExecutableRunner::new(config),
+        default_steward_evaluation_suite(),
+    );
+    let mut store = FileLocalModelBenchmarkBaselineStore::open(baseline_path)?;
+    let identity = StewardIdentity::new("continuitydb-cli-local-model", "0.1.0", "strict")?;
+    let report = record_local_model_benchmark_baseline_with_regression(
+        &benchmark,
+        identity,
+        Utc::now(),
+        &mut store,
+    )?;
+
+    if fail_on_regression && report.regressed() {
+        return Err(std::io::Error::other("local model benchmark regression detected").into());
+    }
+
+    Ok(local_model_benchmark_json(
+        baseline_path,
+        compare_baseline,
+        report.current_baseline(),
+        report.regression(),
+    ))
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_candidate(
+    candidate_id: &str,
+) -> Result<SmallModelCandidate, Box<dyn std::error::Error>> {
+    small_model_candidates()
+        .iter()
+        .copied()
+        .find(|candidate| candidate.model_id() == candidate_id)
+        .ok_or_else(|| std::io::Error::other("unknown local model candidate").into())
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_benchmark_json(
+    baseline_path: &Path,
+    compared: bool,
+    baseline: &LocalModelBenchmarkBaseline,
+    regression: Option<&LocalModelBenchmarkRegression>,
+) -> serde_json::Value {
+    let total_cases = baseline.evaluation().case_reports().len();
+    let passed_cases = baseline
+        .evaluation()
+        .case_reports()
+        .iter()
+        .filter(|case| case.passed())
+        .count();
+    serde_json::json!({
+        "candidate_model_id": baseline.candidate_model_id(),
+        "candidate_role": baseline.candidate_role(),
+        "baseline_path": baseline_path.display().to_string(),
+        "recorded_at": baseline.recorded_at(),
+        "passed": baseline.passed(),
+        "passed_cases": passed_cases,
+        "total_cases": total_cases,
+        "runtime": {
+            "executable": baseline.runtime().executable(),
+            "arguments": baseline.runtime().arguments(),
+        },
+        "baseline_comparison": regression.map(|regression| {
+            serde_json::json!({
+                "compared": true,
+                "regressed": regression.regressed(),
+                "previous_recorded_at": regression.previous_recorded_at(),
+                "current_recorded_at": regression.current_recorded_at(),
+                "previous_passed_cases": regression.previous_passed_cases(),
+                "current_passed_cases": regression.current_passed_cases(),
+                "pass_count_delta": regression.pass_count_delta(),
+            })
+        }).or_else(|| compared.then(|| serde_json::json!({
+            "compared": true,
+            "regressed": false,
+            "previous_recorded_at": null,
+        }))),
+    })
 }
 
 fn requirements_for_profile(profile: RequirementProfile) -> KernelRequirements {

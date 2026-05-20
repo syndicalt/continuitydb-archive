@@ -234,6 +234,7 @@ Storage kernel
 22. Add native conflict-resolution application workflow. Implemented a composed native API path that records conflict-resolution proposal audits and applies accepted `LinkRevision` proposals as native revision-link records through the typed dispatcher.
 23. Add native frontier/watch application workflow. Implemented a composed native API path that records subscribed frontier/watch proposal audits and applies accepted `RequestVerification` and `MarkFrontier` proposals through the typed dispatcher.
 24. Add local model runtime manifests. Implemented `LocalModelRuntimeManifest` so benchmark reports and durable baselines preserve the executable path and deterministic arguments used for a local model evaluation, while legacy baseline JSON remains readable.
+25. Add CLI local-model benchmark recording. Implemented a feature-gated `benchmark-local-model` command that runs the fixed Steward evaluation suite against a configured local executable, appends a JSONL baseline, and prints structured candidate, runtime, pass-count, and regression metadata.
 
 ## Small Embeddable Model Track
 

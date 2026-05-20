@@ -70,6 +70,7 @@ The first milestone builds:
 - Executable local model benchmark fixture.
 - Durable local model benchmark baseline store.
 - Reproducible local model benchmark runtime manifests.
+- Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.
 - Deterministic frontier subscription runner.

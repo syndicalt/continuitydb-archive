@@ -19,8 +19,12 @@ continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-kernel = { path = "../continuitydb-kernel" }
 continuitydb-memory = { path = "../continuitydb-memory" }
 continuitydb-query = { path = "../continuitydb-query" }
+continuitydb-steward = { path = "../continuitydb-steward", optional = true }
 continuitydb-workload = { path = "../continuitydb-workload" }
 serde_json.workspace = true
+
+[features]
+local-model = ["dep:continuitydb-steward", "continuitydb-steward/local-model"]
 
 [dev-dependencies]
 assert_cmd.workspace = true

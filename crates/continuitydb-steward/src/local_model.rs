@@ -1,6 +1,6 @@
 //! Feature-gated local model Steward boundary.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use continuitydb_core::{SemanticAnchor, StateCellId};
 use continuitydb_revision::RevisionLinkKind;
 use serde::{Deserialize, Serialize};
@@ -727,6 +727,30 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
             role: "smoke-test-only",
         },
     ]
+}
+
+/// Returns the fixed default proposal-quality suite for local Steward model baselines.
+pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
+    let created_at = Utc
+        .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+        .single()
+        .unwrap_or_else(|| DateTime::<Utc>::from(std::time::UNIX_EPOCH));
+
+    StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+        "insufficient evidence uncertainty",
+        created_at,
+        "Assess whether thin evidence needs verification.",
+    )
+    .with_evidence(
+        "continuitydb://evaluation/thin-evidence",
+        "One weak source mentions the claim without corroboration.",
+    )
+    .expect_action(StewardAction::RequestVerification {
+        cell_id: None,
+        request: "Gather additional source evidence.".to_string(),
+    })
+    .require_citation("continuitydb://evaluation/thin-evidence")
+    .require_rationale_term("uncertainty")])
 }
 
 /// Reproducible local model executable invocation metadata.
