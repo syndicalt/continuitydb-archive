@@ -186,6 +186,10 @@ impl StorageKernel for MemoryKernel {
         &mut self,
         revision_link: RevisionLinkRecord,
     ) -> Result<(), KernelError> {
+        if self.revision_links.contains(&revision_link) {
+            return Err(KernelError::DuplicateRevisionLink);
+        }
+
         self.revision_links.push(revision_link);
         Ok(())
     }
@@ -428,6 +432,28 @@ mod tests {
                 kind: Some(RevisionLinkKind::Supersedes),
             })?,
             vec![first]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_storage_memory_kernel_rejects_duplicate_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let record = RevisionLinkRecord::new(
+            StateCellId::from_u128(1),
+            RevisionLinkKind::Supersedes,
+            StateCellId::from_u128(2),
+            test_commit_time()?,
+        );
+
+        kernel.append_revision_link(record.clone())?;
+        let result = kernel.append_revision_link(record.clone());
+
+        assert!(matches!(result, Err(KernelError::DuplicateRevisionLink)));
+        assert_eq!(
+            kernel.list_revision_links(RevisionLinkLookup::default())?,
+            vec![record]
         );
         Ok(())
     }

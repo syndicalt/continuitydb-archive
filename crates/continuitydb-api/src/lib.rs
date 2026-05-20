@@ -2202,6 +2202,55 @@ WHERE scope = project("continuitydb")
     }
 
     #[test]
+    fn revision_link_record_api_rejects_duplicate_record() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 15, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:api-duplicate-revision-source",
+                0.91,
+                12,
+            )?,
+            committed_at,
+        )?;
+        let target_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:api-duplicate-revision-target",
+                0.41,
+                12,
+            )?,
+            committed_at,
+        )?;
+
+        let record = db.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::Supersedes,
+            target_id,
+            committed_at,
+        )?;
+        let result = db.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::Supersedes,
+            target_id,
+            committed_at,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Kernel(KernelError::DuplicateRevisionLink))
+        ));
+        assert_eq!(
+            db.list_revision_links(RevisionLinkLookup::default())?,
+            vec![record]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn api_commit_id_batch_ingest_stamps_lookup_boundary() -> Result<(), Box<dyn std::error::Error>>
     {
         let committed_at = Utc

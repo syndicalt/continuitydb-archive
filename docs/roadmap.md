@@ -83,6 +83,7 @@ Storage kernel
 27. Add native revision-link record storage. Implemented `RevisionLinkLookup`, append/list storage-kernel methods, in-memory revision-link storage, and checksummed JSONL file-kernel records that survive reopen and compaction.
 28. Add file-kernel secondary indexes for revision-link lookups. Implemented derived in-process indexes for revision-link source, target, kind, source-kind, target-kind, source-target, and source-target-kind filters while preserving append-order results and the canonical log as source of truth.
 29. Add revision-link-aware file-store status. Extended `FileKernelStatus` and inspection surfaces with visible revision-link counts so native revision graph records are operationally visible alongside cells and commits.
+30. Add duplicate revision-link append rejection. Implemented exact duplicate `RevisionLinkRecord` rejection across memory and file kernels, including pre-write file append checks and duplicate durable-log detection during file-kernel reopen.
 
 ## Checkout Milestones
 
@@ -203,6 +204,7 @@ Storage kernel
 38. Add revision-link-aware direct audit. Implemented `ContinuityDb::audit_cell` enrichment over native revision-link records so direct cell audit exposes source-side and target-side revision relationships while preserving missing-cell error behavior.
 39. Add revision-link-aware commit export/import/copy. Extended `CommitExportBatch` with source-owned native revision links, validated imported link endpoints against existing or imported StateCells, and restored links after commit cell import.
 40. Add duplicate-safe revision-link import validation. Extended commit export batch validation to reject duplicate incoming revision-link records and revision links already visible in the target before any cells or links are imported.
+41. Add duplicate-safe native revision-link append validation. Native revision-link record operations now surface `KernelError::DuplicateRevisionLink` when a caller attempts to append the same source, target, kind, and recorded time twice.
 
 ## Steward Milestones
 

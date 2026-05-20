@@ -22,6 +22,9 @@ pub enum KernelError {
     /// A commit identifier already has a visible manifest.
     #[error("commit already exists")]
     DuplicateCommit,
+    /// A duplicate immutable revision-link record was appended.
+    #[error("revision link already exists")]
+    DuplicateRevisionLink,
     /// Requested commit was not found.
     #[error("commit not found")]
     CommitNotFound,
@@ -431,7 +434,7 @@ impl FileKernelIndex {
             return Err(KernelError::StoreCorrupt);
         }
         for revision_link in log.revision_links {
-            index.insert_revision_link(revision_link);
+            index.insert_revision_link(revision_link)?;
         }
         Ok(index)
     }
@@ -528,7 +531,14 @@ impl FileKernelIndex {
         Ok(())
     }
 
-    fn insert_revision_link(&mut self, revision_link: RevisionLinkRecord) {
+    fn insert_revision_link(
+        &mut self,
+        revision_link: RevisionLinkRecord,
+    ) -> Result<(), KernelError> {
+        if self.revision_links.contains(&revision_link) {
+            return Err(KernelError::DuplicateRevisionLink);
+        }
+
         let position = self.revision_links.len();
         self.revision_link_sources
             .entry(revision_link.source)
@@ -563,6 +573,7 @@ impl FileKernelIndex {
             .or_default()
             .push(position);
         self.revision_links.push(revision_link);
+        Ok(())
     }
 
     fn contains_id(&self, id: StateCellId) -> bool {
@@ -1336,6 +1347,10 @@ impl StorageKernel for FileKernel {
         &mut self,
         revision_link: RevisionLinkRecord,
     ) -> Result<(), KernelError> {
+        if self.index.revision_links.contains(&revision_link) {
+            return Err(KernelError::DuplicateRevisionLink);
+        }
+
         let encoded = serde_json::to_string(&FileKernelRecord::RevisionLink {
             revision_link: revision_link.clone(),
             checksum: Some(file_record_checksum(&revision_link)?),
@@ -1348,7 +1363,7 @@ impl StorageKernel for FileKernel {
             .map_err(|_error| KernelError::StoreIo)?;
         write_all_durable(&mut file, format!("{encoded}\n").as_bytes())?;
 
-        self.index.insert_revision_link(revision_link);
+        self.index.insert_revision_link(revision_link)?;
         self.health.canonical_records += 1;
         Ok(())
     }
@@ -1835,6 +1850,68 @@ mod tests {
             reopened.list_revision_links(RevisionLinkLookup::default())?,
             vec![record]
         );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_storage_file_kernel_rejects_duplicate_links_without_writing_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-revision-links-duplicate");
+        let record = RevisionLinkRecord::new(
+            StateCellId::from_u128(1),
+            RevisionLinkKind::Supersedes,
+            StateCellId::from_u128(2),
+            test_commit_time()?,
+        );
+        let mut kernel = FileKernel::open(&path)?;
+
+        kernel.append_revision_link(record.clone())?;
+        let result = kernel.append_revision_link(record.clone());
+
+        assert!(matches!(result, Err(KernelError::DuplicateRevisionLink)));
+        assert_eq!(
+            kernel.list_revision_links(RevisionLinkLookup::default())?,
+            vec![record]
+        );
+        assert_eq!(fs::read_to_string(&path)?.lines().count(), 2);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_storage_file_kernel_rejects_duplicate_links_on_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-revision-links-duplicate-reopen");
+        let record = RevisionLinkRecord::new(
+            StateCellId::from_u128(1),
+            RevisionLinkKind::Supersedes,
+            StateCellId::from_u128(2),
+            test_commit_time()?,
+        );
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n{}\n",
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 1
+                }),
+                serde_json::json!({
+                    "type": "revision_link",
+                    "revision_link": record
+                }),
+                serde_json::json!({
+                    "type": "revision_link",
+                    "revision_link": record
+                })
+            ),
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::DuplicateRevisionLink)));
         fs::remove_file(path)?;
         Ok(())
     }
