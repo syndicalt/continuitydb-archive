@@ -200,7 +200,7 @@ fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error
     let baseline_path = temp_store_path("continuitydb-cli-local-model-baseline");
     let script = r#"#!/usr/bin/env sh
 cat >/dev/null
-printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]}]}'
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]}]}'
 "#;
     fs::write(&executable_path, script)?;
     let mut permissions = fs::metadata(&executable_path)?.permissions();
@@ -239,9 +239,9 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(json["candidate_role"].as_str(), Some("default-feasibility"));
     assert_eq!(json["passed"].as_bool(), Some(true));
-    assert_eq!(json["passed_cases"].as_u64(), Some(3));
+    assert_eq!(json["passed_cases"].as_u64(), Some(4));
     assert_eq!(json["failed_cases"].as_u64(), Some(0));
-    assert_eq!(json["total_cases"].as_u64(), Some(3));
+    assert_eq!(json["total_cases"].as_u64(), Some(4));
     assert_eq!(json["pass_rate"].as_f64(), Some(1.0));
     assert_eq!(
         json["evaluation"]["case_reports"][0]["name"].as_str(),
@@ -269,6 +269,16 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     );
     assert_eq!(
         json["evaluation"]["case_reports"][2]["failures"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        json["evaluation"]["case_reports"][3]["name"].as_str(),
+        Some("multi-source citation preservation")
+    );
+    assert_eq!(
+        json["evaluation"]["case_reports"][3]["failures"]
             .as_array()
             .map(Vec::len),
         Some(0)
@@ -724,7 +734,7 @@ fn cli_benchmark_local_model_prompt_dir_writes_prompt_artifacts(
         .as_array()
         .ok_or_else(|| std::io::Error::other("missing prompt artifacts"))?;
 
-    assert_eq!(artifacts.len(), 3);
+    assert_eq!(artifacts.len(), 4);
     assert_eq!(
         artifacts[0]["case_name"].as_str(),
         Some("insufficient evidence uncertainty")
@@ -754,6 +764,18 @@ fn cli_benchmark_local_model_prompt_dir_writes_prompt_artifacts(
     assert!(third_prompt
         .contains("Check whether release evidence supports a shipped deployment claim."));
     assert!(third_prompt.contains("continuitydb://evaluation/unsupported-release-claim"));
+    assert_eq!(
+        artifacts[3]["case_name"].as_str(),
+        Some("multi-source citation preservation")
+    );
+    let fourth_prompt_path = artifacts[3]["prompt_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing prompt path"))?;
+    let fourth_prompt = fs::read_to_string(fourth_prompt_path)?;
+    assert!(fourth_prompt
+        .contains("Decide whether a release-status change should stay on the active frontier."));
+    assert!(fourth_prompt.contains("continuitydb://evaluation/release-build-source"));
+    assert!(fourth_prompt.contains("continuitydb://evaluation/release-incident-source"));
     assert!(!baseline_path.exists());
 
     fs::remove_dir_all(prompt_dir)?;
@@ -774,7 +796,7 @@ fn cli_local_model_evaluation_suite_outputs_case_contracts(
     let json: Value = serde_json::from_slice(&output)?;
 
     assert_eq!(json["response_schema_version"].as_u64(), Some(1));
-    assert_eq!(json["total_cases"].as_u64(), Some(3));
+    assert_eq!(json["total_cases"].as_u64(), Some(4));
     assert!(json["evaluation_suite_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
@@ -853,6 +875,38 @@ fn cli_local_model_evaluation_suite_outputs_case_contracts(
     assert_eq!(
         json["cases"][2]["forbidden_rationale_terms"][0].as_str(),
         Some("deployed to all customers")
+    );
+    assert_eq!(
+        json["cases"][3]["name"].as_str(),
+        Some("multi-source citation preservation")
+    );
+    assert_eq!(
+        json["cases"][3]["task"].as_str(),
+        Some("Decide whether a release-status change should stay on the active frontier.")
+    );
+    assert_eq!(
+        json["cases"][3]["evidence"][0]["locator"].as_str(),
+        Some("continuitydb://evaluation/release-build-source")
+    );
+    assert_eq!(
+        json["cases"][3]["evidence"][1]["locator"].as_str(),
+        Some("continuitydb://evaluation/release-incident-source")
+    );
+    assert_eq!(
+        json["cases"][3]["expected_actions"][0]["type"].as_str(),
+        Some("mark_frontier")
+    );
+    assert_eq!(
+        json["cases"][3]["required_citations"][0].as_str(),
+        Some("continuitydb://evaluation/release-build-source")
+    );
+    assert_eq!(
+        json["cases"][3]["required_citations"][1].as_str(),
+        Some("continuitydb://evaluation/release-incident-source")
+    );
+    assert_eq!(
+        json["cases"][3]["required_rationale_terms"][0].as_str(),
+        Some("frontier")
     );
     Ok(())
 }

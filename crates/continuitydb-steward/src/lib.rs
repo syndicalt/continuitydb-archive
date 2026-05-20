@@ -1043,6 +1043,17 @@ mod tests {
                     },
                     "rationale": "The evidence does not support deployment, so the shipped claim remains unsupported.",
                     "citations": ["continuitydb://evaluation/unsupported-release-claim"]
+                },
+                {
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": "00000000-0000-0000-0000-000000000003"
+                    },
+                    "rationale": "The release status changed between the build and incident sources, so this state should stay on the frontier.",
+                    "citations": [
+                        "continuitydb://evaluation/release-build-source",
+                        "continuitydb://evaluation/release-incident-source"
+                    ]
                 }
             ]
         })
@@ -1052,13 +1063,18 @@ mod tests {
         let report = default_steward_evaluation_suite().evaluate(&steward);
 
         assert!(report.passed());
-        assert_eq!(report.case_reports().len(), 3);
+        assert_eq!(report.case_reports().len(), 4);
         assert!(report.case_reports()[1].passed());
         assert_eq!(report.case_reports()[1].name(), "conflict classification");
         assert!(report.case_reports()[2].passed());
         assert_eq!(
             report.case_reports()[2].name(),
             "unsupported claim boundary"
+        );
+        assert!(report.case_reports()[3].passed());
+        assert_eq!(
+            report.case_reports()[3].name(),
+            "multi-source citation preservation"
         );
         Ok(())
     }
@@ -1068,7 +1084,7 @@ mod tests {
     fn default_steward_evaluation_suite_exposes_case_contracts() {
         let suite = default_steward_evaluation_suite();
 
-        assert_eq!(suite.len(), 3);
+        assert_eq!(suite.len(), 4);
         assert!(!suite.is_empty());
         let cases = suite.cases();
 
@@ -1141,6 +1157,38 @@ mod tests {
             &cases[2].expected_actions()[0],
             StewardAction::RequestVerification { cell_id: None, request }
                 if request == "Verify deployment status before treating the release as shipped."
+        ));
+
+        assert_eq!(cases[3].name(), "multi-source citation preservation");
+        assert_eq!(
+            cases[3].input().task(),
+            "Decide whether a release-status change should stay on the active frontier."
+        );
+        assert_eq!(cases[3].input().evidence().len(), 2);
+        assert_eq!(
+            cases[3].input().evidence()[0].locator(),
+            "continuitydb://evaluation/release-build-source"
+        );
+        assert_eq!(
+            cases[3].input().evidence()[1].locator(),
+            "continuitydb://evaluation/release-incident-source"
+        );
+        assert_eq!(
+            cases[3].required_citations(),
+            [
+                "continuitydb://evaluation/release-build-source".to_string(),
+                "continuitydb://evaluation/release-incident-source".to_string(),
+            ]
+            .as_slice()
+        );
+        assert_eq!(
+            cases[3].required_rationale_terms(),
+            ["frontier".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[3].expected_actions()[0],
+            StewardAction::MarkFrontier { cell_id }
+                if *cell_id == StateCellId::from_u128(3)
         ));
     }
 

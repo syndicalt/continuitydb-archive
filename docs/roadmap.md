@@ -261,6 +261,7 @@ Storage kernel
 49. Add durable local-model prompt fingerprints. Persisted deterministic prompt-rendering fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
 50. Add CLI local-model dry-run baseline compatibility preflight. Added read-only `benchmark-local-model --dry-run --compare-baseline` baseline inspection so operators can see whether the current runtime and contract metadata have a compatible previous baseline before executing a model.
 51. Add default local-model unsupported-claim evaluation. Expanded the fixed Steward benchmark suite with a deterministic unsupported-claim boundary case so local model baselines test whether models request verification instead of inventing deployment certainty beyond the cited evidence.
+52. Add default local-model citation preservation evaluation. Expanded the fixed Steward benchmark suite with a deterministic multi-source citation preservation case so local model baselines test whether models preserve all required evidence locators for frontier decisions.
 
 ## Small Embeddable Model Track
 

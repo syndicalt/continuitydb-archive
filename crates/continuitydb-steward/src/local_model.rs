@@ -956,6 +956,7 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .unwrap_or_else(|| DateTime::<Utc>::from(std::time::UNIX_EPOCH));
     let conflict_source = StateCellId::from_u128(1);
     let conflict_target = StateCellId::from_u128(2);
+    let frontier_cell = StateCellId::from_u128(3);
 
     StewardEvaluationSuite::new(vec![
         StewardEvaluationCase::new(
@@ -1005,6 +1006,25 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .require_citation("continuitydb://evaluation/unsupported-release-claim")
         .require_rationale_term("unsupported")
         .forbid_rationale_term("deployed to all customers"),
+        StewardEvaluationCase::new(
+            "multi-source citation preservation",
+            created_at,
+            "Decide whether a release-status change should stay on the active frontier.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/release-build-source",
+            "Build evidence says release candidate 0.3.0 was produced but not deployed.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/release-incident-source",
+            "Incident evidence says deployment was paused after a packaging regression.",
+        )
+        .expect_action(StewardAction::MarkFrontier {
+            cell_id: frontier_cell,
+        })
+        .require_citation("continuitydb://evaluation/release-build-source")
+        .require_citation("continuitydb://evaluation/release-incident-source")
+        .require_rationale_term("frontier"),
     ])
 }
 

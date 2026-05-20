@@ -79,6 +79,7 @@ The first milestone builds:
 - CLI local model per-case evaluation detail output.
 - Default local model conflict-classification evaluation case.
 - Default local model unsupported-claim evaluation case.
+- Default local model multi-source citation preservation evaluation case.
 - Public local model evaluation contract introspection.
 - CLI local model evaluation suite contract export.
 - Durable local model evaluation suite fingerprints.
