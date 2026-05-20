@@ -273,6 +273,9 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert!(json["grammar_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["prompt_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert_eq!(
         json["baseline_path"].as_str(),
         Some(baseline_path.display().to_string().as_str())
@@ -357,6 +360,9 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert!(json["grammar_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["prompt_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert_eq!(

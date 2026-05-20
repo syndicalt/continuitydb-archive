@@ -16,13 +16,13 @@ use continuitydb_kernel::{
 use continuitydb_memory::MemoryKernel;
 #[cfg(feature = "local-model")]
 use continuitydb_steward::{
-    default_steward_evaluation_suite, local_model_prompt_for_input,
-    local_model_response_gbnf_grammar, local_model_response_json_schema,
-    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
-    FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner, LocalExecutableRunnerConfig,
-    LocalModelBenchmark, LocalModelBenchmarkBaseline, LocalModelBenchmarkRegression,
-    SmallModelCandidate, StewardAction, StewardEvaluationSuite, StewardIdentity,
-    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    default_steward_evaluation_suite, local_model_prompt_fingerprint_for_suite,
+    local_model_prompt_for_input, local_model_response_gbnf_grammar,
+    local_model_response_json_schema, record_local_model_benchmark_baseline_with_regression,
+    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
+    LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
+    LocalModelBenchmarkRegression, SmallModelCandidate, StewardAction, StewardEvaluationSuite,
+    StewardIdentity, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
@@ -740,6 +740,7 @@ fn local_model_benchmark_dry_run_json(
         "evaluation_suite_fingerprint": default_steward_evaluation_suite().fingerprint(),
         "schema_fingerprint": local_model_contract_fingerprint(local_model_response_json_schema()),
         "grammar_fingerprint": local_model_contract_fingerprint(local_model_response_gbnf_grammar()),
+        "prompt_fingerprint": local_model_prompt_fingerprint_for_suite(&default_steward_evaluation_suite()),
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
         "runtime": {
@@ -902,6 +903,7 @@ fn local_model_benchmark_json(
         "evaluation_suite_fingerprint": baseline.evaluation_suite_fingerprint(),
         "schema_fingerprint": baseline.schema_fingerprint(),
         "grammar_fingerprint": baseline.grammar_fingerprint(),
+        "prompt_fingerprint": baseline.prompt_fingerprint(),
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
         "runtime": {

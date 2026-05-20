@@ -93,6 +93,7 @@ The first milestone builds:
 - CLI local model benchmark dry-run preflight output.
 - CLI local model contract fingerprints.
 - Durable local model contract fingerprints.
+- Durable local model prompt fingerprints.
 - Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.

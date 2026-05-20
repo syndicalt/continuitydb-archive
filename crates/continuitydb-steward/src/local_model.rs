@@ -451,6 +451,11 @@ pub fn local_model_prompt_for_input(input: &LocalModelStewardInput) -> String {
     LocalModelRequest::from_input(input).prompt
 }
 
+/// Returns the deterministic fingerprint for ordered prompts rendered from a suite.
+pub fn local_model_prompt_fingerprint_for_suite(suite: &StewardEvaluationSuite) -> String {
+    prompt_fingerprint_for_suite(suite)
+}
+
 /// Evidence snippet supplied to a local model Steward.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalModelEvidence {
@@ -1054,6 +1059,7 @@ impl LocalModelBenchmark {
             evaluation_suite_fingerprint: self.suite.fingerprint(),
             schema_fingerprint: fingerprint_text(local_model_response_json_schema()),
             grammar_fingerprint: fingerprint_text(local_model_response_gbnf_grammar()),
+            prompt_fingerprint: prompt_fingerprint_for_suite(&self.suite),
             runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
             evaluation: self.suite.evaluate(&steward),
         }
@@ -1068,6 +1074,7 @@ pub struct LocalModelBenchmarkReport {
     evaluation_suite_fingerprint: String,
     schema_fingerprint: String,
     grammar_fingerprint: String,
+    prompt_fingerprint: String,
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
 }
@@ -1096,6 +1103,11 @@ impl LocalModelBenchmarkReport {
     /// Returns the deterministic fingerprint for the response GBNF grammar text.
     pub fn grammar_fingerprint(&self) -> &str {
         &self.grammar_fingerprint
+    }
+
+    /// Returns the deterministic fingerprint for the rendered prompt contract.
+    pub fn prompt_fingerprint(&self) -> &str {
+        &self.prompt_fingerprint
     }
 
     /// Returns the runtime manifest for the evaluated local model invocation.
@@ -1133,6 +1145,8 @@ pub struct LocalModelBenchmarkBaseline {
     #[serde(default)]
     grammar_fingerprint: String,
     #[serde(default)]
+    prompt_fingerprint: String,
+    #[serde(default)]
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
     recorded_at: DateTime<Utc>,
@@ -1148,6 +1162,7 @@ impl LocalModelBenchmarkBaseline {
             evaluation_suite_fingerprint: report.evaluation_suite_fingerprint,
             schema_fingerprint: report.schema_fingerprint,
             grammar_fingerprint: report.grammar_fingerprint,
+            prompt_fingerprint: report.prompt_fingerprint,
             runtime: report.runtime,
             evaluation: report.evaluation,
             recorded_at,
@@ -1182,6 +1197,11 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the deterministic fingerprint for the response GBNF grammar text.
     pub fn grammar_fingerprint(&self) -> &str {
         &self.grammar_fingerprint
+    }
+
+    /// Returns the deterministic fingerprint for the rendered prompt contract.
+    pub fn prompt_fingerprint(&self) -> &str {
+        &self.prompt_fingerprint
     }
 
     /// Returns the runtime manifest that produced this baseline.
@@ -1395,8 +1415,18 @@ where
         })
         .filter(|baseline| baseline.schema_fingerprint() == current.schema_fingerprint())
         .filter(|baseline| baseline.grammar_fingerprint() == current.grammar_fingerprint())
+        .filter(|baseline| baseline.prompt_fingerprint() == current.prompt_fingerprint())
         .filter(|baseline| baseline.runtime() == current.runtime())
         .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
+}
+
+fn prompt_fingerprint_for_suite(suite: &StewardEvaluationSuite) -> String {
+    let prompts = suite
+        .cases()
+        .iter()
+        .map(|case| local_model_prompt_for_input(case.input()))
+        .collect::<Vec<_>>();
+    fingerprint_fields(&prompts)
 }
 
 fn fingerprint_text(text: &str) -> String {

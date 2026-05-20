@@ -24,11 +24,12 @@ pub use ledger::{
 #[cfg(feature = "local-model")]
 pub use local_model::{
     default_steward_evaluation_suite, latest_compatible_local_model_benchmark_baseline,
-    latest_local_model_benchmark_baseline, local_model_prompt_for_input,
-    local_model_response_gbnf_grammar, local_model_response_json_schema,
-    record_local_model_benchmark_baseline, record_local_model_benchmark_baseline_with_regression,
-    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
-    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    latest_local_model_benchmark_baseline, local_model_prompt_fingerprint_for_suite,
+    local_model_prompt_for_input, local_model_response_gbnf_grammar,
+    local_model_response_json_schema, record_local_model_benchmark_baseline,
+    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
+    FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
+    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
     LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
     LocalModelRuntimeManifest, LocalModelSteward, LocalModelStewardInput,
@@ -1553,6 +1554,24 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn local_model_benchmark_report_and_baseline_preserve_prompt_fingerprint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let benchmark = LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("llama-cli")),
+            default_steward_evaluation_suite(),
+        );
+
+        let report = benchmark.run(steward()?);
+        let baseline = LocalModelBenchmarkBaseline::from_report(report.clone(), created_at());
+
+        assert!(report.prompt_fingerprint().starts_with("fnv1a64:"));
+        assert_eq!(baseline.prompt_fingerprint(), report.prompt_fingerprint());
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_benchmark_baseline_decodes_legacy_json_without_runtime_manifest(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let encoded = serde_json::json!({
@@ -1607,6 +1626,28 @@ mod tests {
 
         assert_eq!(baseline.schema_fingerprint(), "");
         assert_eq!(baseline.grammar_fingerprint(), "");
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_baseline_decodes_legacy_json_without_prompt_fingerprint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let encoded = serde_json::json!({
+            "candidate_model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "candidate_role": "default-feasibility",
+            "response_schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+            "evaluation_suite_fingerprint": default_steward_evaluation_suite().fingerprint(),
+            "schema_fingerprint": "fnv1a64:1111111111111111",
+            "grammar_fingerprint": "fnv1a64:2222222222222222",
+            "runtime": { "executable": "sh", "arguments": [] },
+            "evaluation": { "case_reports": [] },
+            "recorded_at": created_at(),
+        });
+
+        let baseline: LocalModelBenchmarkBaseline = serde_json::from_value(encoded)?;
+
+        assert_eq!(baseline.prompt_fingerprint(), "");
         Ok(())
     }
 
@@ -2033,6 +2074,41 @@ mod tests {
         let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
         store.append_baseline(old_compatible.clone())?;
         store.append_baseline(incompatible_contract)?;
+
+        let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
+
+        assert_eq!(latest, Some(old_compatible));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn latest_compatible_local_model_baseline_requires_prompt_fingerprint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let old_compatible = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let mut incompatible_json = serde_json::to_value(local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 2, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?)?;
+        incompatible_json["prompt_fingerprint"] = serde_json::json!("fnv1a64:0000000000000000");
+        let incompatible_prompt: LocalModelBenchmarkBaseline =
+            serde_json::from_value(incompatible_json)?;
+        let current = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 3, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(old_compatible.clone())?;
+        store.append_baseline(incompatible_prompt)?;
 
         let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
 
