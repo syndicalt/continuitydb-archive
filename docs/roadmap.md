@@ -186,6 +186,7 @@ Storage kernel
 19. Add CLI workload replay artifact bundle separation. Rejected `replay-workload --replay-artifact-dir` values that equal the input `--artifact-dir`, preserving the source workload bundle as an immutable replay fixture.
 20. Add CLI workload replay input manifest validation. Added `replay-workload --require-manifest` so reproducible storage-engine trials can reject tampered `workload-cells.json` or `checkout-request.json` fixture files before replaying archived workload bundles.
 21. Add CLI workload replay validated input manifest metadata. Extended `replay-workload --require-manifest` reports and replay bundle manifests with validated input manifest path, fingerprint, and byte-count metadata so archived replay evidence identifies the enforced source bundle manifest.
+22. Add CLI workload replay manifest-validation failure report artifacts. Extended `replay-workload --require-manifest --failure-report-path` so input manifest validation failures write structured JSON with the validation stage, error message, artifact paths, and fixture fingerprints before exiting non-zero.
 
 ## Native API Milestones
 

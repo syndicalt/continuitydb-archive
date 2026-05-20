@@ -484,6 +484,80 @@ fn cli_replay_workload_require_manifest_rejects_tampered_fixture(
 }
 
 #[test]
+fn cli_replay_workload_require_manifest_failure_report_records_validation_failure(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-manifest-failure-dir-{}",
+        std::process::id()
+    ));
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-replay-workload-manifest-failure").with_extension("json");
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if failure_report_path.exists() {
+        fs::remove_file(&failure_report_path)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let mut cells_artifact: Value = serde_json::from_str(&fs::read_to_string(&cells_path)?)?;
+    cells_artifact["summary"]["cell_count"] = Value::from(7);
+    fs::write(&cells_path, serde_json::to_string_pretty(&cells_artifact)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest fingerprint mismatch"));
+
+    let failure_report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    assert_eq!(
+        failure_report["failure"]["stage"].as_str(),
+        Some("input_manifest_validation")
+    );
+    assert_eq!(
+        failure_report["failure"]["message"].as_str(),
+        Some("workload artifact manifest fingerprint mismatch")
+    );
+    assert_eq!(
+        failure_report["artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        failure_report["failure_report_path"].as_str(),
+        Some(failure_report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        failure_report["workload_artifacts"]["cells_path"].as_str(),
+        Some(cells_path.display().to_string().as_str())
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_replay_workload_require_manifest_reports_validated_manifest(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let artifact_dir = std::env::temp_dir().join(format!(

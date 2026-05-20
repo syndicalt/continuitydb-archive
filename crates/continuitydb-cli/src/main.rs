@@ -2096,11 +2096,21 @@ fn replay_workload_json(
     let cells_text = std::fs::read_to_string(&cells_path)?;
     let request_text = std::fs::read_to_string(&checkout_request_path)?;
     let input_bundle_manifest = if options.require_manifest {
-        Some(validate_workload_artifact_manifest(
-            options.artifact_dir,
-            &cells_text,
-            &request_text,
-        )?)
+        match validate_workload_artifact_manifest(options.artifact_dir, &cells_text, &request_text)
+        {
+            Ok(manifest) => Some(manifest),
+            Err(error) => {
+                write_replay_input_manifest_failure_report(
+                    &options,
+                    &cells_path,
+                    &cells_text,
+                    &checkout_request_path,
+                    &request_text,
+                    error.to_string(),
+                )?;
+                return Err(error);
+            }
+        }
     } else {
         None
     };
@@ -2207,6 +2217,42 @@ fn replay_workload_json(
     }
 
     Ok(output)
+}
+
+fn write_replay_input_manifest_failure_report(
+    options: &WorkloadReplayOptions<'_>,
+    cells_path: &Path,
+    cells_text: &str,
+    checkout_request_path: &Path,
+    request_text: &str,
+    message: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(path) = options.failure_report_path {
+        let output = serde_json::json!({
+            "kernel": workload_kernel_name(options.kernel),
+            "artifact_dir": options.artifact_dir.display().to_string(),
+            "store_path": options.store_path.map(|path| path.display().to_string()),
+            "report_path": options.report_path.map(|path| path.display().to_string()),
+            "failure_report_path": path.display().to_string(),
+            "replay_artifact_dir": options.replay_artifact_dir.map(|path| path.display().to_string()),
+            "replay_bundle_manifest": serde_json::Value::Null,
+            "input_bundle_manifest": serde_json::Value::Null,
+            "workload_artifacts": {
+                "cells_path": cells_path.display().to_string(),
+                "cells_fingerprint": fnv1a64_fingerprint(cells_text),
+                "cells_bytes": cells_text.len(),
+                "checkout_request_path": checkout_request_path.display().to_string(),
+                "checkout_request_fingerprint": fnv1a64_fingerprint(request_text),
+                "checkout_request_bytes": request_text.len(),
+            },
+            "failure": {
+                "stage": "input_manifest_validation",
+                "message": message,
+            },
+        });
+        write_pretty_json_file(path, &output)?;
+    }
+    Ok(())
 }
 
 fn validate_workload_artifact_manifest(
