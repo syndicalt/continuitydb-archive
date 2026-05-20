@@ -187,6 +187,10 @@ pub struct WorkloadLookupPlanSnapshot {
     pub exact_constraint_count: usize,
     /// Ordered names of exact lookup constraints checked after candidate selection.
     pub exact_constraints: Vec<String>,
+    /// Number of exact lookup constraints that require residual filtering after index lookup.
+    pub residual_exact_constraint_count: usize,
+    /// Ordered exact lookup constraints enforced by residual filtering after index lookup.
+    pub residual_exact_constraints: Vec<String>,
     /// Number of indexed lookup constraints that can over-select candidates.
     pub lossy_indexed_constraint_count: usize,
     /// Ordered names of indexed lookup constraints that require exact residual filtering.
@@ -223,6 +227,12 @@ impl From<FileKernelLookupPlan> for WorkloadLookupPlanSnapshot {
             exact_constraint_count: plan.exact_constraint_count,
             exact_constraints: plan
                 .exact_constraints
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            residual_exact_constraint_count: plan.residual_exact_constraint_count,
+            residual_exact_constraints: plan
+                .residual_exact_constraints
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
@@ -1347,6 +1357,8 @@ mod tests {
                 ],
                 exact_constraint_count: 2,
                 exact_constraints: vec!["scope", "minimum_confidence"],
+                residual_exact_constraint_count: 0,
+                residual_exact_constraints: Vec::new(),
                 lossy_indexed_constraint_count: 0,
                 lossy_indexed_constraints: Vec::new(),
                 candidate_count: 8,
@@ -1388,6 +1400,8 @@ mod tests {
                 ],
                 exact_constraint_count: 1,
                 exact_constraints: vec!["valid_at"],
+                residual_exact_constraint_count: 1,
+                residual_exact_constraints: vec!["valid_at"],
                 lossy_indexed_constraint_count: 1,
                 lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 8,
@@ -1420,6 +1434,8 @@ mod tests {
                 ],
                 exact_constraint_count: 1,
                 exact_constraints: vec!["valid_at"],
+                residual_exact_constraint_count: 1,
+                residual_exact_constraints: vec!["valid_at"],
                 lossy_indexed_constraint_count: 1,
                 lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 8,
@@ -1455,6 +1471,8 @@ mod tests {
                 ],
                 exact_constraint_count: 1,
                 exact_constraints: vec!["valid_at"],
+                residual_exact_constraint_count: 1,
+                residual_exact_constraints: vec!["valid_at"],
                 lossy_indexed_constraint_count: 1,
                 lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 8,
@@ -1494,6 +1512,8 @@ mod tests {
                 ],
                 exact_constraint_count: 2,
                 exact_constraints: vec!["scope", "valid_at"],
+                residual_exact_constraint_count: 1,
+                residual_exact_constraints: vec!["valid_at"],
                 lossy_indexed_constraint_count: 1,
                 lossy_indexed_constraints: vec!["valid_at"],
                 candidate_count: 5,
@@ -1541,6 +1561,8 @@ mod tests {
                 ],
                 exact_constraint_count: 3,
                 exact_constraints: vec!["scope", "system_at", "valid_at"],
+                residual_exact_constraint_count: 2,
+                residual_exact_constraints: vec!["system_at", "valid_at"],
                 lossy_indexed_constraint_count: 2,
                 lossy_indexed_constraints: vec!["system_at", "valid_at"],
                 candidate_count: 5,
@@ -1559,6 +1581,47 @@ mod tests {
         assert_eq!(
             json["lookup_plan"]["lossy_indexed_constraints"],
             serde_json::json!(["system_at", "valid_at"])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_snapshot_preserves_lookup_plan_residual_exact_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let measurement = sample_measurement()?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement_with_lookup_plan(
+            &measurement,
+            Some(continuitydb_kernel::FileKernelLookupPlan {
+                indexed_constraint_count: 1,
+                indexed_constraints: vec!["scope"],
+                indexed_constraint_plans: vec![
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "scope",
+                        candidate_count: 5,
+                    },
+                ],
+                exact_constraint_count: 2,
+                exact_constraints: vec!["scope", "valid_at"],
+                residual_exact_constraint_count: 1,
+                residual_exact_constraints: vec!["valid_at"],
+                lossy_indexed_constraint_count: 1,
+                lossy_indexed_constraints: vec!["valid_at"],
+                candidate_count: 5,
+                exact_match_count: 4,
+                filtered_candidate_count: 1,
+                candidate_selectivity_basis_points: 8000,
+                full_scan: false,
+            }),
+        );
+        let json = serde_json::to_value(snapshot)?;
+
+        assert_eq!(
+            json["lookup_plan"]["residual_exact_constraint_count"].as_u64(),
+            Some(1)
+        );
+        assert_eq!(
+            json["lookup_plan"]["residual_exact_constraints"],
+            serde_json::json!(["valid_at"])
         );
         Ok(())
     }
@@ -1874,6 +1937,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            residual_exact_constraint_count: 1,
+            residual_exact_constraints: vec!["valid_at".to_string()],
             lossy_indexed_constraint_count: 1,
             lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
@@ -1892,6 +1957,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            residual_exact_constraint_count: 1,
+            residual_exact_constraints: vec!["valid_at".to_string()],
             lossy_indexed_constraint_count: 1,
             lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
@@ -1932,6 +1999,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["scope".to_string()],
+            residual_exact_constraint_count: 0,
+            residual_exact_constraints: Vec::new(),
             lossy_indexed_constraint_count: 0,
             lossy_indexed_constraints: Vec::new(),
             candidate_count: 8,
@@ -1950,6 +2019,8 @@ mod tests {
             }],
             exact_constraint_count: 2,
             exact_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            residual_exact_constraint_count: 1,
+            residual_exact_constraints: vec!["valid_at".to_string()],
             lossy_indexed_constraint_count: 1,
             lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
@@ -1994,6 +2065,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["scope".to_string()],
+            residual_exact_constraint_count: 0,
+            residual_exact_constraints: Vec::new(),
             lossy_indexed_constraint_count: 0,
             lossy_indexed_constraints: Vec::new(),
             candidate_count: 8,
@@ -2018,6 +2091,8 @@ mod tests {
             ],
             exact_constraint_count: 2,
             exact_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            residual_exact_constraint_count: 1,
+            residual_exact_constraints: vec!["valid_at".to_string()],
             lossy_indexed_constraint_count: 1,
             lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
@@ -2055,6 +2130,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            residual_exact_constraint_count: 1,
+            residual_exact_constraints: vec!["valid_at".to_string()],
             lossy_indexed_constraint_count: 1,
             lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
@@ -2073,6 +2150,8 @@ mod tests {
             }],
             exact_constraint_count: 1,
             exact_constraints: vec!["valid_at".to_string()],
+            residual_exact_constraint_count: 1,
+            residual_exact_constraints: vec!["valid_at".to_string()],
             lossy_indexed_constraint_count: 1,
             lossy_indexed_constraints: vec!["valid_at".to_string()],
             candidate_count: 8,
@@ -2194,6 +2273,15 @@ mod tests {
             exact_constraint_count: constraints.len(),
             exact_constraints: constraints
                 .iter()
+                .map(|constraint| constraint.to_string())
+                .collect(),
+            residual_exact_constraint_count: constraints
+                .iter()
+                .filter(|constraint| **constraint == "system_at" || **constraint == "valid_at")
+                .count(),
+            residual_exact_constraints: constraints
+                .iter()
+                .filter(|constraint| **constraint == "system_at" || **constraint == "valid_at")
                 .map(|constraint| constraint.to_string())
                 .collect(),
             lossy_indexed_constraint_count: constraints

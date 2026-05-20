@@ -98,6 +98,7 @@ Storage kernel
 42. Add exact-constraint file lookup-plan labels. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with exact predicate labels so operators can see which lookup predicates are proven after indexed candidate selection.
 43. Add candidate-selectivity file lookup-plan diagnostics. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with integer basis-point selectivity so operators and CI can compare exact-match survival rates without rederiving ratios.
 44. Add lossy temporal index lookup-plan diagnostics. Extended `FileKernelLookupPlan`, CLI JSON, workload snapshots, and workload baseline regression checks with lossy indexed constraint labels so operators can see when temporal indexes over-select candidates before exact range filtering.
+45. Add residual exact lookup-plan diagnostics. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with exact constraints that still require residual filtering after indexed candidate selection, making lossy temporal predicates and future unindexed predicates explicit to operators.
 
 ## Checkout Milestones
 

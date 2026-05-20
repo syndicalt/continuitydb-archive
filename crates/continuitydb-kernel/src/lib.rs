@@ -806,6 +806,14 @@ impl FileKernelIndex {
             .iter()
             .map(|constraint| constraint.name)
             .collect::<Vec<_>>();
+        let residual_exact_constraints = exact_constraints
+            .iter()
+            .copied()
+            .filter(|constraint| {
+                !indexed_constraints.contains(constraint)
+                    || lossy_indexed_constraints.contains(constraint)
+            })
+            .collect::<Vec<_>>();
         let indexed_constraint_plans = indexed_candidate_constraints
             .iter()
             .map(|constraint| FileKernelIndexedConstraintPlan {
@@ -829,6 +837,8 @@ impl FileKernelIndex {
             indexed_constraint_plans,
             exact_constraint_count: exact_constraints.len(),
             exact_constraints,
+            residual_exact_constraint_count: residual_exact_constraints.len(),
+            residual_exact_constraints,
             lossy_indexed_constraint_count: lossy_indexed_constraints.len(),
             lossy_indexed_constraints,
             candidate_count,
@@ -1095,6 +1105,10 @@ pub struct FileKernelLookupPlan {
     pub exact_constraint_count: usize,
     /// Ordered names of exact lookup constraints checked after candidate selection.
     pub exact_constraints: Vec<&'static str>,
+    /// Number of exact lookup constraints that require residual filtering after index lookup.
+    pub residual_exact_constraint_count: usize,
+    /// Ordered exact lookup constraints enforced by residual filtering after index lookup.
+    pub residual_exact_constraints: Vec<&'static str>,
     /// Number of indexed lookup constraints that can over-select candidates.
     pub lossy_indexed_constraint_count: usize,
     /// Ordered names of indexed lookup constraints that require exact residual filtering.
@@ -4277,6 +4291,40 @@ mod tests {
 
         assert_eq!(plan.exact_constraint_count, 2);
         assert_eq!(plan.exact_constraints, vec!["scope", "valid_at"]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_lookup_plan_reports_residual_exact_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path =
+            temp_kernel_path("continuitydb-file-kernel-lookup-plan-residual-exact-constraints");
+        let valid_from = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let as_of = Utc
+            .with_ymd_and_hms(2026, 5, 22, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut matching = sample_cell(
+            "project:continuitydb:lookup-plan-residual-exact-constraints",
+            0.91,
+            12,
+        )?;
+        matching.valid_time = ValidTimeRange::new(valid_from, None)?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, matching)?;
+
+        let plan = kernel.lookup_plan(&CellLookup {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: Some(as_of),
+            ..CellLookup::default()
+        });
+
+        assert_eq!(plan.residual_exact_constraint_count, 1);
+        assert_eq!(plan.residual_exact_constraints, vec!["valid_at"]);
         fs::remove_file(path)?;
         Ok(())
     }

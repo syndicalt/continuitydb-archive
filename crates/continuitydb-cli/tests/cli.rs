@@ -6343,6 +6343,52 @@ WHERE scope = project("continuitydb")"#,
 }
 
 #[test]
+fn cli_inspect_kernel_reports_lookup_plan_residual_exact_constraints(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-residual-exact-lookup-plan");
+    let first_valid = Utc
+        .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let as_of = Utc
+        .with_ymd_and_hms(2026, 5, 22, 0, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let mut current = test_cell("project:continuitydb:cli-residual-current")?;
+    current.valid_time = ValidTimeRange::new(first_valid, None)?;
+    let mut db = ContinuityDb::new(FileKernel::open(&path)?);
+    db.ingest_cells_at_with_commit_id(vec![current], as_of, CommitId::new())?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--lookup-query")
+        .arg(
+            r#"CHECKOUT "inspect" ANSWER "what is stored?"
+WHERE valid_at = "2026-05-22T00:00:00Z"
+  AND scope = project("continuitydb")"#,
+        )
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        json["lookup_plan"]["residual_exact_constraint_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        json["lookup_plan"]["residual_exact_constraints"],
+        serde_json::json!(["valid_at"])
+    );
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_inspect_kernel_reports_lookup_plan_lossy_indexed_constraints(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-inspect-lossy-lookup-plan");

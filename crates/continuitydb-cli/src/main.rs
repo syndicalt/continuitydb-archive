@@ -3087,6 +3087,8 @@ fn file_lookup_plan_json(plan: continuitydb_kernel::FileKernelLookupPlan) -> ser
         })).collect::<Vec<_>>(),
         "exact_constraint_count": plan.exact_constraint_count,
         "exact_constraints": plan.exact_constraints,
+        "residual_exact_constraint_count": plan.residual_exact_constraint_count,
+        "residual_exact_constraints": plan.residual_exact_constraints,
         "lossy_indexed_constraint_count": plan.lossy_indexed_constraint_count,
         "lossy_indexed_constraints": plan.lossy_indexed_constraints,
         "candidate_count": plan.candidate_count,
