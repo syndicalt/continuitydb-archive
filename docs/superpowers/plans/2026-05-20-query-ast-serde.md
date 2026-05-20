@@ -182,7 +182,7 @@ cargo test -p continuitydb-query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit implementation**
+- [x] **Step 4: Commit implementation**
 
 ```bash
 git add crates/continuitydb-query/Cargo.toml crates/continuitydb-query/src/lib.rs Cargo.lock docs/superpowers/plans/2026-05-20-query-ast-serde.md
@@ -196,7 +196,7 @@ git commit -m "feat: add query ast serde"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-query-ast-serde.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add this current-scope bullet near the query AST bullet:
 
@@ -204,7 +204,7 @@ Add this current-scope bullet near the query AST bullet:
 - Portable typed query serialization for bindings and future query files.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add this Query Language milestone after native typed query execution:
 
@@ -212,7 +212,7 @@ Add this Query Language milestone after native typed query execution:
 3. Add portable typed query serialization. Implemented serde support for `continuitydb-query` AST values with stable snake-case enum tags so future CLI query files, bindings, and agent APIs can exchange typed queries without a text parser.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -226,7 +226,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-query-ast-serde.md
