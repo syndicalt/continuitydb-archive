@@ -1412,6 +1412,9 @@ fn local_model_benchmark_json(
                 "failure_count_deltas": regression.failure_count_deltas(),
                 "regressed_cases": regression.regressed_case_names(),
                 "recovered_cases": regression.recovered_case_names(),
+                "outcome_changed_cases": regression.outcome_changed_cases(),
+                "failure_count_changed_cases": regression.failure_count_changed_cases(),
+                "response_changed_cases": regression.response_changed_cases(),
                 "changed_case_summaries": regression.changed_case_summaries(),
                 "pass_count_delta": regression.pass_count_delta(),
             })

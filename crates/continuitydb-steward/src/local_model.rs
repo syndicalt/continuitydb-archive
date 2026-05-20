@@ -1717,6 +1717,9 @@ pub struct LocalModelBenchmarkRegression {
     failure_count_deltas: BTreeMap<String, isize>,
     regressed_case_names: Vec<String>,
     recovered_case_names: Vec<String>,
+    outcome_changed_cases: usize,
+    failure_count_changed_cases: usize,
+    response_changed_cases: usize,
     changed_case_summaries: Vec<LocalModelBenchmarkCaseSummary>,
     pass_count_delta: isize,
     regressed: bool,
@@ -1842,6 +1845,18 @@ impl LocalModelBenchmarkRegression {
             .filter(|case| !case.previous_passed() && case.current_passed())
             .map(|case| case.case_name().to_string())
             .collect();
+        let outcome_changed_cases = changed_case_summaries
+            .iter()
+            .filter(|case| case.outcome_changed())
+            .count();
+        let failure_count_changed_cases = changed_case_summaries
+            .iter()
+            .filter(|case| case.failure_counts_changed())
+            .count();
+        let response_changed_cases = changed_case_summaries
+            .iter()
+            .filter(|case| case.response_changed())
+            .count();
         let pass_count_delta = current_passed_cases as isize - previous_passed_cases as isize;
         let regressed = current_passed_cases < previous_passed_cases
             || (previous.passed() && !current.passed());
@@ -1858,6 +1873,9 @@ impl LocalModelBenchmarkRegression {
             failure_count_deltas,
             regressed_case_names,
             recovered_case_names,
+            outcome_changed_cases,
+            failure_count_changed_cases,
+            response_changed_cases,
             changed_case_summaries,
             pass_count_delta,
             regressed,
@@ -1917,6 +1935,21 @@ impl LocalModelBenchmarkRegression {
     /// Returns case names that failed previously and pass in the current baseline.
     pub fn recovered_case_names(&self) -> &[String] {
         &self.recovered_case_names
+    }
+
+    /// Returns the number of changed case summaries whose pass/fail outcome changed.
+    pub fn outcome_changed_cases(&self) -> usize {
+        self.outcome_changed_cases
+    }
+
+    /// Returns the number of changed case summaries whose stable failure-code counts changed.
+    pub fn failure_count_changed_cases(&self) -> usize {
+        self.failure_count_changed_cases
+    }
+
+    /// Returns the number of changed case summaries whose raw response fingerprint changed.
+    pub fn response_changed_cases(&self) -> usize {
+        self.response_changed_cases
     }
 
     /// Returns changed per-case outcome summaries.

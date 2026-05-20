@@ -1428,6 +1428,18 @@ printf '%s\n' '{"proposals":[]}'
         report["baseline_comparison"]["pass_count_delta"].as_i64(),
         Some(0)
     );
+    assert_eq!(
+        report["baseline_comparison"]["outcome_changed_cases"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["failure_count_changed_cases"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["response_changed_cases"].as_u64(),
+        Some(9)
+    );
     let changed_cases = report["baseline_comparison"]["changed_case_summaries"]
         .as_array()
         .ok_or("missing changed case summaries")?;
@@ -1528,6 +1540,18 @@ fn cli_benchmark_local_model_reports_passing_response_changes(
     assert_eq!(
         report["baseline_comparison"]["pass_count_delta"].as_i64(),
         Some(0)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["outcome_changed_cases"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["failure_count_changed_cases"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["response_changed_cases"].as_u64(),
+        Some(9)
     );
     let changed_cases = report["baseline_comparison"]["changed_case_summaries"]
         .as_array()
