@@ -2,12 +2,18 @@
 
 mod error;
 mod ledger;
+#[cfg(feature = "local-model")]
+mod local_model;
 mod mock;
 mod policy;
 mod proposal;
 
 pub use error::StewardError;
 pub use ledger::{ProposalAuditRecord, ProposalLedger};
+#[cfg(feature = "local-model")]
+pub use local_model::{
+    LocalModelBackend, LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
+};
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
 pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
@@ -17,7 +23,11 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{SemanticAnchor, StateCellId};
     use continuitydb_revision::RevisionLinkKind;
+    #[cfg(feature = "local-model")]
+    use std::cell::RefCell;
 
+    #[cfg(feature = "local-model")]
+    use super::{LocalModelBackend, LocalModelRequest, LocalModelSteward, LocalModelStewardInput};
     use super::{
         MockSteward, MockStewardInput, MockStewardRule, ProposalDecision, ProposalId,
         ProposalLedger, ProposalOutcome, ProposalPolicy, StewardAction, StewardError,
@@ -459,6 +469,134 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].proposal().id(), proposals[0].id());
         assert_eq!(records[0].decision().outcome(), ProposalOutcome::Accepted);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[derive(Debug)]
+    struct StaticLocalModelBackend {
+        response: String,
+        requests: RefCell<Vec<LocalModelRequest>>,
+    }
+
+    #[cfg(feature = "local-model")]
+    impl StaticLocalModelBackend {
+        fn new(response: String) -> Self {
+            Self {
+                response,
+                requests: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    #[cfg(feature = "local-model")]
+    impl LocalModelBackend for StaticLocalModelBackend {
+        fn infer(&self, request: LocalModelRequest) -> Result<String, StewardError> {
+            self.requests.borrow_mut().push(request);
+            Ok(self.response.clone())
+        }
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_steward_invokes_backend_once() -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The cell is high impact and stale.",
+                "citations": ["test://model-evidence"]
+            }]
+        })
+        .to_string();
+        let backend = StaticLocalModelBackend::new(response);
+        let steward = LocalModelSteward::new(steward()?, backend);
+        let input = LocalModelStewardInput::new(created_at(), "find frontier cells")
+            .with_evidence("test://model-evidence", "The cell has not been refreshed.");
+
+        let proposals = steward.propose(input)?;
+
+        assert_eq!(proposals.len(), 1);
+        assert!(matches!(
+            proposals[0].action(),
+            StewardAction::MarkFrontier { cell_id: actual } if *actual == cell_id
+        ));
+        assert_eq!(steward.backend().requests.borrow().len(), 1);
+        assert_eq!(
+            steward.backend().requests.borrow()[0].task(),
+            "find frontier cells"
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_steward_decodes_multiple_json_proposals(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source = StateCellId::new();
+        let target = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [
+                {
+                    "action": {
+                        "type": "link_revision",
+                        "source": source,
+                        "kind": "conflicts_with",
+                        "target": target,
+                    },
+                    "rationale": "The two cells make incompatible claims.",
+                    "citations": ["test://conflict"]
+                },
+                {
+                    "action": {
+                        "type": "request_verification",
+                        "cell_id": target,
+                        "request": "Refresh the target evidence."
+                    },
+                    "rationale": "The evidence is stale.",
+                    "citations": ["test://stale"]
+                }
+            ]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+
+        let proposals = steward.propose(LocalModelStewardInput::new(
+            created_at(),
+            "classify revision work",
+        ))?;
+
+        assert_eq!(proposals.len(), 2);
+        assert!(matches!(
+            proposals[0].action(),
+            StewardAction::LinkRevision {
+                source: actual_source,
+                kind: RevisionLinkKind::ConflictsWith,
+                target: actual_target,
+            } if *actual_source == source && *actual_target == target
+        ));
+        assert!(matches!(
+            proposals[1].action(),
+            StewardAction::RequestVerification { cell_id, request }
+                if *cell_id == Some(target) && request == "Refresh the target evidence."
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_steward_rejects_invalid_json() -> Result<(), Box<dyn std::error::Error>> {
+        let steward = LocalModelSteward::new(
+            steward()?,
+            StaticLocalModelBackend::new("{not valid json".to_string()),
+        );
+
+        let result = steward.propose(LocalModelStewardInput::new(created_at(), "bad output"));
+
+        assert!(matches!(result, Err(StewardError::InvalidModelResponse)));
         Ok(())
     }
 }

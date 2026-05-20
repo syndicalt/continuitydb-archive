@@ -17,4 +17,7 @@ pub enum StewardError {
     /// Proposal decision IDs must match the recorded proposal.
     #[error("proposal decision ID does not match proposal ID")]
     MismatchedDecision,
+    /// Local model response could not be decoded into Steward proposals.
+    #[error("local model response is not a valid Steward proposal response")]
+    InvalidModelResponse,
 }

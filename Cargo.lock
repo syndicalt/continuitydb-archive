@@ -263,6 +263,7 @@ dependencies = [
  "continuitydb-core",
  "continuitydb-revision",
  "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
