@@ -120,6 +120,7 @@ Storage kernel
 5. Route file-backed CLI commands through native open helpers. Refactored inspection, compaction, export, and import commands to use `ContinuityDb<FileKernel>::open_file` or `open_file_with_requirements`, keeping operational tooling aligned with the embeddable API boundary.
 6. Include file-store status in kernel inspection. Extended `continuitydb inspect-kernel` JSON with visible cell count, commit count, and durable file size.
 7. Include file-store health in kernel inspection. Extended `continuitydb inspect-kernel` JSON with file-format health and compaction recommendation metadata.
+8. Add canonical file-store inspection gate. Implemented `continuitydb inspect-kernel --require-canonical` so CI and operators can fail early when a readable file store needs compaction.
 
 ## Native API Milestones
 
@@ -138,6 +139,7 @@ Storage kernel
 13. Add file-backed open helpers with requirement enforcement. Implemented `ContinuityDb<FileKernel>::open_file` and `open_file_with_requirements` so embedders can enforce storage profiles before receiving a usable file-backed database handle.
 14. Add native file-store status. Implemented `ContinuityDb<FileKernel>::file_store_status` so embedders can inspect file-backed store shape without depending on kernel internals.
 15. Add native file-store health reporting. Implemented `ContinuityDb<FileKernel>::file_store_health` so embedders can inspect file format health without depending on kernel internals.
+16. Add canonical file-store requirement gate. Implemented `ensure_file_store_canonical` and `open_canonical_file` so embedders can reject readable but compaction-worthy file stores without automatic mutation.
 
 ## Steward Milestones
 
