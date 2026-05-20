@@ -28,6 +28,7 @@ The first milestone builds:
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.
 - Deterministic frontier subscription runner.
+- Atomic kernel-level StateCell write batches.
 - Native typed operation API for ingest, checkout, and audit.
 - Native typed utility feedback revision API.
 - Native read-only conflict analysis API.

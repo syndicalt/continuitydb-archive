@@ -5,7 +5,7 @@ use continuitydb_core::{
     ActivationState, CellDependencyKind, Confidence, Scope, StateCell, StateCellId, SystemTimeRange,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -65,7 +65,26 @@ pub trait StorageKernel {
         &mut self,
         cell: StateCell,
         committed_at: DateTime<Utc>,
-    ) -> Result<(), KernelError>;
+    ) -> Result<(), KernelError> {
+        self.append_cells_at(std::iter::once(cell), committed_at)
+    }
+
+    /// Appends immutable StateCell versions as one batch.
+    fn append_cells<I>(&mut self, cells: I) -> Result<(), KernelError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
+        self.append_cells_at(cells, Utc::now())
+    }
+
+    /// Appends immutable StateCell versions as one batch at a deterministic system time.
+    fn append_cells_at<I>(
+        &mut self,
+        cells: I,
+        committed_at: DateTime<Utc>,
+    ) -> Result<(), KernelError>
+    where
+        I: IntoIterator<Item = StateCell>;
 
     /// Looks up StateCells matching deterministic constraints.
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError>;
@@ -175,27 +194,48 @@ fn read_cells_from_path(path: &Path) -> Result<Vec<StateCell>, KernelError> {
 }
 
 impl StorageKernel for FileKernel {
-    fn append_cell_at(
+    fn append_cells_at<I>(
         &mut self,
-        mut cell: StateCell,
+        cells: I,
         committed_at: DateTime<Utc>,
-    ) -> Result<(), KernelError> {
-        if self.index.contains_id(cell.id) {
-            return Err(KernelError::DuplicateCell);
+    ) -> Result<(), KernelError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
+        let mut batch_ids = HashSet::new();
+        let mut stamped = Vec::new();
+        for mut cell in cells {
+            if self.index.contains_id(cell.id) || !batch_ids.insert(cell.id) {
+                return Err(KernelError::DuplicateCell);
+            }
+
+            cell.system_time = SystemTimeRange::open_from(committed_at);
+            stamped.push(cell);
         }
 
-        cell.system_time = SystemTimeRange::open_from(committed_at);
-        let encoded = serde_json::to_string(&cell).map_err(|_error| KernelError::StoreCorrupt)?;
+        if stamped.is_empty() {
+            return Ok(());
+        }
+
+        let mut encoded = String::new();
+        for cell in &stamped {
+            encoded.push_str(
+                &serde_json::to_string(cell).map_err(|_error| KernelError::StoreCorrupt)?,
+            );
+            encoded.push('\n');
+        }
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.path)
             .map_err(|_error| KernelError::StoreIo)?;
         file.write_all(encoded.as_bytes())
-            .and_then(|()| file.write_all(b"\n"))
             .map_err(|_error| KernelError::StoreIo)?;
 
-        self.index.insert(cell)
+        for cell in stamped {
+            self.index.insert(cell)?;
+        }
+        Ok(())
     }
 
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError> {
@@ -397,6 +437,76 @@ mod tests {
         let result = reopened.append_cell(cell);
 
         assert!(matches!(result, Err(KernelError::DuplicateCell)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_persists_batch_across_reopen_with_shared_system_time(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-batch");
+        let committed_at = test_commit_time()?;
+        let first = sample_cell("project:continuitydb:batch-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:batch-second", 0.83, 15)?;
+        let first_id = first.id;
+        let second_id = second.id;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cells_at(vec![first, second], committed_at)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup::default())?;
+
+        assert_eq!(
+            results.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            vec![first_id, second_id]
+        );
+        assert!(results
+            .iter()
+            .all(|cell| cell.system_time.from() == committed_at));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_duplicate_ids_inside_batch_without_writing_records(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-batch-duplicate");
+        let committed_at = test_commit_time()?;
+        let cell = sample_cell("project:continuitydb:batch-duplicate", 0.91, 12)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            let result = kernel.append_cells_at(vec![cell.clone(), cell], committed_at);
+            assert!(matches!(result, Err(KernelError::DuplicateCell)));
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        assert!(reopened.lookup_cells(CellLookup::default())?.is_empty());
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_existing_ids_inside_batch_without_writing_records(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-batch-existing");
+        let committed_at = test_commit_time()?;
+        let stored = sample_cell("project:continuitydb:stored", 0.91, 12)?;
+        let duplicate = stored.clone();
+        let fresh = sample_cell("project:continuitydb:fresh", 0.83, 15)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell_at(stored.clone(), committed_at)?;
+            let result = kernel.append_cells_at(vec![duplicate, fresh], committed_at);
+            assert!(matches!(result, Err(KernelError::DuplicateCell)));
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup::default())?;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, stored.id);
         fs::remove_file(path)?;
         Ok(())
     }

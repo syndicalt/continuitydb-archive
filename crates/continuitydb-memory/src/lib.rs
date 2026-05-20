@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use continuitydb_core::{StateCell, SystemTimeRange};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
+use std::collections::HashSet;
 
 /// Append-only in-memory storage kernel.
 #[derive(Default)]
@@ -11,17 +12,26 @@ pub struct MemoryKernel {
 }
 
 impl StorageKernel for MemoryKernel {
-    fn append_cell_at(
+    fn append_cells_at<I>(
         &mut self,
-        mut cell: StateCell,
+        cells: I,
         committed_at: DateTime<Utc>,
-    ) -> Result<(), KernelError> {
-        if self.cells.iter().any(|stored| stored.id == cell.id) {
-            return Err(KernelError::DuplicateCell);
+    ) -> Result<(), KernelError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
+        let mut batch_ids = HashSet::new();
+        let mut stamped = Vec::new();
+        for mut cell in cells {
+            if self.cells.iter().any(|stored| stored.id == cell.id) || !batch_ids.insert(cell.id) {
+                return Err(KernelError::DuplicateCell);
+            }
+
+            cell.system_time = SystemTimeRange::open_from(committed_at);
+            stamped.push(cell);
         }
 
-        cell.system_time = SystemTimeRange::open_from(committed_at);
-        self.cells.push(cell);
+        self.cells.extend(stamped);
         Ok(())
     }
 
@@ -110,7 +120,7 @@ mod tests {
         Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
         TrustSignal, ValidTimeRange,
     };
-    use continuitydb_kernel::{CellLookup, StorageKernel};
+    use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 
     use super::MemoryKernel;
 
@@ -180,6 +190,43 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![cell]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_appends_batch_with_shared_system_time(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let committed_at = test_commit_time()?;
+        let first = sample_cell("project:continuitydb:batch-first", 0.9, 12)?;
+        let second = sample_cell("project:continuitydb:batch-second", 0.8, 15)?;
+        let first_id = first.id;
+        let second_id = second.id;
+
+        kernel.append_cells_at(vec![first, second], committed_at)?;
+
+        let results = kernel.lookup_cells(CellLookup::default())?;
+        assert_eq!(
+            results.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            vec![first_id, second_id]
+        );
+        assert!(results
+            .iter()
+            .all(|cell| cell.system_time.from() == committed_at));
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_rejects_duplicate_ids_inside_batch_without_partial_append(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let committed_at = test_commit_time()?;
+        let cell = sample_cell("project:continuitydb:batch-duplicate", 0.9, 12)?;
+
+        let result = kernel.append_cells_at(vec![cell.clone(), cell], committed_at);
+
+        assert!(matches!(result, Err(KernelError::DuplicateCell)));
+        assert!(kernel.lookup_cells(CellLookup::default())?.is_empty());
         Ok(())
     }
 

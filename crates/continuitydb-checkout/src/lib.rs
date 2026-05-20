@@ -331,11 +331,14 @@ mod tests {
     }
 
     impl StorageKernel for RecordingKernel {
-        fn append_cell_at(
+        fn append_cells_at<I>(
             &mut self,
-            _cell: StateCell,
+            _cells: I,
             _committed_at: DateTime<Utc>,
-        ) -> Result<(), KernelError> {
+        ) -> Result<(), KernelError>
+        where
+            I: IntoIterator<Item = StateCell>,
+        {
             Ok(())
         }
 

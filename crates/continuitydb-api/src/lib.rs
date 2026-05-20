@@ -77,6 +77,29 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(cell_id)
     }
 
+    /// Appends immutable StateCell versions as one batch and returns their identifiers.
+    pub fn ingest_cells<I>(&mut self, cells: I) -> Result<Vec<StateCellId>, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
+        self.ingest_cells_at(cells, Utc::now())
+    }
+
+    /// Appends immutable StateCell versions as one batch at a deterministic system time.
+    pub fn ingest_cells_at<I>(
+        &mut self,
+        cells: I,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Vec<StateCellId>, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCell>,
+    {
+        let cells = cells.into_iter().collect::<Vec<_>>();
+        let cell_ids = cells.iter().map(|cell| cell.id).collect::<Vec<_>>();
+        self.kernel.append_cells_at(cells, committed_at)?;
+        Ok(cell_ids)
+    }
+
     /// Materializes a deterministic continuity slice.
     pub fn checkout(&self, request: CheckoutRequest) -> Result<CheckoutSlice, ContinuityError> {
         checkout(&self.kernel, request).map_err(Into::into)
@@ -185,7 +208,7 @@ mod tests {
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
         ValidTimeRange,
     };
-    use continuitydb_kernel::{CellLookup, StorageKernel};
+    use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
 
     use super::{ContinuityDb, ContinuityError};
@@ -256,6 +279,52 @@ mod tests {
         assert_eq!(slice.cells.len(), 1);
         assert_eq!(slice.cells[0].id, cell_id);
         assert_eq!(slice.cells[0].system_time.from(), committed_at);
+        Ok(())
+    }
+
+    #[test]
+    fn api_batch_ingest_returns_ordered_ids_and_shared_system_time(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:batch-first", 0.91, 12)?;
+        let second = sample_cell("project:continuitydb:batch-second", 0.83, 15)?;
+        let expected_ids = vec![first.id, second.id];
+
+        let returned_ids = db.ingest_cells_at(vec![first, second], committed_at)?;
+
+        assert_eq!(returned_ids, expected_ids);
+        let stored = db.kernel().lookup_cells(CellLookup::default())?;
+        assert_eq!(
+            stored.iter().map(|cell| cell.id).collect::<Vec<_>>(),
+            expected_ids
+        );
+        assert!(stored
+            .iter()
+            .all(|cell| cell.system_time.from() == committed_at));
+        Ok(())
+    }
+
+    #[test]
+    fn api_batch_ingest_rejects_duplicates_without_partial_visibility(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:batch-duplicate", 0.91, 12)?;
+
+        let result = db.ingest_cells_at(vec![cell.clone(), cell], committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Kernel(KernelError::DuplicateCell))
+        ));
+        assert!(db.kernel().lookup_cells(CellLookup::default())?.is_empty());
         Ok(())
     }
 
