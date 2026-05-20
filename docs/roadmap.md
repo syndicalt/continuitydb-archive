@@ -81,6 +81,7 @@ Storage kernel
 25. Add file-backed store status. Implemented `FileKernelStatus` and `FileKernel::status` so operators and embedders can inspect visible cell counts, commit counts, and durable file size after open-time validation.
 26. Add file-backed store health reporting. Implemented `FileKernelHealth` and `FileKernel::health` so validated readable stores report whether they are canonical, legacy raw, checksum-free, or compaction-worthy.
 27. Add native revision-link record storage. Implemented `RevisionLinkLookup`, append/list storage-kernel methods, in-memory revision-link storage, and checksummed JSONL file-kernel records that survive reopen and compaction.
+28. Add file-kernel secondary indexes for revision-link lookups. Implemented derived in-process indexes for revision-link source, target, kind, source-kind, target-kind, source-target, and source-target-kind filters while preserving append-order results and the canonical log as source of truth.
 
 ## Checkout Milestones
 

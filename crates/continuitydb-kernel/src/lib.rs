@@ -398,6 +398,14 @@ struct FileKernelIndex {
     manifests: HashMap<CommitId, CommitManifest>,
     manifest_order: Vec<CommitId>,
     revision_links: Vec<RevisionLinkRecord>,
+    revision_link_sources: HashMap<StateCellId, Vec<usize>>,
+    revision_link_targets: HashMap<StateCellId, Vec<usize>>,
+    revision_link_kinds: HashMap<RevisionLinkKind, Vec<usize>>,
+    revision_link_source_kinds: HashMap<(StateCellId, RevisionLinkKind), Vec<usize>>,
+    revision_link_target_kinds: HashMap<(StateCellId, RevisionLinkKind), Vec<usize>>,
+    revision_link_source_targets: HashMap<(StateCellId, StateCellId), Vec<usize>>,
+    revision_link_source_target_kinds:
+        HashMap<(StateCellId, StateCellId, RevisionLinkKind), Vec<usize>>,
 }
 
 impl FileKernelIndex {
@@ -422,7 +430,9 @@ impl FileKernelIndex {
         {
             return Err(KernelError::StoreCorrupt);
         }
-        index.revision_links = log.revision_links;
+        for revision_link in log.revision_links {
+            index.insert_revision_link(revision_link);
+        }
         Ok(index)
     }
 
@@ -518,6 +528,43 @@ impl FileKernelIndex {
         Ok(())
     }
 
+    fn insert_revision_link(&mut self, revision_link: RevisionLinkRecord) {
+        let position = self.revision_links.len();
+        self.revision_link_sources
+            .entry(revision_link.source)
+            .or_default()
+            .push(position);
+        self.revision_link_targets
+            .entry(revision_link.target)
+            .or_default()
+            .push(position);
+        self.revision_link_kinds
+            .entry(revision_link.kind)
+            .or_default()
+            .push(position);
+        self.revision_link_source_kinds
+            .entry((revision_link.source, revision_link.kind))
+            .or_default()
+            .push(position);
+        self.revision_link_target_kinds
+            .entry((revision_link.target, revision_link.kind))
+            .or_default()
+            .push(position);
+        self.revision_link_source_targets
+            .entry((revision_link.source, revision_link.target))
+            .or_default()
+            .push(position);
+        self.revision_link_source_target_kinds
+            .entry((
+                revision_link.source,
+                revision_link.target,
+                revision_link.kind,
+            ))
+            .or_default()
+            .push(position);
+        self.revision_links.push(revision_link);
+    }
+
     fn contains_id(&self, id: StateCellId) -> bool {
         self.ids.contains_key(&id)
     }
@@ -565,8 +612,84 @@ impl FileKernelIndex {
     }
 
     fn list_revision_links(&self, lookup: RevisionLinkLookup) -> Vec<RevisionLinkRecord> {
-        self.revision_links
-            .iter()
+        let candidates: Vec<&RevisionLinkRecord> = if let (Some(source), Some(target), Some(kind)) =
+            (lookup.source, lookup.target, lookup.kind)
+        {
+            self.revision_link_source_target_kinds
+                .get(&(source, target, kind))
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.revision_links[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let (Some(source), Some(target)) = (lookup.source, lookup.target) {
+            self.revision_link_source_targets
+                .get(&(source, target))
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.revision_links[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let (Some(source), Some(kind)) = (lookup.source, lookup.kind) {
+            self.revision_link_source_kinds
+                .get(&(source, kind))
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.revision_links[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let (Some(target), Some(kind)) = (lookup.target, lookup.kind) {
+            self.revision_link_target_kinds
+                .get(&(target, kind))
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.revision_links[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(source) = lookup.source {
+            self.revision_link_sources
+                .get(&source)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.revision_links[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(target) = lookup.target {
+            self.revision_link_targets
+                .get(&target)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.revision_links[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(kind) = lookup.kind {
+            self.revision_link_kinds
+                .get(&kind)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.revision_links[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            self.revision_links.iter().collect()
+        };
+
+        candidates
+            .into_iter()
             .filter(|revision_link| {
                 lookup
                     .source
@@ -1222,7 +1345,7 @@ impl StorageKernel for FileKernel {
             .map_err(|_error| KernelError::StoreIo)?;
         write_all_durable(&mut file, format!("{encoded}\n").as_bytes())?;
 
-        self.index.revision_links.push(revision_link);
+        self.index.insert_revision_link(revision_link);
         self.health.canonical_records += 1;
         Ok(())
     }
@@ -1308,6 +1431,16 @@ mod tests {
             CellCost::new(tokens, 0)?,
         )
         .map_err(Into::into)
+    }
+
+    fn indexed_revision_links(
+        index: &super::FileKernelIndex,
+        positions: &[usize],
+    ) -> Vec<RevisionLinkRecord> {
+        positions
+            .iter()
+            .map(|position| index.revision_links[*position].clone())
+            .collect()
     }
 
     #[test]
@@ -1722,6 +1855,244 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![matching]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rebuilds_revision_link_indexes() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-revision-link-index-rebuild");
+        let recorded_at = test_commit_time()?;
+        let source = StateCellId::from_u128(10);
+        let target = StateCellId::from_u128(20);
+        let other_source = StateCellId::from_u128(30);
+        let other_target = StateCellId::from_u128(40);
+        let same_target = RevisionLinkRecord::new(
+            other_source,
+            RevisionLinkKind::ConflictsWith,
+            target,
+            recorded_at,
+        );
+        let matching =
+            RevisionLinkRecord::new(source, RevisionLinkKind::Supersedes, target, recorded_at);
+        let same_source = RevisionLinkRecord::new(
+            source,
+            RevisionLinkKind::Supersedes,
+            other_target,
+            recorded_at,
+        );
+        let same_kind = RevisionLinkRecord::new(
+            other_source,
+            RevisionLinkKind::Supersedes,
+            other_target,
+            recorded_at,
+        );
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_revision_link(same_target.clone())?;
+            kernel.append_revision_link(matching.clone())?;
+            kernel.append_revision_link(same_source.clone())?;
+            kernel.append_revision_link(same_kind.clone())?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+
+        assert_eq!(
+            indexed_revision_links(
+                &reopened.index,
+                &reopened
+                    .index
+                    .revision_link_sources
+                    .get(&source)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![matching.clone(), same_source.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &reopened.index,
+                &reopened
+                    .index
+                    .revision_link_targets
+                    .get(&target)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![same_target, matching.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &reopened.index,
+                &reopened
+                    .index
+                    .revision_link_kinds
+                    .get(&RevisionLinkKind::Supersedes)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![matching.clone(), same_source.clone(), same_kind]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &reopened.index,
+                &reopened
+                    .index
+                    .revision_link_source_kinds
+                    .get(&(source, RevisionLinkKind::Supersedes))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![matching.clone(), same_source]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &reopened.index,
+                &reopened
+                    .index
+                    .revision_link_target_kinds
+                    .get(&(target, RevisionLinkKind::Supersedes))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![matching.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &reopened.index,
+                &reopened
+                    .index
+                    .revision_link_source_targets
+                    .get(&(source, target))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![matching.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &reopened.index,
+                &reopened
+                    .index
+                    .revision_link_source_target_kinds
+                    .get(&(source, target, RevisionLinkKind::Supersedes))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![matching.clone()]
+        );
+        assert_eq!(
+            reopened.list_revision_links(RevisionLinkLookup {
+                source: Some(source),
+                target: Some(target),
+                kind: Some(RevisionLinkKind::Supersedes),
+            })?,
+            vec![matching]
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_revision_link_indexes_after_append(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-revision-link-index-append");
+        let source = StateCellId::from_u128(100);
+        let target = StateCellId::from_u128(200);
+        let record = RevisionLinkRecord::new(
+            source,
+            RevisionLinkKind::DerivesFrom,
+            target,
+            test_commit_time()?,
+        );
+        let mut kernel = FileKernel::open(&path)?;
+
+        kernel.append_revision_link(record.clone())?;
+
+        assert_eq!(
+            indexed_revision_links(
+                &kernel.index,
+                &kernel
+                    .index
+                    .revision_link_sources
+                    .get(&source)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![record.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &kernel.index,
+                &kernel
+                    .index
+                    .revision_link_targets
+                    .get(&target)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![record.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &kernel.index,
+                &kernel
+                    .index
+                    .revision_link_kinds
+                    .get(&RevisionLinkKind::DerivesFrom)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![record.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &kernel.index,
+                &kernel
+                    .index
+                    .revision_link_source_kinds
+                    .get(&(source, RevisionLinkKind::DerivesFrom))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![record.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &kernel.index,
+                &kernel
+                    .index
+                    .revision_link_target_kinds
+                    .get(&(target, RevisionLinkKind::DerivesFrom))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![record.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &kernel.index,
+                &kernel
+                    .index
+                    .revision_link_source_targets
+                    .get(&(source, target))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![record.clone()]
+        );
+        assert_eq!(
+            indexed_revision_links(
+                &kernel.index,
+                &kernel
+                    .index
+                    .revision_link_source_target_kinds
+                    .get(&(source, target, RevisionLinkKind::DerivesFrom))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+            vec![record.clone()]
+        );
         fs::remove_file(path)?;
         Ok(())
     }
