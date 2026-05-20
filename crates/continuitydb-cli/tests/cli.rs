@@ -199,6 +199,43 @@ fn cli_measure_workload_records_baseline_for_memory_kernel(
     Ok(())
 }
 
+#[test]
+fn cli_measure_workload_report_path_writes_json_artifact() -> Result<(), Box<dyn std::error::Error>>
+{
+    let report_path = temp_store_path("continuitydb-cli-measure-workload-report")
+        .with_extension("dir")
+        .join("workload-report.json");
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--report-path")
+        .arg(&report_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout_json: Value = serde_json::from_slice(&output)?;
+    let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+
+    assert_eq!(report_json, stdout_json);
+    assert_eq!(report_json["kernel"].as_str(), Some("memory"));
+    assert_eq!(report_json["workload"]["cell_count"].as_u64(), Some(8));
+
+    fs::remove_file(&report_path)?;
+    fs::remove_dir(
+        report_path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("report path should have a parent directory"))?,
+    )?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error::Error>> {

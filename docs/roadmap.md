@@ -175,6 +175,7 @@ Storage kernel
 8. Add file-kernel lookup-plan diagnostics to workload measurement. Extended `continuitydb measure-workload --kernel file` JSON with the exact checkout request's file lookup plan so workload artifacts capture indexed constraints, per-index cardinalities, final candidate counts, and full-scan fallback alongside ingest and checkout timings.
 9. Add durable file workload lookup-plan baseline snapshots. Extended workload measurement snapshots with optional serialized file lookup-plan diagnostics so JSONL baselines preserve indexed constraint labels, per-index candidate counts, final candidate counts, and full-scan status for future planner regression analysis.
 10. Add file workload lookup-plan baseline regression detection. Extended workload baseline comparison with deterministic lookup-plan presence, indexed constraint, candidate count, full-scan, and per-constraint candidate-count regressions so persisted planner evidence can fail CI before selected checkout counts change.
+11. Add CLI workload report artifacts. Added `measure-workload --report-path` so successful workload measurements can write the same structured JSON printed to stdout into an archiveable artifact for CI and storage-engine trials.
 
 ## Native API Milestones
 

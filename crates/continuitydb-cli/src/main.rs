@@ -31,9 +31,7 @@ use continuitydb_workload::{
     WorkloadBaselineRecord, WorkloadConfig, WorkloadMeasurement, WorkloadMeasurementSnapshot,
     WorkloadRegressionThresholds,
 };
-#[cfg(feature = "local-model")]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// ContinuityDB command-line interface.
 #[derive(Debug, Parser)]
@@ -50,6 +48,7 @@ struct Cli {
 struct WorkloadMeasureOptions<'a> {
     kernel: WorkloadKernelProfile,
     store_path: Option<&'a PathBuf>,
+    report_path: Option<&'a PathBuf>,
     cells: usize,
     token_budget: i64,
     frontier_every: usize,
@@ -181,6 +180,9 @@ enum Command {
         /// Path to the JSONL file-backed store when measuring the file kernel.
         #[arg(long = "store-path")]
         store_path: Option<PathBuf>,
+        /// Optional path to write the successful workload measurement JSON report.
+        #[arg(long = "report-path")]
+        report_path: Option<PathBuf>,
         /// Number of deterministic StateCells to generate.
         #[arg(long = "cells", default_value_t = 8)]
         cells: usize,
@@ -380,6 +382,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::MeasureWorkload {
             kernel,
             store_path,
+            report_path,
             cells,
             token_budget,
             frontier_every,
@@ -393,6 +396,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let output = measure_workload_json(WorkloadMeasureOptions {
                 kernel,
                 store_path: store_path.as_ref(),
+                report_path: report_path.as_ref(),
                 cells,
                 token_budget,
                 frontier_every,
@@ -403,6 +407,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 max_elapsed_growth_percent,
                 fail_on_regression,
             })?;
+            if let Some(path) = report_path.as_ref() {
+                write_pretty_json_file(path, &output)?;
+            }
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
@@ -1031,7 +1038,6 @@ fn local_model_benchmark_dry_run_json(
     value
 }
 
-#[cfg(feature = "local-model")]
 fn write_pretty_json_file(
     report_path: &Path,
     report: &serde_json::Value,
@@ -1660,10 +1666,7 @@ fn measure_workload_json(
     }
 
     Ok(workload_measurement_json(
-        options.kernel,
-        options.store_path,
-        options.baseline_path,
-        options.label,
+        &options,
         comparison.as_ref(),
         lookup_plan,
         measurement,
@@ -1671,19 +1674,17 @@ fn measure_workload_json(
 }
 
 fn workload_measurement_json(
-    kernel: WorkloadKernelProfile,
-    store_path: Option<&PathBuf>,
-    baseline_path: Option<&PathBuf>,
-    label: &str,
+    options: &WorkloadMeasureOptions<'_>,
     comparison: Option<&WorkloadBaselineComparison>,
     lookup_plan: Option<continuitydb_kernel::FileKernelLookupPlan>,
     measurement: WorkloadMeasurement,
 ) -> serde_json::Value {
     serde_json::json!({
-        "kernel": workload_kernel_name(kernel),
-        "store_path": store_path.map(|path| path.display().to_string()),
-        "baseline_path": baseline_path.map(|path| path.display().to_string()),
-        "baseline_label": baseline_path.map(|_| label),
+        "kernel": workload_kernel_name(options.kernel),
+        "store_path": options.store_path.map(|path| path.display().to_string()),
+        "report_path": options.report_path.map(|path| path.display().to_string()),
+        "baseline_path": options.baseline_path.map(|path| path.display().to_string()),
+        "baseline_label": options.baseline_path.map(|_| options.label),
         "baseline_comparison": comparison.map(workload_baseline_comparison_json),
         "lookup_plan": lookup_plan.map(file_lookup_plan_json),
         "workload": {
