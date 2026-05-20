@@ -935,6 +935,10 @@ impl StewardEvaluationCaseReport {
 pub enum StewardEvaluationFailure {
     /// The local model backend or decoder failed.
     ModelError,
+    /// The local model backend failed before producing a response.
+    ModelExecutionFailed,
+    /// The local model produced a response that could not be decoded.
+    InvalidModelResponse,
     /// No emitted proposal matched an expected action.
     MissingExpectedAction {
         /// Expected action that was not emitted.
@@ -2159,7 +2163,7 @@ where
             return (
                 StewardEvaluationCaseReport {
                     name: case.name.clone(),
-                    failures: vec![StewardEvaluationFailure::ModelError],
+                    failures: vec![StewardEvaluationFailure::ModelExecutionFailed],
                 },
                 StewardEvaluationCaseResponse::missing(case.name.clone()),
             );
@@ -2171,7 +2175,7 @@ where
             return (
                 StewardEvaluationCaseReport {
                     name: case.name.clone(),
-                    failures: vec![StewardEvaluationFailure::ModelError],
+                    failures: vec![StewardEvaluationFailure::InvalidModelResponse],
                 },
                 StewardEvaluationCaseResponse::captured(case.name.clone(), response),
             );

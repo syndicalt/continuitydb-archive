@@ -283,6 +283,7 @@ Storage kernel
 71. Add CLI local-model instability artifact bundles. Extended `benchmark-local-model --artifact-dir --stability-trials --fail-on-unstable` so unstable repeated-output checks still write a benchmark report with stability drift metadata, responses, nested response manifests, and the root bundle manifest before exiting non-zero without recording a baseline.
 72. Add CLI local-model regression failure report artifacts. Extended `benchmark-local-model --fail-on-regression --failure-report-path` so compatible baseline regressions can write structured benchmark JSON without requiring a full artifact bundle or recording the regressed run.
 73. Add CLI local-model instability failure report artifacts. Extended `benchmark-local-model --stability-trials --fail-on-unstable --failure-report-path` so unstable repeated-output checks can write structured benchmark JSON without requiring a full artifact bundle or recording a baseline.
+74. Add typed local-model evaluation failure diagnostics. Split generic model errors into execution-failure and invalid-response failure reasons so benchmark reports distinguish runtime failures from undecodable model output while preserving deterministic evaluation artifacts.
 
 ## Small Embeddable Model Track
 

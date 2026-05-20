@@ -679,6 +679,17 @@ mod tests {
     }
 
     #[cfg(feature = "local-model")]
+    #[derive(Debug)]
+    struct FailingLocalModelBackend;
+
+    #[cfg(feature = "local-model")]
+    impl LocalModelBackend for FailingLocalModelBackend {
+        fn infer(&self, _request: LocalModelRequest) -> Result<String, StewardError> {
+            Err(StewardError::LocalModelExecutionFailed)
+        }
+    }
+
+    #[cfg(feature = "local-model")]
     #[test]
     fn local_model_steward_invokes_backend_once() -> Result<(), Box<dyn std::error::Error>> {
         let cell_id = StateCellId::new();
@@ -798,6 +809,49 @@ mod tests {
         let result = steward.propose(LocalModelStewardInput::new(created_at(), "bad output"));
 
         assert!(matches!(result, Err(StewardError::InvalidModelResponse)));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_reports_model_execution_failure() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let steward = LocalModelSteward::new(steward()?, FailingLocalModelBackend);
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "execution failure",
+            created_at(),
+            "run local model",
+        )]);
+
+        let report = suite.evaluate(&steward);
+
+        assert_eq!(
+            report.case_reports()[0].failures(),
+            &[StewardEvaluationFailure::ModelExecutionFailed]
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_reports_invalid_model_response() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let steward = LocalModelSteward::new(
+            steward()?,
+            StaticLocalModelBackend::new("{not valid json".to_string()),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "invalid response",
+            created_at(),
+            "decode local model output",
+        )]);
+
+        let report = suite.evaluate(&steward);
+
+        assert_eq!(
+            report.case_reports()[0].failures(),
+            &[StewardEvaluationFailure::InvalidModelResponse]
+        );
         Ok(())
     }
 
