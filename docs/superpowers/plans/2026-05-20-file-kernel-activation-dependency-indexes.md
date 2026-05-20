@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add activation rebuild test**
+- [x] **Step 1: Add activation rebuild test**
 
 Add near `file_kernel_filters_by_activation_state`:
 
@@ -59,7 +59,7 @@ fn file_kernel_rebuilds_activation_index() -> Result<(), Box<dyn std::error::Err
 }
 ```
 
-- [ ] **Step 2: Add activation append-update test**
+- [x] **Step 2: Add activation append-update test**
 
 Add:
 
@@ -89,7 +89,7 @@ fn file_kernel_updates_activation_index_after_append() -> Result<(), Box<dyn std
 }
 ```
 
-- [ ] **Step 3: Add dependency rebuild test**
+- [x] **Step 3: Add dependency rebuild test**
 
 Add near `file_kernel_filters_by_dependency_target_and_kind`:
 
@@ -153,7 +153,7 @@ fn file_kernel_rebuilds_dependency_indexes() -> Result<(), Box<dyn std::error::E
 }
 ```
 
-- [ ] **Step 4: Add dependency append-update test**
+- [x] **Step 4: Add dependency append-update test**
 
 Add:
 
@@ -200,7 +200,7 @@ fn file_kernel_updates_dependency_indexes_after_append() -> Result<(), Box<dyn s
 }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify RED**
+- [x] **Step 5: Run targeted tests and verify RED**
 
 Run:
 
@@ -217,7 +217,7 @@ Expected: compilation fails because `activations`, `dependency_targets`, and `de
 - Modify: `crates/continuitydb-core/src/cell.rs`
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Derive Hash for index key types**
+- [x] **Step 1: Derive Hash for index key types**
 
 Change:
 
@@ -247,7 +247,7 @@ to:
 pub enum CellDependencyKind {
 ```
 
-- [ ] **Step 2: Add index fields**
+- [x] **Step 2: Add index fields**
 
 Change `FileKernelIndex` to include:
 
@@ -257,7 +257,7 @@ dependency_targets: HashMap<StateCellId, Vec<usize>>,
 dependency_target_kinds: HashMap<(StateCellId, CellDependencyKind), Vec<usize>>,
 ```
 
-- [ ] **Step 3: Populate indexes during insert**
+- [x] **Step 3: Populate indexes during insert**
 
 In `FileKernelIndex::insert`, after evidence-source indexing and before commit indexing, add:
 
@@ -278,7 +278,7 @@ for dependency in &cell.dependencies {
 }
 ```
 
-- [ ] **Step 4: Use indexes for candidate selection**
+- [x] **Step 4: Use indexes for candidate selection**
 
 In `FileKernel::lookup_cells`, add activation/dependency branches after evidence-source lookup and before full scan:
 
@@ -320,7 +320,7 @@ In `FileKernel::lookup_cells`, add activation/dependency branches after evidence
     }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify GREEN**
+- [x] **Step 5: Run targeted tests and verify GREEN**
 
 Run:
 
@@ -342,7 +342,7 @@ Expected: all targeted index and lookup tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-file-kernel-activation-dependency-indexes.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope near the secondary file-kernel index bullet:
 
@@ -350,7 +350,7 @@ Add to Current Scope near the secondary file-kernel index bullet:
 - File-kernel secondary indexes for activation states and dependency filters.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add a Storage Kernel milestone after the answerability/evidence index milestone:
 
@@ -358,7 +358,7 @@ Add a Storage Kernel milestone after the answerability/evidence index milestone:
 22. Add file-kernel secondary indexes for activation and dependency lookups. Implemented derived in-process indexes for activation states, dependency targets, and dependency target/kind pairs so frontier and causality filters can start from indexed candidates while preserving append-order results.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -372,7 +372,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 

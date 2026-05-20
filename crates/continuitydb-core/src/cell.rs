@@ -109,7 +109,7 @@ pub enum Scope {
 }
 
 /// Lifecycle activation state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ActivationState {
     /// Stored but not actively considered.
     Dormant,
@@ -200,7 +200,7 @@ impl UtilityFeedback {
 }
 
 /// Meaning of a StateCell dependency edge.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum CellDependencyKind {
     /// This cell depends on the target cell.
     DependsOn,

@@ -75,6 +75,7 @@ Storage kernel
 19. Add headered JSONL file-kernel partial-commit detection. Implemented explicit-manifest enforcement for current-format headered logs so crash-truncated cell records are rejected instead of reconstructed as committed truth, while headerless legacy raw logs remain readable.
 20. Add durable filesystem flush boundaries for JSONL file-kernel writes. Implemented internal durable write helpers using flush plus `sync_all` for headers, append batches, and compaction temp files, with parent-directory sync after compaction rename.
 21. Add file-kernel secondary indexes for answerability and evidence source lookups. Implemented derived in-process indexes rebuilt from the JSONL log and maintained after append so common context retrieval filters can start from indexed candidates while preserving append-order results and the canonical log as source of truth.
+22. Add file-kernel secondary indexes for activation and dependency lookups. Implemented derived in-process indexes for activation states, dependency targets, and dependency target/kind pairs so frontier and causality filters can start from indexed candidates while preserving append-order results.
 
 ## Checkout Milestones
 

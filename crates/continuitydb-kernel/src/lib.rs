@@ -214,6 +214,9 @@ struct FileKernelIndex {
     anchors: HashMap<String, Vec<usize>>,
     answerability_questions: HashMap<String, Vec<usize>>,
     evidence_sources: HashMap<String, Vec<usize>>,
+    activations: HashMap<ActivationState, Vec<usize>>,
+    dependency_targets: HashMap<StateCellId, Vec<usize>>,
+    dependency_target_kinds: HashMap<(StateCellId, CellDependencyKind), Vec<usize>>,
     commits: HashMap<CommitId, Vec<usize>>,
     manifests: HashMap<CommitId, CommitManifest>,
     manifest_order: Vec<CommitId>,
@@ -266,6 +269,20 @@ impl FileKernelIndex {
         for evidence in &cell.evidence {
             self.evidence_sources
                 .entry(evidence.source.as_str().to_string())
+                .or_default()
+                .push(position);
+        }
+        self.activations
+            .entry(cell.activation)
+            .or_default()
+            .push(position);
+        for dependency in &cell.dependencies {
+            self.dependency_targets
+                .entry(dependency.target)
+                .or_default()
+                .push(position);
+            self.dependency_target_kinds
+                .entry((dependency.target, dependency.kind))
                 .or_default()
                 .push(position);
         }
@@ -732,6 +749,41 @@ impl StorageKernel for FileKernel {
                         .collect()
                 })
                 .unwrap_or_default()
+        } else if let Some(activation) = lookup.activation {
+            self.index
+                .activations
+                .get(&activation)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.index.cells[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(target) = lookup.dependency_target {
+            if let Some(kind) = lookup.dependency_kind {
+                self.index
+                    .dependency_target_kinds
+                    .get(&(target, kind))
+                    .map(|positions| {
+                        positions
+                            .iter()
+                            .map(|position| &self.index.cells[*position])
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                self.index
+                    .dependency_targets
+                    .get(&target)
+                    .map(|positions| {
+                        positions
+                            .iter()
+                            .map(|position| &self.index.cells[*position])
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
         } else {
             self.index.cells.iter().collect()
         };
@@ -2035,6 +2087,65 @@ mod tests {
     }
 
     #[test]
+    fn file_kernel_rebuilds_activation_index() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-activation-index-rebuild");
+        let mut active = sample_cell("project:continuitydb:index-active", 0.91, 12)?;
+        active.activation = ActivationState::Active;
+        let mut frontier = sample_cell("project:continuitydb:index-frontier-activation", 0.83, 15)?;
+        frontier.activation = ActivationState::Frontier;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            append_committed(&mut kernel, active)?;
+            frontier = append_committed(&mut kernel, frontier)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let positions = reopened
+            .index
+            .activations
+            .get(&ActivationState::Frontier)
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![frontier]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_activation_index_after_append() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-activation-index-append");
+        let mut frontier = sample_cell(
+            "project:continuitydb:index-append-frontier-activation",
+            0.83,
+            15,
+        )?;
+        frontier.activation = ActivationState::Frontier;
+        let mut kernel = FileKernel::open(&path)?;
+
+        frontier = append_committed(&mut kernel, frontier)?;
+        let positions = kernel
+            .index
+            .activations
+            .get(&ActivationState::Frontier)
+            .cloned()
+            .unwrap_or_default();
+        let indexed = positions
+            .iter()
+            .map(|position| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(indexed, vec![frontier]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
     fn file_kernel_filters_by_answerability_question() -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_kernel_path("continuitydb-file-kernel-answerability");
         let mut status = sample_cell("project:continuitydb:status", 0.91, 12)?;
@@ -2293,6 +2404,105 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![dependent]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rebuilds_dependency_indexes() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-dependency-index-rebuild");
+        let target = StateCellId::new();
+        let other_target = StateCellId::new();
+        let mut dependent = sample_cell("project:continuitydb:index-dependent", 0.9, 12)?;
+        dependent.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut support = sample_cell("project:continuitydb:index-support", 0.9, 12)?;
+        support.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::Supports,
+            "supports target",
+        ));
+        let mut unrelated = sample_cell("project:continuitydb:index-unrelated", 0.9, 12)?;
+        unrelated.dependencies.push(CellDependency::new(
+            other_target,
+            CellDependencyKind::DependsOn,
+            "depends on other target",
+        ));
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            dependent = append_committed(&mut kernel, dependent)?;
+            support = append_committed(&mut kernel, support)?;
+            append_committed(&mut kernel, unrelated)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let target_positions = reopened
+            .index
+            .dependency_targets
+            .get(&target)
+            .cloned()
+            .unwrap_or_default();
+        let target_indexed = target_positions
+            .iter()
+            .map(|position| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+        let kind_positions = reopened
+            .index
+            .dependency_target_kinds
+            .get(&(target, CellDependencyKind::DependsOn))
+            .cloned()
+            .unwrap_or_default();
+        let kind_indexed = kind_positions
+            .iter()
+            .map(|position| reopened.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(target_indexed, vec![dependent.clone(), support]);
+        assert_eq!(kind_indexed, vec![dependent]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_updates_dependency_indexes_after_append(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-dependency-index-append");
+        let target = StateCellId::new();
+        let mut dependent = sample_cell("project:continuitydb:index-append-dependent", 0.9, 12)?;
+        dependent.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut kernel = FileKernel::open(&path)?;
+
+        dependent = append_committed(&mut kernel, dependent)?;
+        let target_positions = kernel
+            .index
+            .dependency_targets
+            .get(&target)
+            .cloned()
+            .unwrap_or_default();
+        let target_indexed = target_positions
+            .iter()
+            .map(|position| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+        let kind_positions = kernel
+            .index
+            .dependency_target_kinds
+            .get(&(target, CellDependencyKind::DependsOn))
+            .cloned()
+            .unwrap_or_default();
+        let kind_indexed = kind_positions
+            .iter()
+            .map(|position| kernel.index.cells[*position].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(target_indexed, vec![dependent.clone()]);
+        assert_eq!(kind_indexed, vec![dependent]);
         fs::remove_file(path)?;
         Ok(())
     }

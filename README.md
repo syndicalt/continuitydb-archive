@@ -39,6 +39,7 @@ The first milestone builds:
 - Versioned JSONL file-kernel format headers.
 - Per-record JSONL file-kernel checksums for cell and commit records.
 - File-kernel secondary indexes for answerability questions and evidence sources.
+- File-kernel secondary indexes for activation states and dependency filters.
 - Line-addressed JSONL file-kernel corruption diagnostics.
 - Headered JSONL file-kernel partial-commit detection.
 - Durable filesystem flush boundaries for JSONL file-kernel writes.
