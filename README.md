@@ -137,6 +137,7 @@ The first milestone builds:
 - CLI local model benchmark artifact bundle directory.
 - CLI local model benchmark bundle manifests.
 - CLI local model changed-case report bundle artifacts.
+- CLI local model changed-case report artifact metadata.
 - CLI local model fixed-failure artifact bundles.
 - CLI local model regression artifact bundles.
 - CLI local model instability artifact bundles.

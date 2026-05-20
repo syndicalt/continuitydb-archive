@@ -320,6 +320,7 @@ Storage kernel
 86. Add local-model regression total changed-case counts. Added top-level changed-case totals to compatible regression reports and CLI JSON so CI dashboards can summarize all Steward model drift before drilling into reason-specific counts or per-case records.
 87. Add CLI local-model changed-case report artifacts. Added `benchmark-local-model --changed-case-report-path` so compatible baseline comparisons can write compact changed-case drift reports with totals, reason counts, and per-case summaries without requiring CI consumers to parse the full benchmark report.
 88. Add CLI local-model changed-case bundle artifacts. Extended `benchmark-local-model --artifact-dir --compare-baseline` so archiveable benchmark bundles automatically write `changed-cases.json` and advertise it from `local-model-benchmark.manifest.json`.
+89. Add CLI local-model changed-case report artifact metadata. Added `changed_case_report` path, fingerprint, and byte-count metadata to benchmark JSON and bundle manifests so CI can verify archived changed-case reports without reparsing the full benchmark output.
 
 ## Small Embeddable Model Track
 

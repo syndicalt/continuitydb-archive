@@ -2053,6 +2053,16 @@ fn cli_benchmark_local_model_artifact_dir_writes_changed_case_report(
         stdout_report["changed_case_report_path"].as_str(),
         Some(changed_case_report_path.display().to_string().as_str())
     );
+    assert_eq!(
+        stdout_report["changed_case_report"]["report_path"].as_str(),
+        Some(changed_case_report_path.display().to_string().as_str())
+    );
+    assert!(stdout_report["changed_case_report"]["report_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(stdout_report["changed_case_report"]["report_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
     let changed_case_report: Value =
         serde_json::from_str(&fs::read_to_string(&changed_case_report_path)?)?;
     assert_eq!(
@@ -2067,6 +2077,18 @@ fn cli_benchmark_local_model_artifact_dir_writes_changed_case_report(
     assert_eq!(
         bundle_manifest["changed_case_report_path"].as_str(),
         Some(changed_case_report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["changed_case_report"]["report_path"].as_str(),
+        Some(changed_case_report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["changed_case_report"]["report_fingerprint"],
+        stdout_report["changed_case_report"]["report_fingerprint"]
+    );
+    assert_eq!(
+        bundle_manifest["changed_case_report"]["report_bytes"],
+        stdout_report["changed_case_report"]["report_bytes"]
     );
 
     fs::remove_file(executable_path)?;

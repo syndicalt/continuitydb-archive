@@ -141,6 +141,13 @@ struct LocalModelBundleManifest {
 }
 
 #[cfg(feature = "local-model")]
+struct LocalModelChangedCaseReportArtifact {
+    report_path: PathBuf,
+    report_fingerprint: String,
+    report_bytes: usize,
+}
+
+#[cfg(feature = "local-model")]
 struct LocalModelBenchmarkArtifacts<'a> {
     contract: Option<&'a LocalModelContractArtifacts>,
     prompts: &'a [LocalModelPromptArtifact],
@@ -1148,9 +1155,11 @@ fn finalize_local_model_benchmark_report(
     report["changed_case_report_path"] = changed_case_report_path
         .map(|path| serde_json::Value::String(path.display().to_string()))
         .unwrap_or(serde_json::Value::Null);
-    if let Some(path) = changed_case_report_path {
-        write_local_model_changed_case_report(path, &report)?;
-    }
+    let changed_case_report = changed_case_report_path
+        .map(|path| write_local_model_changed_case_report(path, &report))
+        .transpose()?;
+    report["changed_case_report"] =
+        local_model_changed_case_report_artifact_json(changed_case_report.as_ref());
     Ok(report)
 }
 
@@ -1158,7 +1167,7 @@ fn finalize_local_model_benchmark_report(
 fn write_local_model_changed_case_report(
     path: &Path,
     benchmark_report: &serde_json::Value,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<LocalModelChangedCaseReportArtifact, Box<dyn std::error::Error>> {
     let comparison = benchmark_report
         .get("baseline_comparison")
         .cloned()
@@ -1183,7 +1192,34 @@ fn write_local_model_changed_case_report(
             "changed_case_summaries": comparison["changed_case_summaries"].clone(),
         },
     });
-    write_pretty_json_file(path, &changed_case_report)
+    let report_text = serde_json::to_string_pretty(&changed_case_report)?;
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, &report_text)?;
+    Ok(LocalModelChangedCaseReportArtifact {
+        report_path: path.to_path_buf(),
+        report_fingerprint: local_model_contract_fingerprint(&report_text),
+        report_bytes: report_text.len(),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_changed_case_report_artifact_json(
+    artifact: Option<&LocalModelChangedCaseReportArtifact>,
+) -> serde_json::Value {
+    artifact
+        .map(|artifact| {
+            serde_json::json!({
+                "report_path": artifact.report_path.display().to_string(),
+                "report_fingerprint": artifact.report_fingerprint,
+                "report_bytes": artifact.report_bytes,
+            })
+        })
+        .unwrap_or(serde_json::Value::Null)
 }
 
 fn fnv1a64_fingerprint(text: &str) -> String {
@@ -1475,6 +1511,7 @@ fn write_local_model_bundle_manifest(
         "response_artifacts": report["response_artifacts"].clone(),
         "response_artifact_manifest": report["response_artifact_manifest"].clone(),
         "changed_case_report_path": report["changed_case_report_path"].clone(),
+        "changed_case_report": report["changed_case_report"].clone(),
     });
     let manifest_text = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, &manifest_text)?;
