@@ -121,6 +121,7 @@ Storage kernel
 6. Include file-store status in kernel inspection. Extended `continuitydb inspect-kernel` JSON with visible cell count, commit count, and durable file size.
 7. Include file-store health in kernel inspection. Extended `continuitydb inspect-kernel` JSON with file-format health and compaction recommendation metadata.
 8. Add canonical file-store inspection gate. Implemented `continuitydb inspect-kernel --require-canonical` so CI and operators can fail early when a readable file store needs compaction.
+9. Add conditional file-store compaction. Implemented `continuitydb compact-file --if-needed` so operators can compact only when health recommends it.
 
 ## Native API Milestones
 
@@ -140,6 +141,7 @@ Storage kernel
 14. Add native file-store status. Implemented `ContinuityDb<FileKernel>::file_store_status` so embedders can inspect file-backed store shape without depending on kernel internals.
 15. Add native file-store health reporting. Implemented `ContinuityDb<FileKernel>::file_store_health` so embedders can inspect file format health without depending on kernel internals.
 16. Add canonical file-store requirement gate. Implemented `ensure_file_store_canonical` and `open_canonical_file` so embedders can reject readable but compaction-worthy file stores without automatic mutation.
+17. Add conditional file-store compaction. Implemented `compact_file_store_if_needed` with before/after health summaries so embedders can automate explicit maintenance without rewriting canonical stores.
 
 ## Steward Milestones
 

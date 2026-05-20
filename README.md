@@ -49,6 +49,7 @@ The first milestone builds:
 - Headered JSONL file-kernel partial-commit detection.
 - Durable filesystem flush boundaries for JSONL file-kernel writes.
 - JSONL file-kernel compaction into the canonical durable record format.
+- Conditional file-store compaction for explicit maintenance automation.
 - Native file-backed compaction API.
 - Native file-backed open helpers with requirement enforcement.
 - CLI file-backed compaction command.
