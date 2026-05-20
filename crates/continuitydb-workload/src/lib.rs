@@ -190,7 +190,7 @@ impl WorkloadMeasurementSnapshot {
 }
 
 /// Durable workload measurement baseline record.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WorkloadBaselineRecord {
     /// Timestamp when this baseline was recorded.
     pub recorded_at: DateTime<Utc>,
@@ -217,6 +217,139 @@ impl WorkloadBaselineRecord {
             snapshot,
         }
     }
+}
+
+/// Regression thresholds used when comparing workload measurements to a baseline.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadRegressionThresholds {
+    /// Maximum allowed elapsed-time growth percentage before reporting a regression.
+    pub max_elapsed_growth_percent: u128,
+}
+
+impl Default for WorkloadRegressionThresholds {
+    fn default() -> Self {
+        Self {
+            max_elapsed_growth_percent: 25,
+        }
+    }
+}
+
+/// Deterministic workload baseline comparison report.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadBaselineComparison {
+    /// Baseline record used for comparison.
+    pub baseline: WorkloadBaselineRecord,
+    /// Current measurement snapshot compared against the baseline.
+    pub current: WorkloadMeasurementSnapshot,
+    /// Regressions detected by exact count checks or elapsed-time thresholds.
+    pub regressions: Vec<WorkloadBaselineRegression>,
+}
+
+impl WorkloadBaselineComparison {
+    /// Returns true when no regressions were detected.
+    pub fn passed(&self) -> bool {
+        self.regressions.is_empty()
+    }
+}
+
+/// Deterministic workload baseline regression reason.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum WorkloadBaselineRegression {
+    /// Generated StateCell count changed.
+    WorkloadCellCountChanged {
+        /// Baseline count.
+        previous: usize,
+        /// Current count.
+        current: usize,
+    },
+    /// Generated frontier StateCell count changed.
+    WorkloadFrontierCountChanged {
+        /// Baseline count.
+        previous: usize,
+        /// Current count.
+        current: usize,
+    },
+    /// Generated dependency edge count changed.
+    WorkloadDependencyCountChanged {
+        /// Baseline count.
+        previous: usize,
+        /// Current count.
+        current: usize,
+    },
+    /// Generated total token cost changed.
+    WorkloadTokenCostChanged {
+        /// Baseline token count.
+        previous: i64,
+        /// Current token count.
+        current: i64,
+    },
+    /// Ingest operation count changed.
+    IngestOperationCountChanged {
+        /// Baseline operation count.
+        previous: usize,
+        /// Current operation count.
+        current: usize,
+    },
+    /// Checkout operation count changed.
+    CheckoutOperationCountChanged {
+        /// Baseline operation count.
+        previous: usize,
+        /// Current operation count.
+        current: usize,
+    },
+    /// Checkout candidate count changed.
+    CheckoutMatchedCountChanged {
+        /// Baseline count.
+        previous: usize,
+        /// Current count.
+        current: usize,
+    },
+    /// Checkout selected-cell count changed.
+    CheckoutSelectedCountChanged {
+        /// Baseline count.
+        previous: usize,
+        /// Current count.
+        current: usize,
+    },
+    /// Checkout alternative count changed.
+    CheckoutAlternativeCountChanged {
+        /// Baseline count.
+        previous: usize,
+        /// Current count.
+        current: usize,
+    },
+    /// Checkout frontier recommendation count changed.
+    CheckoutFrontierCountChanged {
+        /// Baseline count.
+        previous: usize,
+        /// Current count.
+        current: usize,
+    },
+    /// Checkout selected token count changed.
+    CheckoutSelectedTokenCountChanged {
+        /// Baseline token count.
+        previous: i64,
+        /// Current token count.
+        current: i64,
+    },
+    /// Ingest elapsed time exceeded the allowed growth threshold.
+    IngestElapsedRegressed {
+        /// Baseline elapsed nanoseconds.
+        previous_nanos: u128,
+        /// Current elapsed nanoseconds.
+        current_nanos: u128,
+        /// Maximum allowed current elapsed nanoseconds under the threshold.
+        max_allowed_nanos: u128,
+    },
+    /// Checkout elapsed time exceeded the allowed growth threshold.
+    CheckoutElapsedRegressed {
+        /// Baseline elapsed nanoseconds.
+        previous_nanos: u128,
+        /// Current elapsed nanoseconds.
+        current_nanos: u128,
+        /// Maximum allowed current elapsed nanoseconds under the threshold.
+        max_allowed_nanos: u128,
+    },
 }
 
 /// Workload generation failure.
@@ -329,6 +462,183 @@ impl FileWorkloadBaselineStore {
             Err(error) => Err(error.into()),
         }
     }
+
+    /// Returns the newest baseline record matching the given label and kernel.
+    pub fn latest_matching(
+        &self,
+        label: &str,
+        kernel: &str,
+    ) -> Result<Option<WorkloadBaselineRecord>, WorkloadBaselineError> {
+        let mut latest: Option<WorkloadBaselineRecord> = None;
+        for record in self.list()? {
+            let is_newer_match = match latest.as_ref() {
+                Some(current) => record.recorded_at >= current.recorded_at,
+                None => true,
+            };
+            if record.label == label && record.kernel == kernel && is_newer_match {
+                latest = Some(record);
+            }
+        }
+        Ok(latest)
+    }
+}
+
+/// Compares a current workload snapshot to a durable baseline record.
+pub fn compare_workload_snapshot_to_baseline(
+    baseline: &WorkloadBaselineRecord,
+    current: &WorkloadMeasurementSnapshot,
+    thresholds: WorkloadRegressionThresholds,
+) -> WorkloadBaselineComparison {
+    let previous = &baseline.snapshot;
+    let mut regressions = Vec::new();
+
+    push_if_changed(
+        &mut regressions,
+        previous.workload.cell_count,
+        current.workload.cell_count,
+        |previous, current| WorkloadBaselineRegression::WorkloadCellCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.workload.frontier_count,
+        current.workload.frontier_count,
+        |previous, current| WorkloadBaselineRegression::WorkloadFrontierCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.workload.dependency_count,
+        current.workload.dependency_count,
+        |previous, current| WorkloadBaselineRegression::WorkloadDependencyCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.workload.total_token_cost,
+        current.workload.total_token_cost,
+        |previous, current| WorkloadBaselineRegression::WorkloadTokenCostChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.ingest.operation_count,
+        current.ingest.operation_count,
+        |previous, current| WorkloadBaselineRegression::IngestOperationCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.checkout_operation.operation_count,
+        current.checkout_operation.operation_count,
+        |previous, current| WorkloadBaselineRegression::CheckoutOperationCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.checkout.matched_count,
+        current.checkout.matched_count,
+        |previous, current| WorkloadBaselineRegression::CheckoutMatchedCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.checkout.selected_count,
+        current.checkout.selected_count,
+        |previous, current| WorkloadBaselineRegression::CheckoutSelectedCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.checkout.alternative_count,
+        current.checkout.alternative_count,
+        |previous, current| WorkloadBaselineRegression::CheckoutAlternativeCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.checkout.frontier_count,
+        current.checkout.frontier_count,
+        |previous, current| WorkloadBaselineRegression::CheckoutFrontierCountChanged {
+            previous,
+            current,
+        },
+    );
+    push_if_changed(
+        &mut regressions,
+        previous.checkout.selected_token_count,
+        current.checkout.selected_token_count,
+        |previous, current| WorkloadBaselineRegression::CheckoutSelectedTokenCountChanged {
+            previous,
+            current,
+        },
+    );
+
+    let ingest_allowed = max_allowed_elapsed(
+        previous.ingest.elapsed_nanos,
+        thresholds.max_elapsed_growth_percent,
+    );
+    if current.ingest.elapsed_nanos > ingest_allowed {
+        regressions.push(WorkloadBaselineRegression::IngestElapsedRegressed {
+            previous_nanos: previous.ingest.elapsed_nanos,
+            current_nanos: current.ingest.elapsed_nanos,
+            max_allowed_nanos: ingest_allowed,
+        });
+    }
+
+    let checkout_allowed = max_allowed_elapsed(
+        previous.checkout_operation.elapsed_nanos,
+        thresholds.max_elapsed_growth_percent,
+    );
+    if current.checkout_operation.elapsed_nanos > checkout_allowed {
+        regressions.push(WorkloadBaselineRegression::CheckoutElapsedRegressed {
+            previous_nanos: previous.checkout_operation.elapsed_nanos,
+            current_nanos: current.checkout_operation.elapsed_nanos,
+            max_allowed_nanos: checkout_allowed,
+        });
+    }
+
+    WorkloadBaselineComparison {
+        baseline: baseline.clone(),
+        current: current.clone(),
+        regressions,
+    }
+}
+
+fn push_if_changed<T, F>(
+    regressions: &mut Vec<WorkloadBaselineRegression>,
+    previous: T,
+    current: T,
+    build: F,
+) where
+    T: Copy + Eq,
+    F: FnOnce(T, T) -> WorkloadBaselineRegression,
+{
+    if previous != current {
+        regressions.push(build(previous, current));
+    }
+}
+
+fn max_allowed_elapsed(previous_nanos: u128, growth_percent: u128) -> u128 {
+    previous_nanos + ((previous_nanos * growth_percent) / 100)
 }
 
 /// Generates a deterministic world-model workload for benchmarks and engine comparisons.
@@ -767,6 +1077,156 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn workload_baseline_regression_latest_matching_uses_label_kernel_and_timestamp(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_baseline_path("continuitydb-workload-baseline-latest");
+        let store = FileWorkloadBaselineStore::new(&path);
+        let snapshot = deterministic_snapshot();
+        let older = WorkloadBaselineRecord::new(
+            timestamp(2026, 5, 20, 2)?,
+            "target",
+            "memory",
+            snapshot.clone(),
+        );
+        let newest_matching = WorkloadBaselineRecord::new(
+            timestamp(2026, 5, 20, 3)?,
+            "target",
+            "memory",
+            snapshot.clone(),
+        );
+        let newer_different_kernel = WorkloadBaselineRecord::new(
+            timestamp(2026, 5, 20, 4)?,
+            "target",
+            "file",
+            snapshot.clone(),
+        );
+        let newer_different_label =
+            WorkloadBaselineRecord::new(timestamp(2026, 5, 20, 5)?, "other", "memory", snapshot);
+
+        store.append(&older)?;
+        store.append(&newest_matching)?;
+        store.append(&newer_different_kernel)?;
+        store.append(&newer_different_label)?;
+
+        assert_eq!(
+            store.latest_matching("target", "memory")?,
+            Some(newest_matching)
+        );
+        assert_eq!(store.latest_matching("missing", "memory")?, None);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_passes_equal_counts_within_elapsed_threshold(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = baseline_record("current", "memory", 100, 100)?;
+        let current = baseline_record("current", "memory", 125, 120)?;
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current.snapshot,
+            WorkloadRegressionThresholds {
+                max_elapsed_growth_percent: 25,
+            },
+        );
+
+        assert!(comparison.passed());
+        assert!(comparison.regressions.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_reports_count_and_elapsed_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = baseline_record("current", "memory", 100, 100)?;
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.workload.cell_count += 1;
+        current_snapshot.workload.frontier_count += 1;
+        current_snapshot.workload.dependency_count += 1;
+        current_snapshot.workload.total_token_cost += 10;
+        current_snapshot.ingest.operation_count += 1;
+        current_snapshot.ingest.elapsed_nanos = 126;
+        current_snapshot.checkout_operation.operation_count += 1;
+        current_snapshot.checkout_operation.elapsed_nanos = 150;
+        current_snapshot.checkout.matched_count += 1;
+        current_snapshot.checkout.selected_count += 1;
+        current_snapshot.checkout.alternative_count += 1;
+        current_snapshot.checkout.frontier_count += 1;
+        current_snapshot.checkout.selected_token_count += 10;
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds {
+                max_elapsed_growth_percent: 25,
+            },
+        );
+
+        assert!(!comparison.passed());
+        assert_eq!(
+            comparison.regressions,
+            vec![
+                WorkloadBaselineRegression::WorkloadCellCountChanged {
+                    previous: 8,
+                    current: 9
+                },
+                WorkloadBaselineRegression::WorkloadFrontierCountChanged {
+                    previous: 2,
+                    current: 3
+                },
+                WorkloadBaselineRegression::WorkloadDependencyCountChanged {
+                    previous: 6,
+                    current: 7
+                },
+                WorkloadBaselineRegression::WorkloadTokenCostChanged {
+                    previous: 988,
+                    current: 998
+                },
+                WorkloadBaselineRegression::IngestOperationCountChanged {
+                    previous: 8,
+                    current: 9
+                },
+                WorkloadBaselineRegression::CheckoutOperationCountChanged {
+                    previous: 1,
+                    current: 2
+                },
+                WorkloadBaselineRegression::CheckoutMatchedCountChanged {
+                    previous: 8,
+                    current: 9
+                },
+                WorkloadBaselineRegression::CheckoutSelectedCountChanged {
+                    previous: 3,
+                    current: 4
+                },
+                WorkloadBaselineRegression::CheckoutAlternativeCountChanged {
+                    previous: 5,
+                    current: 6
+                },
+                WorkloadBaselineRegression::CheckoutFrontierCountChanged {
+                    previous: 0,
+                    current: 1
+                },
+                WorkloadBaselineRegression::CheckoutSelectedTokenCountChanged {
+                    previous: 370,
+                    current: 380
+                },
+                WorkloadBaselineRegression::IngestElapsedRegressed {
+                    previous_nanos: 100,
+                    current_nanos: 126,
+                    max_allowed_nanos: 125
+                },
+                WorkloadBaselineRegression::CheckoutElapsedRegressed {
+                    previous_nanos: 100,
+                    current_nanos: 150,
+                    max_allowed_nanos: 125
+                },
+            ]
+        );
+        Ok(())
+    }
+
     fn sample_measurement() -> Result<WorkloadMeasurement, Box<dyn std::error::Error>> {
         let workload = generate_world_model_workload(sample_config()?)?;
         let mut kernel = MemoryKernel::default();
@@ -791,6 +1251,60 @@ mod tests {
 
         measure_ingest_and_checkout(&mut kernel, &workload, committed_at, request)
             .map_err(Into::into)
+    }
+
+    fn baseline_record(
+        label: &str,
+        kernel: &str,
+        ingest_elapsed_nanos: u128,
+        checkout_elapsed_nanos: u128,
+    ) -> Result<WorkloadBaselineRecord, Box<dyn std::error::Error>> {
+        let mut snapshot = deterministic_snapshot();
+        snapshot.ingest.elapsed_nanos = ingest_elapsed_nanos;
+        snapshot.checkout_operation.elapsed_nanos = checkout_elapsed_nanos;
+        Ok(WorkloadBaselineRecord::new(
+            timestamp(2026, 5, 20, 2)?,
+            label,
+            kernel,
+            snapshot,
+        ))
+    }
+
+    fn deterministic_snapshot() -> WorkloadMeasurementSnapshot {
+        WorkloadMeasurementSnapshot {
+            workload: WorkloadSummarySnapshot {
+                cell_count: 8,
+                frontier_count: 2,
+                dependency_count: 6,
+                total_token_cost: 988,
+            },
+            ingest: MeasuredOperationSnapshot {
+                operation_count: 8,
+                elapsed_nanos: 100,
+            },
+            checkout_operation: MeasuredOperationSnapshot {
+                operation_count: 1,
+                elapsed_nanos: 100,
+            },
+            checkout: CheckoutMeasurementSnapshot {
+                matched_count: 8,
+                selected_count: 3,
+                alternative_count: 5,
+                frontier_count: 0,
+                selected_token_count: 370,
+            },
+        }
+    }
+
+    fn timestamp(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+    ) -> Result<DateTime<Utc>, Box<dyn std::error::Error>> {
+        Utc.with_ymd_and_hms(year, month, day, hour, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp").into())
     }
 
     fn temp_baseline_path(name: &str) -> std::path::PathBuf {

@@ -151,6 +151,7 @@ Storage kernel
 3. Add CLI workload measurement. Implemented `continuitydb measure-workload` for memory and file-backed kernels so deterministic workload ingest and checkout measurements can be collected as JSON from operator and CI workflows.
 4. Add durable workload measurement baselines. Implemented JSONL baseline records for workload measurement snapshots so historical ingest and checkout evidence can be retained before adding regression gates.
 5. Add CLI workload baseline recording. Extended `continuitydb measure-workload` with `--baseline-path` and `--label` so operator and CI runs can append durable JSONL baseline records while still printing current measurement JSON.
+6. Add deterministic workload baseline regression comparison. Implemented latest matching baseline lookup and count/timing comparison reports so future storage-engine changes can be checked against durable workload evidence before adding CI gates.
 
 ## Native API Milestones
 

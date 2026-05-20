@@ -14,6 +14,7 @@ The first milestone builds:
 - CLI workload measurement for memory and file-backed kernels.
 - JSONL workload measurement baseline recording.
 - CLI workload measurement baseline recording.
+- Deterministic workload baseline regression comparison.
 - A pluggable storage kernel trait.
 - An in-memory kernel for correctness tests.
 - Basic revision links.
