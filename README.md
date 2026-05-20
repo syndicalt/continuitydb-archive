@@ -60,6 +60,7 @@ The first milestone builds:
 - Native read-only conflict analysis API.
 - Native read-only batch conflict analysis API.
 - CLI kernel capability inspection and requirement checks.
+- CLI file-backed commands routed through native open helpers.
 - CLI commit backup and restore commands over versioned export envelopes.
 - A thin CLI over library APIs.
 
