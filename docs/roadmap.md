@@ -134,7 +134,8 @@ Storage kernel
 
 1. Add first-class StateCell dependency references. Implemented in `continuitydb-core` as typed links to target `StateCellId` values with dependency kind and rationale, defaulting to an empty list for new and previously serialized cells.
 2. Add dependency-aware storage lookup. Implemented target and kind filters in `CellLookup` across memory and file kernels.
-3. Add core native revision-link records. Implemented `RevisionLinkKind` and `RevisionLinkRecord` in `continuitydb-core`, with compatibility re-export from `continuitydb-revision`, establishing the semantic record shape needed for storage-native revision links.
+3. Add standalone dependency-kind storage lookup. Extended memory and file kernels so `CellLookup.dependency_kind` filters dependency edges even without a target constraint, backed by a file-kernel dependency-kind index and lookup-plan diagnostics.
+4. Add core native revision-link records. Implemented `RevisionLinkKind` and `RevisionLinkRecord` in `continuitydb-core`, with compatibility re-export from `continuitydb-revision`, establishing the semantic record shape needed for storage-native revision links.
 
 ## Conflict Detection Milestones
 

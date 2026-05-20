@@ -51,6 +51,7 @@ The first milestone builds:
 - First strict text parser for `CHECKOUT` queries.
 - Bitemporal and commit-scoped constraints in strict text `CHECKOUT` queries.
 - Dependency-aware constraints in strict text `CHECKOUT` queries.
+- Standalone dependency-kind storage lookups with file-kernel planner diagnostics.
 - Portable typed query serialization for bindings and future query files.
 - Versioned JSON envelopes for portable typed query files.
 - Read-only typed query AST introspection for embedders and bindings.

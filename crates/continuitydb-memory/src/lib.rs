@@ -133,13 +133,16 @@ impl StorageKernel for MemoryKernel {
                     })
             })
             .filter(|cell| {
-                lookup.dependency_target.map_or(true, |target| {
-                    cell.dependencies.iter().any(|dependency| {
-                        dependency.target == target
-                            && lookup
-                                .dependency_kind
-                                .map_or(true, |kind| dependency.kind == kind)
-                    })
+                if lookup.dependency_target.is_none() && lookup.dependency_kind.is_none() {
+                    return true;
+                }
+                cell.dependencies.iter().any(|dependency| {
+                    lookup
+                        .dependency_target
+                        .map_or(true, |target| dependency.target == target)
+                        && lookup
+                            .dependency_kind
+                            .map_or(true, |kind| dependency.kind == kind)
                 })
             })
             .cloned()
@@ -771,6 +774,43 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![dependent]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_dependency_kind_without_target(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let target = StateCellId::new();
+        let other_target = StateCellId::new();
+        let mut first = sample_cell("project:continuitydb:kind-first", 0.9, 12)?;
+        first.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut support = sample_cell("project:continuitydb:kind-support", 0.9, 12)?;
+        support.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::Supports,
+            "supports target",
+        ));
+        let mut second = sample_cell("project:continuitydb:kind-second", 0.9, 12)?;
+        second.dependencies.push(CellDependency::new(
+            other_target,
+            CellDependencyKind::DependsOn,
+            "depends on another target",
+        ));
+        let first = append_committed(&mut kernel, first)?;
+        append_committed(&mut kernel, support)?;
+        let second = append_committed(&mut kernel, second)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            dependency_kind: Some(CellDependencyKind::DependsOn),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![first, second]);
         Ok(())
     }
 }

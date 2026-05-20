@@ -67,7 +67,7 @@ pub struct CellLookup {
     pub minimum_confidence: Option<Confidence>,
     /// Optional dependency target filter.
     pub dependency_target: Option<StateCellId>,
-    /// Optional dependency kind filter, applied with dependency target when present.
+    /// Optional dependency kind filter.
     pub dependency_kind: Option<CellDependencyKind>,
 }
 
@@ -400,6 +400,7 @@ struct FileKernelIndex {
     system_times: Vec<(DateTime<Utc>, usize)>,
     activations: HashMap<ActivationState, Vec<usize>>,
     dependency_targets: HashMap<StateCellId, Vec<usize>>,
+    dependency_kinds: HashMap<CellDependencyKind, Vec<usize>>,
     dependency_target_kinds: HashMap<(StateCellId, CellDependencyKind), Vec<usize>>,
     commits: HashMap<CommitId, Vec<usize>>,
     manifests: HashMap<CommitId, CommitManifest>,
@@ -488,6 +489,10 @@ impl FileKernelIndex {
         for dependency in &cell.dependencies {
             self.dependency_targets
                 .entry(dependency.target)
+                .or_default()
+                .push(position);
+            self.dependency_kinds
+                .entry(dependency.kind)
                 .or_default()
                 .push(position);
             self.dependency_target_kinds
@@ -600,24 +605,36 @@ impl FileKernelIndex {
             });
         }
         if let Some(target) = lookup.dependency_target {
-            let (name, positions) = if let Some(kind) = lookup.dependency_kind {
-                (
-                    "dependency_target_kind",
-                    self.dependency_target_kinds
-                        .get(&(target, kind))
-                        .cloned()
-                        .unwrap_or_default(),
-                )
-            } else {
-                (
-                    "dependency_target",
-                    self.dependency_targets
-                        .get(&target)
-                        .cloned()
-                        .unwrap_or_default(),
-                )
-            };
+            let (name, positions) = lookup.dependency_kind.map_or_else(
+                || {
+                    (
+                        "dependency_target",
+                        self.dependency_targets
+                            .get(&target)
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                },
+                |kind| {
+                    (
+                        "dependency_target_kind",
+                        self.dependency_target_kinds
+                            .get(&(target, kind))
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                },
+            );
             candidates.push(IndexedCandidateConstraint { name, positions });
+        } else if let Some(kind) = lookup.dependency_kind {
+            candidates.push(IndexedCandidateConstraint {
+                name: "dependency_kind",
+                positions: self
+                    .dependency_kinds
+                    .get(&kind)
+                    .cloned()
+                    .unwrap_or_default(),
+            });
         }
         if let Some(minimum_confidence) = lookup.minimum_confidence {
             candidates.push(IndexedCandidateConstraint {
@@ -1461,13 +1478,16 @@ impl StorageKernel for FileKernel {
                     })
             })
             .filter(|cell| {
-                lookup.dependency_target.map_or(true, |target| {
-                    cell.dependencies.iter().any(|dependency| {
-                        dependency.target == target
-                            && lookup
-                                .dependency_kind
-                                .map_or(true, |kind| dependency.kind == kind)
-                    })
+                if lookup.dependency_target.is_none() && lookup.dependency_kind.is_none() {
+                    return true;
+                }
+                cell.dependencies.iter().any(|dependency| {
+                    lookup
+                        .dependency_target
+                        .map_or(true, |target| dependency.target == target)
+                        && lookup
+                            .dependency_kind
+                            .map_or(true, |kind| dependency.kind == kind)
                 })
             })
             .cloned()
@@ -4025,6 +4045,55 @@ mod tests {
     }
 
     #[test]
+    fn file_kernel_lookup_plan_reports_dependency_kind_index(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-lookup-plan-dependency-kind");
+        let target = StateCellId::new();
+        let other_target = StateCellId::new();
+        let mut first = sample_cell("project:continuitydb:lookup-plan-kind-first", 0.9, 12)?;
+        first.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut support = sample_cell("project:continuitydb:lookup-plan-kind-support", 0.9, 12)?;
+        support.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::Supports,
+            "supports target",
+        ));
+        let mut second = sample_cell("project:continuitydb:lookup-plan-kind-second", 0.9, 12)?;
+        second.dependencies.push(CellDependency::new(
+            other_target,
+            CellDependencyKind::DependsOn,
+            "depends on another target",
+        ));
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, first)?;
+        append_committed(&mut kernel, support)?;
+        append_committed(&mut kernel, second)?;
+
+        let plan = kernel.lookup_plan(&CellLookup {
+            dependency_kind: Some(CellDependencyKind::DependsOn),
+            ..CellLookup::default()
+        });
+
+        assert_eq!(plan.indexed_constraint_count, 1);
+        assert_eq!(plan.indexed_constraints, vec!["dependency_kind"]);
+        assert_eq!(
+            plan.indexed_constraint_plans,
+            vec![FileKernelIndexedConstraintPlan {
+                name: "dependency_kind",
+                candidate_count: 2,
+            }]
+        );
+        assert_eq!(plan.candidate_count, 2);
+        assert!(!plan.full_scan);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
     fn file_kernel_filters_by_dependency_target_and_kind() -> Result<(), Box<dyn std::error::Error>>
     {
         let path = temp_kernel_path("continuitydb-file-kernel-dependency");
@@ -4063,6 +4132,48 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![dependent]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_dependency_kind_without_target(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-dependency-kind");
+        let target = StateCellId::new();
+        let other_target = StateCellId::new();
+        let mut first = sample_cell("project:continuitydb:dependency-kind-first", 0.9, 12)?;
+        first.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target",
+        ));
+        let mut support = sample_cell("project:continuitydb:dependency-kind-support", 0.9, 12)?;
+        support.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::Supports,
+            "supports target",
+        ));
+        let mut second = sample_cell("project:continuitydb:dependency-kind-second", 0.9, 12)?;
+        second.dependencies.push(CellDependency::new(
+            other_target,
+            CellDependencyKind::DependsOn,
+            "depends on another target",
+        ));
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            first = append_committed(&mut kernel, first)?;
+            append_committed(&mut kernel, support)?;
+            second = append_committed(&mut kernel, second)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            dependency_kind: Some(CellDependencyKind::DependsOn),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![first, second]);
         fs::remove_file(path)?;
         Ok(())
     }
