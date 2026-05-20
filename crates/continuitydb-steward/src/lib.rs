@@ -1054,6 +1054,15 @@ mod tests {
                         "continuitydb://evaluation/release-build-source",
                         "continuitydb://evaluation/release-incident-source"
                     ]
+                },
+                {
+                    "action": {
+                        "type": "request_verification",
+                        "cell_id": null,
+                        "request": "Ask for a concrete answerability question before labeling the cell."
+                    },
+                    "rationale": "The answerability label input is invalid because it has no concrete question.",
+                    "citations": ["continuitydb://evaluation/invalid-answerability-label"]
                 }
             ]
         })
@@ -1063,7 +1072,7 @@ mod tests {
         let report = default_steward_evaluation_suite().evaluate(&steward);
 
         assert!(report.passed());
-        assert_eq!(report.case_reports().len(), 4);
+        assert_eq!(report.case_reports().len(), 5);
         assert!(report.case_reports()[1].passed());
         assert_eq!(report.case_reports()[1].name(), "conflict classification");
         assert!(report.case_reports()[2].passed());
@@ -1076,6 +1085,11 @@ mod tests {
             report.case_reports()[3].name(),
             "multi-source citation preservation"
         );
+        assert!(report.case_reports()[4].passed());
+        assert_eq!(
+            report.case_reports()[4].name(),
+            "policy rejection avoidance"
+        );
         Ok(())
     }
 
@@ -1084,7 +1098,7 @@ mod tests {
     fn default_steward_evaluation_suite_exposes_case_contracts() {
         let suite = default_steward_evaluation_suite();
 
-        assert_eq!(suite.len(), 4);
+        assert_eq!(suite.len(), 5);
         assert!(!suite.is_empty());
         let cases = suite.cases();
 
@@ -1189,6 +1203,33 @@ mod tests {
             &cases[3].expected_actions()[0],
             StewardAction::MarkFrontier { cell_id }
                 if *cell_id == StateCellId::from_u128(3)
+        ));
+
+        assert_eq!(cases[4].name(), "policy rejection avoidance");
+        assert_eq!(
+            cases[4].input().task(),
+            "Handle invalid answerability-label evidence without emitting an invalid label."
+        );
+        assert_eq!(
+            cases[4].input().evidence()[0].locator(),
+            "continuitydb://evaluation/invalid-answerability-label"
+        );
+        assert_eq!(
+            cases[4].required_citations(),
+            ["continuitydb://evaluation/invalid-answerability-label".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[4].required_rationale_terms(),
+            ["invalid".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[4].forbidden_rationale_terms(),
+            ["label applied".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[4].expected_actions()[0],
+            StewardAction::RequestVerification { cell_id: None, request }
+                if request == "Ask for a concrete answerability question before labeling the cell."
         ));
     }
 

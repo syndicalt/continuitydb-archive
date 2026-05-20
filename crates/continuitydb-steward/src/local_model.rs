@@ -1025,6 +1025,23 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .require_citation("continuitydb://evaluation/release-build-source")
         .require_citation("continuitydb://evaluation/release-incident-source")
         .require_rationale_term("frontier"),
+        StewardEvaluationCase::new(
+            "policy rejection avoidance",
+            created_at,
+            "Handle invalid answerability-label evidence without emitting an invalid label.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/invalid-answerability-label",
+            "A proposed answerability update has an empty question list and must not be applied as-is.",
+        )
+        .expect_action(StewardAction::RequestVerification {
+            cell_id: None,
+            request: "Ask for a concrete answerability question before labeling the cell."
+                .to_string(),
+        })
+        .require_citation("continuitydb://evaluation/invalid-answerability-label")
+        .require_rationale_term("invalid")
+        .forbid_rationale_term("label applied"),
     ])
 }
 
