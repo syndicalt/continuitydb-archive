@@ -1371,6 +1371,84 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_benchmark_local_model_reports_same_outcome_failure_changes(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-same-outcome-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-same-outcome-baseline");
+    let previous_script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status remains on the frontier.","citations":["continuitydb://evaluation/unrelated"]}]}'
+"#;
+    let current_script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[]}'
+"#;
+    fs::write(&executable_path, previous_script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+    fs::write(&executable_path, current_script)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--compare-baseline")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: Value = serde_json::from_slice(&output)?;
+    assert_eq!(
+        report["baseline_comparison"]["regressed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["pass_count_delta"].as_i64(),
+        Some(0)
+    );
+    let changed_cases = report["baseline_comparison"]["changed_case_summaries"]
+        .as_array()
+        .ok_or("missing changed case summaries")?;
+    assert!(
+        changed_cases.iter().any(|case| {
+            case["previous_passed"].as_bool() == Some(false)
+                && case["current_passed"].as_bool() == Some(false)
+                && case["failure_count_deltas"]
+                    .as_object()
+                    .is_some_and(|deltas| !deltas.is_empty())
+        }),
+        "expected same-outcome changed failure summary in {changed_cases:?}"
+    );
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-passing-gate-runner");

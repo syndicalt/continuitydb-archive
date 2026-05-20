@@ -2599,6 +2599,65 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn local_model_baseline_regression_summarizes_changed_failure_reasons(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let previous = local_model_baseline_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://other"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let current = local_model_baseline_for_response(
+            cell_id,
+            serde_json::json!({ "proposals": [] }).to_string(),
+        )?;
+
+        let regression = LocalModelBenchmarkRegression::compare(&previous, &current);
+
+        assert_eq!(regression.previous_passed_cases(), 0);
+        assert_eq!(regression.current_passed_cases(), 0);
+        assert_eq!(regression.pass_count_delta(), 0);
+        assert!(!regression.regressed());
+        assert!(regression.regressed_case_names().is_empty());
+        let changed_case = regression
+            .changed_case_summaries()
+            .first()
+            .ok_or("missing changed failure-reason summary")?;
+        assert_eq!(changed_case.case_name(), "frontier baseline regression");
+        assert!(!changed_case.previous_passed());
+        assert!(!changed_case.current_passed());
+        assert_eq!(
+            changed_case
+                .previous_failure_counts()
+                .get("missing_citation"),
+            Some(&1)
+        );
+        assert_eq!(
+            changed_case
+                .current_failure_counts()
+                .get("missing_expected_action"),
+            Some(&1)
+        );
+        assert_eq!(
+            changed_case
+                .failure_count_deltas()
+                .get("missing_expected_action"),
+            Some(&1)
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn latest_local_model_baseline_returns_newest_matching_candidate(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let old_qwen = local_model_empty_baseline(

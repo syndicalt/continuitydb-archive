@@ -1930,11 +1930,11 @@ fn changed_case_summaries(
         let current_report = current_by_name.get(name).copied();
         let previous_passed = previous_report.is_some_and(StewardEvaluationCaseReport::passed);
         let current_passed = current_report.is_some_and(StewardEvaluationCaseReport::passed);
-        if previous_passed != current_passed {
-            let previous_failure_counts = case_failure_counts(previous_report);
-            let current_failure_counts = case_failure_counts(current_report);
-            let failure_count_deltas =
-                failure_count_deltas(&previous_failure_counts, &current_failure_counts);
+        let previous_failure_counts = case_failure_counts(previous_report);
+        let current_failure_counts = case_failure_counts(current_report);
+        let failure_count_deltas =
+            failure_count_deltas(&previous_failure_counts, &current_failure_counts);
+        if previous_passed != current_passed || !failure_count_deltas.is_empty() {
             summaries.push(LocalModelBenchmarkCaseSummary {
                 case_name: name.to_string(),
                 previous_passed,
