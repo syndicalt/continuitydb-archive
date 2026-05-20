@@ -857,6 +857,54 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn steward_evaluation_failure_serializes_stable_failure_codes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let execution = serde_json::to_value(StewardEvaluationFailure::ModelExecutionFailed)?;
+        let invalid = serde_json::to_value(StewardEvaluationFailure::InvalidModelResponse)?;
+        let missing = serde_json::to_value(StewardEvaluationFailure::MissingCitation {
+            locator: "test://evidence".to_string(),
+        })?;
+
+        assert_eq!(execution, serde_json::json!("model_execution_failed"));
+        assert_eq!(invalid, serde_json::json!("invalid_model_response"));
+        assert_eq!(
+            missing,
+            serde_json::json!({
+                "missing_citation": {
+                    "locator": "test://evidence"
+                }
+            })
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_failure_decodes_legacy_failure_names(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let execution: StewardEvaluationFailure =
+            serde_json::from_value(serde_json::json!("ModelExecutionFailed"))?;
+        let invalid: StewardEvaluationFailure =
+            serde_json::from_value(serde_json::json!("InvalidModelResponse"))?;
+        let missing: StewardEvaluationFailure = serde_json::from_value(serde_json::json!({
+            "MissingCitation": {
+                "locator": "test://evidence"
+            }
+        }))?;
+
+        assert_eq!(execution, StewardEvaluationFailure::ModelExecutionFailed);
+        assert_eq!(invalid, StewardEvaluationFailure::InvalidModelResponse);
+        assert_eq!(
+            missing,
+            StewardEvaluationFailure::MissingCitation {
+                locator: "test://evidence".to_string(),
+            }
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn steward_evaluation_passes_fixed_quality_case() -> Result<(), Box<dyn std::error::Error>> {
         let source = StateCellId::new();
         let target = StateCellId::new();

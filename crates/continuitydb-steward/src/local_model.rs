@@ -932,34 +932,43 @@ impl StewardEvaluationCaseReport {
 
 /// Deterministic local model evaluation failure reason.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StewardEvaluationFailure {
     /// The local model backend or decoder failed.
+    #[serde(alias = "ModelError")]
     ModelError,
     /// The local model backend failed before producing a response.
+    #[serde(alias = "ModelExecutionFailed")]
     ModelExecutionFailed,
     /// The local model produced a response that could not be decoded.
+    #[serde(alias = "InvalidModelResponse")]
     InvalidModelResponse,
     /// No emitted proposal matched an expected action.
+    #[serde(alias = "MissingExpectedAction")]
     MissingExpectedAction {
         /// Expected action that was not emitted.
         action: StewardAction,
     },
     /// Required evidence citation was not preserved.
+    #[serde(alias = "MissingCitation")]
     MissingCitation {
         /// Missing citation locator.
         locator: String,
     },
     /// Required rationale term was not found in emitted proposal rationales.
+    #[serde(alias = "MissingRationaleTerm")]
     MissingRationaleTerm {
         /// Required term missing from rationale text.
         term: String,
     },
     /// A proposal was rejected by deterministic policy.
+    #[serde(alias = "PolicyRejected")]
     PolicyRejected {
         /// Rejection reasons emitted by policy.
         reasons: Vec<String>,
     },
     /// A proposal rationale included an unsupported claim marker.
+    #[serde(alias = "UnsupportedRationaleTerm")]
     UnsupportedRationaleTerm {
         /// Forbidden term found in rationale text.
         term: String,
