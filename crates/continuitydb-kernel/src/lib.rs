@@ -1,7 +1,7 @@
 //! Storage kernel interface for ContinuityDB backends.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{ActivationState, Scope, StateCell};
+use continuitydb_core::{ActivationState, Confidence, Scope, StateCell};
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
@@ -24,7 +24,7 @@ pub enum KernelError {
 }
 
 /// Query constraints supported by baseline storage kernels.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CellLookup {
     /// Optional semantic anchor filter.
     pub semantic_anchor: Option<String>,
@@ -36,6 +36,10 @@ pub struct CellLookup {
     pub activation: Option<ActivationState>,
     /// Optional exact answerability question filter.
     pub answerability_question: Option<String>,
+    /// Optional exact evidence-source filter.
+    pub evidence_source: Option<String>,
+    /// Optional minimum evidence confidence filter.
+    pub minimum_confidence: Option<Confidence>,
 }
 
 /// Minimal append and lookup contract required by the first ContinuityDB milestone.
@@ -151,6 +155,22 @@ impl StorageKernel for FileKernel {
                             .any(|candidate| candidate == question)
                     })
             })
+            .filter(|cell| {
+                lookup.evidence_source.as_ref().map_or(true, |source| {
+                    cell.evidence
+                        .iter()
+                        .any(|evidence| evidence.source.as_str() == source)
+                })
+            })
+            .filter(|cell| {
+                lookup
+                    .minimum_confidence
+                    .map_or(true, |minimum_confidence| {
+                        cell.evidence.iter().any(|evidence| {
+                            evidence.confidence.value() >= minimum_confidence.value()
+                        })
+                    })
+            })
             .collect();
 
         Ok(cells)
@@ -176,6 +196,15 @@ mod tests {
         confidence: f32,
         tokens: i64,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        sample_cell_with_source(anchor, "test", confidence, tokens)
+    }
+
+    fn sample_cell_with_source(
+        anchor: &str,
+        source: &str,
+        confidence: f32,
+        tokens: i64,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
         let valid_from = Utc
             .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
             .single()
@@ -187,7 +216,7 @@ mod tests {
             Scope::Project("continuitydb".to_string()),
             Answerability::new(vec!["what is stored?".to_string()])?,
             vec![Evidence {
-                source: SourceId::new("test"),
+                source: SourceId::new(source),
                 citation: Citation {
                     locator: "test://sample".to_string(),
                 },
@@ -316,6 +345,51 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![frontier]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_evidence_source() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-evidence-source");
+        let observed =
+            sample_cell_with_source("project:continuitydb:observed", "sensor", 0.91, 12)?;
+        let reviewed = sample_cell_with_source("project:continuitydb:reviewed", "human", 0.83, 15)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell(observed)?;
+            kernel.append_cell(reviewed.clone())?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            evidence_source: Some("human".to_string()),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![reviewed]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_minimum_confidence() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-minimum-confidence");
+        let weak = sample_cell("project:continuitydb:weak", 0.61, 12)?;
+        let strong = sample_cell("project:continuitydb:strong", 0.86, 15)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell(weak)?;
+            kernel.append_cell(strong.clone())?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            minimum_confidence: Some(Confidence::new(0.8)?),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![strong]);
         fs::remove_file(path)?;
         Ok(())
     }

@@ -59,6 +59,7 @@ Storage kernel
 3. Add the first durable embedded kernel. Implemented as an append-only JSONL `FileKernel` in `continuitydb-kernel` with nested database directory creation; indexed production storage remains future work.
 4. Add first-class StateCell activation filtering. Implemented in `CellLookup` across memory and file kernels.
 5. Add first-class StateCell answerability filtering. Implemented in `CellLookup` across memory and file kernels.
+6. Add first-class evidence-source and minimum-confidence filtering. Implemented in `CellLookup` across memory and file kernels.
 
 ## Steward Milestones
 

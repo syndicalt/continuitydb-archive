@@ -50,6 +50,13 @@ mod tests {
     }
 
     #[test]
+    fn source_id_as_str_returns_stored_identifier() {
+        let source = SourceId::new("human-review");
+
+        assert_eq!(source.as_str(), "human-review");
+    }
+
+    #[test]
     fn answerability_questions_returns_normalized_questions(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let answerability = Answerability::new(vec![

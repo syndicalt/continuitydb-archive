@@ -57,6 +57,22 @@ impl StorageKernel for MemoryKernel {
                             .any(|candidate| candidate == question)
                     })
             })
+            .filter(|cell| {
+                lookup.evidence_source.as_ref().map_or(true, |source| {
+                    cell.evidence
+                        .iter()
+                        .any(|evidence| evidence.source.as_str() == source)
+                })
+            })
+            .filter(|cell| {
+                lookup
+                    .minimum_confidence
+                    .map_or(true, |minimum_confidence| {
+                        cell.evidence.iter().any(|evidence| {
+                            evidence.confidence.value() >= minimum_confidence.value()
+                        })
+                    })
+            })
             .cloned()
             .collect();
 
@@ -80,6 +96,15 @@ mod tests {
         confidence: f32,
         tokens: i64,
     ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        sample_cell_with_source(anchor, "test", confidence, tokens)
+    }
+
+    fn sample_cell_with_source(
+        anchor: &str,
+        source: &str,
+        confidence: f32,
+        tokens: i64,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
         let valid_from = Utc
             .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
             .single()
@@ -91,7 +116,7 @@ mod tests {
             Scope::Project("continuitydb".to_string()),
             Answerability::new(vec!["what is stored?".to_string()])?,
             vec![Evidence {
-                source: SourceId::new("test"),
+                source: SourceId::new(source),
                 citation: Citation {
                     locator: "test://sample".to_string(),
                 },
@@ -154,6 +179,40 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![frontier]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_evidence_source() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let observed = sample_cell_with_source("project:continuitydb:observed", "sensor", 0.9, 12)?;
+        let reviewed = sample_cell_with_source("project:continuitydb:reviewed", "human", 0.8, 15)?;
+        kernel.append_cell(observed)?;
+        kernel.append_cell(reviewed.clone())?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            evidence_source: Some("human".to_string()),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![reviewed]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_minimum_confidence() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let weak = sample_cell("project:continuitydb:weak", 0.61, 12)?;
+        let strong = sample_cell("project:continuitydb:strong", 0.86, 15)?;
+        kernel.append_cell(weak)?;
+        kernel.append_cell(strong.clone())?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            minimum_confidence: Some(Confidence::new(0.8)?),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![strong]);
         Ok(())
     }
 }

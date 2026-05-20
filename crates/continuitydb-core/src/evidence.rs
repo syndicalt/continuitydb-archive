@@ -13,6 +13,11 @@ impl SourceId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
+
+    /// Returns the inner source identifier.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Human or machine-readable citation for evidence.
