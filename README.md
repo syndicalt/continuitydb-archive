@@ -100,6 +100,7 @@ The first milestone builds:
 - Native validated commit import batch API for replay flows.
 - Native direct commit copy between open databases for local sync.
 - Revision-link-aware commit export, import, and direct copy.
+- Duplicate-safe revision-link import validation.
 - Commit import dry-run validation for backup and sync workflows.
 - Commit import summaries with cursor metadata for checkpointed sync.
 - Versioned JSON commit export envelope for backup and sync files.

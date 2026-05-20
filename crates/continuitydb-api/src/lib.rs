@@ -1155,7 +1155,19 @@ impl<K: StorageKernel> ContinuityDb<K> {
             .first()
             .map(|slice| slice.manifest.commit_id)
             .unwrap_or_default();
+        let existing_revision_links = self
+            .kernel
+            .list_revision_links(RevisionLinkLookup::default())?;
+        let mut incoming_revision_links = Vec::new();
         for revision_link in &batch.revision_links {
+            if incoming_revision_links.contains(revision_link)
+                || existing_revision_links.contains(revision_link)
+            {
+                return Err(ContinuityError::InvalidCommitExport {
+                    commit_id: invalid_link_commit,
+                });
+            }
+            incoming_revision_links.push(revision_link.clone());
             if !cell_ids.contains(&revision_link.source)
                 && self.lookup_one_cell(revision_link.source).is_err()
             {
@@ -2607,6 +2619,103 @@ WHERE scope = project("continuitydb")
         let imported = target.import_commit_batch(batch)?;
 
         assert_eq!(imported, 1);
+        assert_eq!(
+            target.list_revision_links(RevisionLinkLookup::default())?,
+            vec![link]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_import_rejects_duplicate_links_without_mutation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        let source_cell = sample_cell(
+            "project:continuitydb:duplicate-link-import-source",
+            0.91,
+            12,
+        )?;
+        let target_cell = sample_cell(
+            "project:continuitydb:duplicate-link-import-target",
+            0.89,
+            12,
+        )?;
+        let source_id = source_cell.id;
+        let target_id = target_cell.id;
+        source.ingest_cells_at_with_commit_id(
+            vec![source_cell, target_cell],
+            committed_at,
+            commit_id,
+        )?;
+        let link = source.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::Supersedes,
+            target_id,
+            committed_at,
+        )?;
+        let mut batch = source.export_commits(CommitManifestLookup::default())?;
+        batch.revision_links.push(link);
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let result = target.import_commit_batch(batch);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::InvalidCommitExport { commit_id: rejected })
+                if rejected == commit_id
+        ));
+        assert!(target
+            .commit_slices(CommitManifestLookup::default())?
+            .is_empty());
+        assert!(target
+            .list_revision_links(RevisionLinkLookup::default())?
+            .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_import_rejects_existing_target_link_without_mutation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+        let source_cell =
+            sample_cell("project:continuitydb:existing-link-import-source", 0.91, 12)?;
+        let target_cell =
+            sample_cell("project:continuitydb:existing-link-import-target", 0.89, 12)?;
+        let source_id = source_cell.id;
+        let target_id = target_cell.id;
+        target.ingest_cells_at_with_commit_id(
+            vec![source_cell, target_cell],
+            committed_at,
+            commit_id,
+        )?;
+        let link = target.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::DerivesFrom,
+            target_id,
+            committed_at,
+        )?;
+        let batch = CommitExportBatch {
+            slices: Vec::new(),
+            revision_links: vec![link.clone()],
+            next_after: None,
+        };
+
+        let result = target.import_commit_batch(batch);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::InvalidCommitExport { .. })
+        ));
         assert_eq!(
             target.list_revision_links(RevisionLinkLookup::default())?,
             vec![link]

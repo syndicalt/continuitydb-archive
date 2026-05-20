@@ -202,6 +202,7 @@ Storage kernel
 37. Add typed accepted Steward proposal dispatch. Implemented optional `steward` feature enum `StewardApplicationResult` and `apply_accepted_steward_proposal_typed_at` so unified application can return either committed StateCell IDs or native revision-link records while preserving the legacy `StateCellId` dispatcher.
 38. Add revision-link-aware direct audit. Implemented `ContinuityDb::audit_cell` enrichment over native revision-link records so direct cell audit exposes source-side and target-side revision relationships while preserving missing-cell error behavior.
 39. Add revision-link-aware commit export/import/copy. Extended `CommitExportBatch` with source-owned native revision links, validated imported link endpoints against existing or imported StateCells, and restored links after commit cell import.
+40. Add duplicate-safe revision-link import validation. Extended commit export batch validation to reject duplicate incoming revision-link records and revision links already visible in the target before any cells or links are imported.
 
 ## Steward Milestones
 
