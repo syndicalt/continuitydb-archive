@@ -2741,6 +2741,7 @@ fn file_lookup_plan_json(plan: continuitydb_kernel::FileKernelLookupPlan) -> ser
         "candidate_count": plan.candidate_count,
         "exact_match_count": plan.exact_match_count,
         "filtered_candidate_count": plan.filtered_candidate_count,
+        "candidate_selectivity_basis_points": plan.candidate_selectivity_basis_points,
         "full_scan": plan.full_scan,
     })
 }

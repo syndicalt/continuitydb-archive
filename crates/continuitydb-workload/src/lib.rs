@@ -193,6 +193,8 @@ pub struct WorkloadLookupPlanSnapshot {
     pub exact_match_count: usize,
     /// Number of selected candidates rejected by exact predicate filtering.
     pub filtered_candidate_count: usize,
+    /// Exact match share of selected candidates in integer basis points.
+    pub candidate_selectivity_basis_points: usize,
     /// Whether lookup must inspect all visible StateCells.
     pub full_scan: bool,
 }
@@ -223,6 +225,7 @@ impl From<FileKernelLookupPlan> for WorkloadLookupPlanSnapshot {
             candidate_count: plan.candidate_count,
             exact_match_count: plan.exact_match_count,
             filtered_candidate_count: plan.filtered_candidate_count,
+            candidate_selectivity_basis_points: plan.candidate_selectivity_basis_points,
             full_scan: plan.full_scan,
         }
     }
@@ -468,6 +471,13 @@ pub enum WorkloadBaselineRegression {
         /// Baseline filtered candidate count.
         previous: usize,
         /// Current filtered candidate count.
+        current: usize,
+    },
+    /// Candidate selectivity changed.
+    LookupPlanCandidateSelectivityChanged {
+        /// Baseline selectivity in basis points.
+        previous: usize,
+        /// Current selectivity in basis points.
         current: usize,
     },
     /// Lookup-plan full-scan fallback changed.
@@ -837,6 +847,17 @@ fn push_lookup_plan_regressions(
                 current.filtered_candidate_count,
                 |previous, current| {
                     WorkloadBaselineRegression::LookupPlanFilteredCandidateCountChanged {
+                        previous,
+                        current,
+                    }
+                },
+            );
+            push_if_changed(
+                regressions,
+                previous.candidate_selectivity_basis_points,
+                current.candidate_selectivity_basis_points,
+                |previous, current| {
+                    WorkloadBaselineRegression::LookupPlanCandidateSelectivityChanged {
                         previous,
                         current,
                     }
@@ -1301,6 +1322,7 @@ mod tests {
                 candidate_count: 8,
                 exact_match_count: 8,
                 filtered_candidate_count: 0,
+                candidate_selectivity_basis_points: 10000,
                 full_scan: false,
             }),
         );
@@ -1339,6 +1361,7 @@ mod tests {
                 candidate_count: 8,
                 exact_match_count: 5,
                 filtered_candidate_count: 3,
+                candidate_selectivity_basis_points: 6250,
                 full_scan: false,
             }),
         );
@@ -1368,6 +1391,7 @@ mod tests {
                 candidate_count: 8,
                 exact_match_count: 5,
                 filtered_candidate_count: 3,
+                candidate_selectivity_basis_points: 6250,
                 full_scan: false,
             }),
         );
@@ -1376,6 +1400,39 @@ mod tests {
         assert_eq!(
             json["lookup_plan"]["filtered_candidate_count"].as_u64(),
             Some(3)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_snapshot_preserves_lookup_plan_candidate_selectivity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let measurement = sample_measurement()?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement_with_lookup_plan(
+            &measurement,
+            Some(continuitydb_kernel::FileKernelLookupPlan {
+                indexed_constraint_count: 1,
+                indexed_constraints: vec!["valid_at"],
+                indexed_constraint_plans: vec![
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "valid_at",
+                        candidate_count: 8,
+                    },
+                ],
+                exact_constraint_count: 1,
+                exact_constraints: vec!["valid_at"],
+                candidate_count: 8,
+                exact_match_count: 5,
+                filtered_candidate_count: 3,
+                candidate_selectivity_basis_points: 6250,
+                full_scan: false,
+            }),
+        );
+        let json = serde_json::to_value(snapshot)?;
+
+        assert_eq!(
+            json["lookup_plan"]["candidate_selectivity_basis_points"].as_u64(),
+            Some(6250)
         );
         Ok(())
     }
@@ -1404,6 +1461,7 @@ mod tests {
                 candidate_count: 5,
                 exact_match_count: 4,
                 filtered_candidate_count: 1,
+                candidate_selectivity_basis_points: 8000,
                 full_scan: false,
             }),
         );
@@ -1734,6 +1792,7 @@ mod tests {
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 3,
+            candidate_selectivity_basis_points: 6250,
             full_scan: false,
         });
         let mut current_snapshot = deterministic_snapshot();
@@ -1749,6 +1808,7 @@ mod tests {
             candidate_count: 8,
             exact_match_count: 5,
             filtered_candidate_count: 4,
+            candidate_selectivity_basis_points: 6250,
             full_scan: false,
         });
 
@@ -1786,6 +1846,7 @@ mod tests {
             candidate_count: 8,
             exact_match_count: 8,
             filtered_candidate_count: 0,
+            candidate_selectivity_basis_points: 10000,
             full_scan: false,
         });
         let mut current_snapshot = deterministic_snapshot();
@@ -1801,6 +1862,7 @@ mod tests {
             candidate_count: 8,
             exact_match_count: 8,
             filtered_candidate_count: 0,
+            candidate_selectivity_basis_points: 10000,
             full_scan: false,
         });
 
@@ -1816,6 +1878,60 @@ mod tests {
                 WorkloadBaselineRegression::LookupPlanExactConstraintsChanged {
                     previous: vec!["scope".to_string()],
                     current: vec!["scope".to_string(), "valid_at".to_string()],
+                }
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_detects_lookup_plan_candidate_selectivity_change(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut previous = baseline_record("current", "file", 100, 100)?;
+        previous.snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["valid_at".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "valid_at".to_string(),
+                candidate_count: 8,
+            }],
+            exact_constraint_count: 1,
+            exact_constraints: vec!["valid_at".to_string()],
+            candidate_count: 8,
+            exact_match_count: 5,
+            filtered_candidate_count: 3,
+            candidate_selectivity_basis_points: 6250,
+            full_scan: false,
+        });
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["valid_at".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "valid_at".to_string(),
+                candidate_count: 8,
+            }],
+            exact_constraint_count: 1,
+            exact_constraints: vec!["valid_at".to_string()],
+            candidate_count: 8,
+            exact_match_count: 5,
+            filtered_candidate_count: 3,
+            candidate_selectivity_basis_points: 7500,
+            full_scan: false,
+        });
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert_eq!(
+            comparison.regressions,
+            vec![
+                WorkloadBaselineRegression::LookupPlanCandidateSelectivityChanged {
+                    previous: 6250,
+                    current: 7500,
                 }
             ]
         );
@@ -1921,6 +2037,7 @@ mod tests {
             candidate_count,
             exact_match_count: candidate_count,
             filtered_candidate_count: 0,
+            candidate_selectivity_basis_points: if candidate_count == 0 { 0 } else { 10000 },
             full_scan,
         }
     }

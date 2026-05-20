@@ -5099,6 +5099,53 @@ WHERE valid_at = "2026-05-22T00:00:00Z""#,
 }
 
 #[test]
+fn cli_inspect_kernel_reports_lookup_plan_candidate_selectivity(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-selectivity-lookup-plan");
+    let first_valid = Utc
+        .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let first_expired = Utc
+        .with_ymd_and_hms(2026, 5, 21, 0, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let as_of = Utc
+        .with_ymd_and_hms(2026, 5, 22, 0, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let mut expired = test_cell("project:continuitydb:cli-selectivity-expired")?;
+    expired.valid_time = ValidTimeRange::new(first_valid, Some(first_expired))?;
+    let mut current = test_cell("project:continuitydb:cli-selectivity-current")?;
+    current.valid_time = ValidTimeRange::new(first_valid, None)?;
+    let mut db = ContinuityDb::new(FileKernel::open(&path)?);
+    db.ingest_cells_at_with_commit_id(vec![expired, current], as_of, CommitId::new())?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--lookup-query")
+        .arg(
+            r#"CHECKOUT "inspect" ANSWER "what is stored?"
+WHERE valid_at = "2026-05-22T00:00:00Z""#,
+        )
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        json["lookup_plan"]["candidate_selectivity_basis_points"].as_u64(),
+        Some(5000)
+    );
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_inspect_kernel_reports_lookup_plan_exact_constraint_labels(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-inspect-exact-constraint-lookup-plan");

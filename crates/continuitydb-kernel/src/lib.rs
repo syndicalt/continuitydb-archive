@@ -809,6 +809,8 @@ impl FileKernelIndex {
             .filter(|position| Self::cell_matches_lookup(&self.cells[**position], lookup))
             .count();
         let filtered_candidate_count = candidate_count - exact_match_count;
+        let candidate_selectivity_basis_points =
+            candidate_selectivity_basis_points(candidate_count, exact_match_count);
         FileKernelLookupPlan {
             indexed_constraint_count,
             indexed_constraints,
@@ -818,6 +820,7 @@ impl FileKernelIndex {
             candidate_count,
             exact_match_count,
             filtered_candidate_count,
+            candidate_selectivity_basis_points,
             full_scan: indexed_constraint_count == 0,
         }
     }
@@ -1084,6 +1087,8 @@ pub struct FileKernelLookupPlan {
     pub exact_match_count: usize,
     /// Number of selected candidates rejected by exact predicate filtering.
     pub filtered_candidate_count: usize,
+    /// Exact match share of selected candidates in integer basis points.
+    pub candidate_selectivity_basis_points: usize,
     /// Whether lookup must inspect all visible StateCells.
     pub full_scan: bool,
 }
@@ -1095,6 +1100,13 @@ pub struct FileKernelIndexedConstraintPlan {
     pub name: &'static str,
     /// Number of StateCell positions selected by this single index before intersection.
     pub candidate_count: usize,
+}
+
+fn candidate_selectivity_basis_points(candidate_count: usize, exact_match_count: usize) -> usize {
+    if candidate_count == 0 {
+        return 0;
+    }
+    exact_match_count * 10_000 / candidate_count
 }
 
 /// Operational health report for a file-backed storage kernel.
@@ -4170,6 +4182,50 @@ mod tests {
         assert_eq!(plan.candidate_count, 2);
         assert_eq!(plan.exact_match_count, 1);
         assert_eq!(plan.filtered_candidate_count, 1);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_lookup_plan_reports_candidate_selectivity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-lookup-plan-selectivity");
+        let first_valid = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_expired = Utc
+            .with_ymd_and_hms(2026, 5, 21, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let as_of = Utc
+            .with_ymd_and_hms(2026, 5, 22, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut expired = sample_cell(
+            "project:continuitydb:lookup-plan-selectivity-expired",
+            0.91,
+            12,
+        )?;
+        expired.valid_time = ValidTimeRange::new(first_valid, Some(first_expired))?;
+        let mut current = sample_cell(
+            "project:continuitydb:lookup-plan-selectivity-current",
+            0.83,
+            15,
+        )?;
+        current.valid_time = ValidTimeRange::new(first_valid, None)?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, expired)?;
+        append_committed(&mut kernel, current)?;
+
+        let plan = kernel.lookup_plan(&CellLookup {
+            valid_at: Some(as_of),
+            ..CellLookup::default()
+        });
+
+        assert_eq!(plan.candidate_count, 2);
+        assert_eq!(plan.exact_match_count, 1);
+        assert_eq!(plan.candidate_selectivity_basis_points, 5000);
         fs::remove_file(path)?;
         Ok(())
     }
