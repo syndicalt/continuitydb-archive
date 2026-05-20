@@ -2285,6 +2285,17 @@ fn validate_workload_artifact_manifest(
         return Err(std::io::Error::other("unsupported workload artifact manifest").into());
     }
 
+    let expected_report_path = artifact_dir
+        .join("workload-report.json")
+        .display()
+        .to_string();
+    let manifest_report_path = required_json_string(&manifest, "workload_report_path")?;
+    if manifest_report_path != expected_report_path {
+        return Err(
+            std::io::Error::other("workload artifact manifest report path mismatch").into(),
+        );
+    }
+
     let expected_cells_path = artifact_dir
         .join("workload-cells.json")
         .display()
