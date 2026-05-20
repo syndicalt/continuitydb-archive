@@ -225,6 +225,52 @@ pub fn recommend_conflict_resolution(
     })
 }
 
+/// Deterministic conflict-resolution scan over a candidate StateCell set.
+pub struct ConflictResolutionScan {
+    /// Resolution recommendations in deterministic input-pair order.
+    pub recommendations: Vec<ConflictResolutionRecommendation>,
+    /// Aggregate reciprocal conflict links for all recommended conflicts.
+    pub conflicts: RevisionGraph,
+    /// Aggregate proposed revision links from recommendations.
+    pub proposed_revisions: RevisionGraph,
+}
+
+/// Recommends deterministic resolutions for all conflicts across unordered pairs.
+pub fn recommend_conflict_resolutions(cells: &[StateCell]) -> ConflictResolutionScan {
+    let mut recommendations = Vec::new();
+    let mut conflicts = RevisionGraph::default();
+    let mut proposed_revisions = RevisionGraph::default();
+
+    for (left_index, left) in cells.iter().enumerate() {
+        for right in cells.iter().skip(left_index + 1) {
+            if let Some(recommendation) = recommend_conflict_resolution(left, right) {
+                conflicts.link(
+                    recommendation.conflict.left,
+                    RevisionLinkKind::ConflictsWith,
+                    recommendation.conflict.right,
+                );
+                conflicts.link(
+                    recommendation.conflict.right,
+                    RevisionLinkKind::ConflictsWith,
+                    recommendation.conflict.left,
+                );
+
+                if let (Some(winner), Some(loser)) = (recommendation.winner, recommendation.loser) {
+                    proposed_revisions.link(winner, RevisionLinkKind::Supersedes, loser);
+                }
+
+                recommendations.push(recommendation);
+            }
+        }
+    }
+
+    ConflictResolutionScan {
+        recommendations,
+        conflicts,
+        proposed_revisions,
+    }
+}
+
 fn recommend_supersession(
     conflict: CellConflict,
     kind: ConflictResolutionKind,
@@ -262,9 +308,9 @@ mod tests {
     };
 
     use super::{
-        detect_cell_conflict, recommend_conflict_resolution, revise_utility_feedback,
-        scan_cell_conflicts, CellConflictKind, ConflictResolutionKind, RevisionGraph,
-        RevisionLinkKind,
+        detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
+        revise_utility_feedback, scan_cell_conflicts, CellConflictKind, ConflictResolutionKind,
+        RevisionGraph, RevisionLinkKind,
     };
 
     fn timestamp(day: u32) -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
@@ -576,6 +622,82 @@ mod tests {
             .revision
             .targets(left.id, RevisionLinkKind::Supersedes)
             .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_resolution_scan_recommends_each_detected_conflict(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let low_confidence = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is blocked.",
+            20,
+            Some(23),
+            0.55,
+        )?;
+        let high_confidence = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:release-status",
+            "Release is green.",
+            21,
+            Some(23),
+            0.9,
+        )?;
+        let older = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:roadmap-status",
+            "Roadmap is stale.",
+            20,
+            Some(23),
+            0.8,
+        )?;
+        let newer = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:roadmap-status",
+            "Roadmap is current.",
+            21,
+            Some(23),
+            0.79,
+        )?;
+        let unrelated = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:storage",
+            "Storage milestone is separate.",
+            20,
+            Some(23),
+            0.95,
+        )?;
+
+        let scan = recommend_conflict_resolutions(&[
+            low_confidence.clone(),
+            high_confidence.clone(),
+            older.clone(),
+            newer.clone(),
+            unrelated,
+        ]);
+
+        assert_eq!(scan.recommendations.len(), 2);
+        assert_eq!(
+            scan.recommendations[0].kind,
+            ConflictResolutionKind::CandidateSupersession
+        );
+        assert_eq!(scan.recommendations[0].winner, Some(high_confidence.id));
+        assert_eq!(
+            scan.recommendations[1].kind,
+            ConflictResolutionKind::LatestEvidenceWins
+        );
+        assert_eq!(scan.recommendations[1].winner, Some(newer.id));
+        assert_eq!(
+            scan.conflicts
+                .targets(low_confidence.id, RevisionLinkKind::ConflictsWith),
+            vec![high_confidence.id]
+        );
+        assert_eq!(
+            scan.proposed_revisions
+                .targets(high_confidence.id, RevisionLinkKind::Supersedes),
+            vec![low_confidence.id]
+        );
+        assert_eq!(
+            scan.proposed_revisions
+                .targets(newer.id, RevisionLinkKind::Supersedes),
+            vec![older.id]
+        );
         Ok(())
     }
 }
