@@ -77,6 +77,7 @@ Storage kernel
 21. Add file-kernel secondary indexes for answerability and evidence source lookups. Implemented derived in-process indexes rebuilt from the JSONL log and maintained after append so common context retrieval filters can start from indexed candidates while preserving append-order results and the canonical log as source of truth.
 22. Add file-kernel secondary indexes for activation and dependency lookups. Implemented derived in-process indexes for activation states, dependency targets, and dependency target/kind pairs so frontier and causality filters can start from indexed candidates while preserving append-order results.
 23. Add typed storage-kernel capability introspection. Implemented `KernelDurability`, `KernelCapabilities`, `StorageKernel::capabilities`, and native API exposure so embedders can distinguish ephemeral, append-log, and future indexed embedded kernels without depending on concrete kernel types.
+24. Add typed storage-kernel requirement matching. Implemented `KernelRequirements` and `KernelCapabilities::satisfies` so embedders can express ephemeral, durable append-log, and future indexed embedded storage requirements without duplicating capability comparison logic.
 
 ## Checkout Milestones
 
@@ -127,6 +128,7 @@ Storage kernel
 9. Add native validated commit import batches. Implemented `ContinuityDb::import_commit_batch` so exported commit batches can be validated and replayed into another store while preserving commit IDs, commit times, cell IDs, and manifest ordering.
 10. Add versioned JSON commit export envelopes. Implemented `CommitExportEnvelope` plus JSON encode/decode helpers so native commit export batches can be written to files or sync channels with explicit format/version validation.
 11. Add native commit backup and restore file helpers. Implemented `ContinuityDb<FileKernel>::export_commits_json_file` and `import_commits_json_file` so embedders can write and read versioned commit export envelope files without duplicating CLI file I/O orchestration.
+12. Add native kernel requirement enforcement. Implemented `ContinuityDb::kernel_satisfies` and `ensure_kernel_requirements` with a typed `KernelRequirementsNotMet` error so embedders can fail early when a backing kernel lacks required production guarantees.
 
 ## Steward Milestones
 

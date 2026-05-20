@@ -1151,21 +1151,21 @@ mod tests {
 
     #[test]
     fn ephemeral_capabilities_do_not_satisfy_durable_append_log_requirements() {
-        assert!(!KernelCapabilities::ephemeral().satisfies(KernelRequirements::durable_append_log()));
+        assert!(
+            !KernelCapabilities::ephemeral().satisfies(KernelRequirements::durable_append_log())
+        );
     }
 
     #[test]
     fn file_append_log_capabilities_satisfy_durable_append_log_requirements() {
-        assert!(
-            KernelCapabilities::file_append_log().satisfies(KernelRequirements::durable_append_log())
-        );
+        assert!(KernelCapabilities::file_append_log()
+            .satisfies(KernelRequirements::durable_append_log()));
     }
 
     #[test]
     fn file_append_log_capabilities_do_not_satisfy_indexed_embedded_requirements() {
-        assert!(
-            !KernelCapabilities::file_append_log().satisfies(KernelRequirements::indexed_embedded())
-        );
+        assert!(!KernelCapabilities::file_append_log()
+            .satisfies(KernelRequirements::indexed_embedded()));
     }
 
     #[test]
