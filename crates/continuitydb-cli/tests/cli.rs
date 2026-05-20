@@ -357,6 +357,69 @@ fn cli_measure_workload_artifact_dir_writes_bundle() -> Result<(), Box<dyn std::
     Ok(())
 }
 
+#[test]
+fn cli_replay_workload_replays_artifact_bundle() -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-artifact-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["kernel"].as_str(), Some("memory"));
+    assert_eq!(
+        json["artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(json["workload"]["cell_count"].as_u64(), Some(8));
+    assert_eq!(json["checkout"]["matched_count"].as_u64(), Some(8));
+    assert_eq!(json["checkout"]["selected_count"].as_u64(), Some(3));
+    assert_eq!(json["checkout"]["alternative_count"].as_u64(), Some(5));
+    assert_eq!(
+        json["workload_artifacts"]["cells_path"].as_str(),
+        Some(
+            artifact_dir
+                .join("workload-cells.json")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+    assert!(json["workload_artifacts"]["cells_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error::Error>> {

@@ -27,9 +27,9 @@ use continuitydb_steward::{
 };
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
-    measure_ingest_and_checkout, FileWorkloadBaselineStore, WorkloadBaselineComparison,
-    WorkloadBaselineRecord, WorkloadConfig, WorkloadMeasurement, WorkloadMeasurementSnapshot,
-    WorkloadRegressionThresholds,
+    measure_ingest_and_checkout, ContinuityWorkload, FileWorkloadBaselineStore,
+    WorkloadBaselineComparison, WorkloadBaselineRecord, WorkloadConfig, WorkloadMeasurement,
+    WorkloadMeasurementSnapshot, WorkloadRegressionThresholds, WorkloadSummary,
 };
 use std::path::{Path, PathBuf};
 
@@ -234,6 +234,18 @@ enum Command {
         #[arg(long = "fail-on-regression")]
         fail_on_regression: bool,
     },
+    /// Replay a workload artifact bundle against a selected kernel.
+    ReplayWorkload {
+        /// Kernel profile to replay against.
+        #[arg(long = "kernel", default_value = "memory")]
+        kernel: WorkloadKernelProfile,
+        /// Directory containing workload-cells.json and checkout-request.json.
+        #[arg(long = "artifact-dir")]
+        artifact_dir: PathBuf,
+        /// Path to the JSONL file-backed store when replaying the file kernel.
+        #[arg(long = "store-path")]
+        store_path: Option<PathBuf>,
+    },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
         /// Path to the JSONL file-backed store.
@@ -437,6 +449,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(path) = report_path.as_ref() {
                 write_pretty_json_file(path, &output)?;
             }
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        Some(Command::ReplayWorkload {
+            kernel,
+            artifact_dir,
+            store_path,
+        }) => {
+            let output = replay_workload_json(kernel, &artifact_dir, store_path.as_ref())?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
@@ -1895,6 +1915,144 @@ fn write_workload_artifact_bundle_report(
     report["bundle_manifest"] = workload_bundle_manifest_json(&bundle_manifest);
     write_pretty_json_file(&report_path, &report)?;
     Ok(report)
+}
+
+fn replay_workload_json(
+    kernel: WorkloadKernelProfile,
+    artifact_dir: &Path,
+    store_path: Option<&PathBuf>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let cells_path = artifact_dir.join("workload-cells.json");
+    let checkout_request_path = artifact_dir.join("checkout-request.json");
+    let cells_text = std::fs::read_to_string(&cells_path)?;
+    let request_text = std::fs::read_to_string(&checkout_request_path)?;
+    let cells_artifact: serde_json::Value = serde_json::from_str(&cells_text)?;
+    let request_artifact: serde_json::Value = serde_json::from_str(&request_text)?;
+    let workload = workload_from_cells_artifact(&cells_artifact)?;
+    let request = checkout_request_from_artifact(&request_artifact)?;
+    let committed_at = workload_commit_time()?;
+
+    let (measurement, lookup_plan) = match kernel {
+        WorkloadKernelProfile::Memory => {
+            let mut memory = MemoryKernel::default();
+            (
+                measure_ingest_and_checkout(&mut memory, &workload, committed_at, request.clone())?,
+                None,
+            )
+        }
+        WorkloadKernelProfile::File => {
+            let path = store_path.ok_or_else(|| std::io::Error::other("store path is required"))?;
+            let mut file = continuitydb_kernel::FileKernel::open(path)?;
+            let measurement =
+                measure_ingest_and_checkout(&mut file, &workload, committed_at, request.clone())?;
+            let lookup = cell_lookup_from_checkout_request(&request);
+            let lookup_plan = file.lookup_plan(&lookup);
+            (measurement, Some(lookup_plan))
+        }
+    };
+
+    Ok(serde_json::json!({
+        "kernel": workload_kernel_name(kernel),
+        "artifact_dir": artifact_dir.display().to_string(),
+        "store_path": store_path.map(|path| path.display().to_string()),
+        "workload_artifacts": {
+            "cells_path": cells_path.display().to_string(),
+            "cells_fingerprint": fnv1a64_fingerprint(&cells_text),
+            "cells_bytes": cells_text.len(),
+            "checkout_request_path": checkout_request_path.display().to_string(),
+            "checkout_request_fingerprint": fnv1a64_fingerprint(&request_text),
+            "checkout_request_bytes": request_text.len(),
+        },
+        "lookup_plan": lookup_plan.map(file_lookup_plan_json),
+        "workload": {
+            "cell_count": measurement.workload_summary.cell_count,
+            "frontier_count": measurement.workload_summary.frontier_count,
+            "dependency_count": measurement.workload_summary.dependency_count,
+            "total_token_cost": measurement.workload_summary.total_token_cost,
+        },
+        "ingest": {
+            "operation_count": measurement.ingest.operation_count,
+            "elapsed_nanos": measurement.ingest.elapsed.as_nanos(),
+        },
+        "checkout_operation": {
+            "operation_count": measurement.checkout_operation.operation_count,
+            "elapsed_nanos": measurement.checkout_operation.elapsed.as_nanos(),
+        },
+        "checkout": {
+            "matched_count": measurement.checkout.matched_count,
+            "selected_count": measurement.checkout.selected_count,
+            "alternative_count": measurement.checkout.alternative_count,
+            "frontier_count": measurement.checkout.frontier_count,
+            "selected_token_count": measurement.checkout.selected_token_count,
+        },
+    }))
+}
+
+fn workload_from_cells_artifact(
+    artifact: &serde_json::Value,
+) -> Result<ContinuityWorkload, Box<dyn std::error::Error>> {
+    if artifact["format"].as_str() != Some("continuitydb.workload.cells") {
+        return Err(std::io::Error::other("unsupported workload cells artifact format").into());
+    }
+    if artifact["format_version"].as_u64() != Some(1) {
+        return Err(
+            std::io::Error::other("unsupported workload cells artifact format version").into(),
+        );
+    }
+
+    let cells: Vec<StateCell> = serde_json::from_value(artifact["cells"].clone())?;
+    let summary = &artifact["summary"];
+    Ok(ContinuityWorkload {
+        cells,
+        summary: WorkloadSummary {
+            cell_count: json_usize(summary, "cell_count")?,
+            frontier_count: json_usize(summary, "frontier_count")?,
+            dependency_count: json_usize(summary, "dependency_count")?,
+            total_token_cost: summary["total_token_cost"]
+                .as_i64()
+                .ok_or_else(|| std::io::Error::other("missing workload total token cost"))?,
+        },
+    })
+}
+
+fn checkout_request_from_artifact(
+    artifact: &serde_json::Value,
+) -> Result<CheckoutRequest, Box<dyn std::error::Error>> {
+    if artifact["format"].as_str() != Some("continuitydb.workload.checkout_request") {
+        return Err(
+            std::io::Error::other("unsupported workload checkout request artifact format").into(),
+        );
+    }
+    if artifact["format_version"].as_u64() != Some(1) {
+        return Err(std::io::Error::other(
+            "unsupported workload checkout request artifact format version",
+        )
+        .into());
+    }
+    let request = &artifact["request"];
+    Ok(CheckoutRequest {
+        semantic_anchor: serde_json::from_value(request["semantic_anchor"].clone())?,
+        scope: serde_json::from_value(request["scope"].clone())?,
+        valid_at: serde_json::from_value(request["valid_at"].clone())?,
+        system_at: serde_json::from_value(request["system_at"].clone())?,
+        commit_id: serde_json::from_value(request["commit_id"].clone())?,
+        activation: serde_json::from_value(request["activation"].clone())?,
+        answerability_question: serde_json::from_value(request["answerability_question"].clone())?,
+        evidence_source: serde_json::from_value(request["evidence_source"].clone())?,
+        dependency_target: serde_json::from_value(request["dependency_target"].clone())?,
+        dependency_kind: serde_json::from_value(request["dependency_kind"].clone())?,
+        minimum_confidence: serde_json::from_value(request["minimum_confidence"].clone())?,
+        token_budget: request["token_budget"]
+            .as_i64()
+            .ok_or_else(|| std::io::Error::other("missing workload checkout token budget"))?,
+    })
+}
+
+fn json_usize(value: &serde_json::Value, key: &str) -> Result<usize, Box<dyn std::error::Error>> {
+    let raw = value[key]
+        .as_u64()
+        .ok_or_else(|| std::io::Error::other(format!("missing workload summary {key}")))?;
+    Ok(usize::try_from(raw)?)
 }
 
 fn workload_baseline_comparison(
