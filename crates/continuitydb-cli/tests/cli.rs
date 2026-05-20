@@ -476,6 +476,143 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_stability_dry_run_outputs_preflight_without_baseline(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-stability-dry-run-baseline");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--stability-trials")
+        .arg("3")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["dry_run"].as_bool(), Some(true));
+    assert_eq!(json["stability_preflight"]["trials"].as_u64(), Some(3));
+    assert_eq!(
+        json["stability_preflight"]["will_execute"].as_bool(),
+        Some(false)
+    );
+    assert!(json.get("stability").is_none());
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_benchmark_local_model_stability_run_outputs_report() -> Result<(), Box<dyn std::error::Error>>
+{
+    let executable_path = temp_store_path("continuitydb-cli-local-model-stability-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-stability-baseline");
+    let script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]}]}'
+"#;
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--stability-trials")
+        .arg("2")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--temp")
+        .arg("--arg")
+        .arg("0")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    let records: Vec<Value> = baseline_text
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+
+    assert_eq!(json["passed"].as_bool(), Some(true));
+    assert_eq!(json["stability"]["trials"].as_u64(), Some(2));
+    assert_eq!(json["stability"]["stable"].as_bool(), Some(true));
+    assert_eq!(
+        json["stability"]["case_reports"].as_array().map(Vec::len),
+        Some(4)
+    );
+    assert_eq!(
+        json["stability"]["case_reports"][0]["name"].as_str(),
+        Some("insufficient evidence uncertainty")
+    );
+    assert_eq!(
+        json["stability"]["case_reports"][0]["changed_trials"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        json["stability"]["case_reports"][0]["proposal_fingerprints"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(records.len(), 1);
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_benchmark_local_model_stability_rejects_zero_trials_without_baseline(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-stability-zero-baseline");
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--stability-trials")
+        .arg("0")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("--stability-trials must be greater than zero"));
+
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_benchmark_local_model_dry_run_compare_reports_missing_baseline_without_creating_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let baseline_path = temp_store_path("continuitydb-cli-local-model-dry-run-missing-baseline");

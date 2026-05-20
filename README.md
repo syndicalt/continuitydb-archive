@@ -78,6 +78,7 @@ The first milestone builds:
 - CLI local model evaluation summary output.
 - CLI local model per-case evaluation detail output.
 - Public local model benchmark stability report API.
+- CLI local model benchmark stability reporting.
 - Default local model conflict-classification evaluation case.
 - Default local model unsupported-claim evaluation case.
 - Default local model multi-source citation preservation evaluation case.

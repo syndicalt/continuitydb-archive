@@ -21,8 +21,9 @@ use continuitydb_steward::{
     local_model_response_json_schema, record_local_model_benchmark_baseline_with_regression,
     small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
-    LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression, SmallModelCandidate,
-    StewardAction, StewardEvaluationSuite, StewardIdentity, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression, LocalModelStabilityReport,
+    SmallModelCandidate, StewardAction, StewardEvaluationSuite, StewardIdentity,
+    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
@@ -72,6 +73,7 @@ struct LocalModelBenchmarkOptions<'a> {
     prompt_dir: Option<&'a Path>,
     enforce_candidate_requirements: bool,
     baseline_path: &'a Path,
+    stability_trials: Option<usize>,
     dry_run: bool,
     compare_baseline: bool,
     fail_on_regression: bool,
@@ -251,6 +253,9 @@ enum Command {
         /// JSONL path to append a benchmark baseline record.
         #[arg(long = "baseline-path")]
         baseline_path: PathBuf,
+        /// Re-run each evaluation case N times and report output stability.
+        #[arg(long = "stability-trials")]
+        stability_trials: Option<usize>,
         /// Print benchmark configuration without executing the model or recording a baseline.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -453,6 +458,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             prompt_dir,
             enforce_candidate_requirements,
             baseline_path,
+            stability_trials,
             dry_run,
             compare_baseline,
             fail_on_regression,
@@ -468,6 +474,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 prompt_dir: prompt_dir.as_deref(),
                 enforce_candidate_requirements,
                 baseline_path: &baseline_path,
+                stability_trials,
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
@@ -671,6 +678,9 @@ fn benchmark_local_model_json(
         )
         .into());
     }
+    if options.stability_trials == Some(0) {
+        return Err(std::io::Error::other("--stability-trials must be greater than zero").into());
+    }
     let mut config = if options.candidate_defaults {
         candidate.recommended_runner_config(
             options.executable.to_path_buf(),
@@ -706,12 +716,18 @@ fn benchmark_local_model_json(
             contract_artifacts.as_ref(),
             &prompt_artifacts,
             baseline_preflight,
+            options
+                .stability_trials
+                .map(local_model_stability_preflight_json),
         ));
     }
 
     let benchmark = LocalModelBenchmark::new(candidate, LocalExecutableRunner::new(config), suite);
     let mut store = FileLocalModelBenchmarkBaselineStore::open(options.baseline_path)?;
     let identity = StewardIdentity::new("continuitydb-cli-local-model", "0.1.0", "strict")?;
+    let stability = options
+        .stability_trials
+        .map(|trials| benchmark.run_stability(identity.clone(), trials));
     let report = record_local_model_benchmark_baseline_with_regression(
         &benchmark,
         identity,
@@ -730,6 +746,7 @@ fn benchmark_local_model_json(
         report.regression(),
         contract_artifacts.as_ref(),
         &prompt_artifacts,
+        stability.as_ref(),
     ))
 }
 
@@ -741,6 +758,7 @@ fn local_model_benchmark_dry_run_json(
     contract_artifacts: Option<&LocalModelContractArtifacts>,
     prompt_artifacts: &[LocalModelPromptArtifact],
     baseline_preflight: Option<serde_json::Value>,
+    stability_preflight: Option<serde_json::Value>,
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
         "dry_run": true,
@@ -763,7 +781,18 @@ fn local_model_benchmark_dry_run_json(
     if let Some(baseline_preflight) = baseline_preflight {
         value["baseline_preflight"] = baseline_preflight;
     }
+    if let Some(stability_preflight) = stability_preflight {
+        value["stability_preflight"] = stability_preflight;
+    }
     value
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_stability_preflight_json(trials: usize) -> serde_json::Value {
+    serde_json::json!({
+        "trials": trials,
+        "will_execute": false,
+    })
 }
 
 #[cfg(feature = "local-model")]
@@ -947,9 +976,10 @@ fn local_model_benchmark_json(
     regression: Option<&LocalModelBenchmarkRegression>,
     contract_artifacts: Option<&LocalModelContractArtifacts>,
     prompt_artifacts: &[LocalModelPromptArtifact],
+    stability: Option<&LocalModelStabilityReport>,
 ) -> serde_json::Value {
     let summary = baseline.evaluation_summary();
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "candidate_model_id": baseline.candidate_model_id(),
         "candidate_role": baseline.candidate_role(),
         "baseline_path": baseline_path.display().to_string(),
@@ -986,6 +1016,30 @@ fn local_model_benchmark_json(
             "regressed": false,
             "previous_recorded_at": null,
         }))),
+    });
+    if let Some(stability) = stability {
+        value["stability"] = local_model_stability_report_json(stability);
+    }
+    value
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_stability_report_json(report: &LocalModelStabilityReport) -> serde_json::Value {
+    serde_json::json!({
+        "trials": report.trials(),
+        "stable": report.stable(),
+        "case_reports": report
+            .case_reports()
+            .iter()
+            .map(|case| {
+                serde_json::json!({
+                    "name": case.name(),
+                    "stable": case.stable(),
+                    "proposal_fingerprints": case.proposal_fingerprints(),
+                    "changed_trials": case.changed_trials(),
+                })
+            })
+            .collect::<Vec<_>>(),
     })
 }
 
