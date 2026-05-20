@@ -2972,6 +2972,16 @@ fn cli_validate_local_model_bundle_failure_report_path_records_validation_failur
         failure_report["failure"]["stage"].as_str(),
         Some("local_model_bundle_validation")
     );
+    assert_eq!(
+        failure_report["manifest"]["manifest_path"].as_str(),
+        Some(manifest_path.display().to_string().as_str())
+    );
+    assert!(failure_report["manifest"]["manifest_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(failure_report["manifest"]["manifest_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
     assert!(failure_report["failure"]["message"].as_str().is_some_and(
         |message| message.contains("local model benchmark manifest byte count mismatch")
     ));

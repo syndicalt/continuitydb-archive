@@ -362,6 +362,7 @@ Storage kernel
 98. Add CLI local-model response artifact manifest content mismatch diagnostics. Extended response artifact manifest content validation errors with deterministic mismatch labels for format, format version, and artifact-list drift so CI can diagnose archived response manifest changes without manually diffing bundle files.
 99. Add CLI local-model bundle validation report artifacts. Extended `validate-local-model-bundle` with `--report-path` so successful archived Steward benchmark bundle validation can write the same structured JSON emitted to stdout into a durable CI artifact.
 100. Add CLI local-model bundle validation failure report artifacts. Extended `validate-local-model-bundle` with `--failure-report-path` so rejected archived Steward benchmark bundles can preserve structured validation failure evidence before exiting non-zero.
+101. Add CLI local-model bundle validation manifest failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort manifest path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify the inspected manifest bytes.
 
 ## Small Embeddable Model Track
 
