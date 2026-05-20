@@ -484,6 +484,82 @@ fn cli_replay_workload_require_manifest_rejects_tampered_fixture(
 }
 
 #[test]
+fn cli_replay_workload_require_manifest_reports_validated_manifest(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-input-manifest-dir-{}",
+        std::process::id()
+    ));
+    let replay_artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-input-manifest-replay-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if replay_artifact_dir.exists() {
+        fs::remove_dir_all(&replay_artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let input_manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .arg("--replay-artifact-dir")
+        .arg(&replay_artifact_dir)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        report["input_bundle_manifest"]["manifest_path"].as_str(),
+        Some(input_manifest_path.display().to_string().as_str())
+    );
+    assert!(report["input_bundle_manifest"]["manifest_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(report["input_bundle_manifest"]["manifest_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+
+    let replay_manifest_path =
+        replay_artifact_dir.join("continuitydb-workload-replay.manifest.json");
+    let replay_manifest: Value = serde_json::from_str(&fs::read_to_string(replay_manifest_path)?)?;
+    assert_eq!(
+        replay_manifest["input_bundle_manifest"]["manifest_path"].as_str(),
+        Some(input_manifest_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        replay_manifest["input_bundle_manifest"]["manifest_fingerprint"],
+        report["input_bundle_manifest"]["manifest_fingerprint"]
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_dir_all(replay_artifact_dir)?;
+    Ok(())
+}
+
+#[test]
 fn cli_replay_workload_compares_archived_report() -> Result<(), Box<dyn std::error::Error>> {
     let artifact_dir = std::env::temp_dir().join(format!(
         "continuitydb-cli-replay-workload-compare-dir-{}",

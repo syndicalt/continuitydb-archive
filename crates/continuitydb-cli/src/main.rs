@@ -2095,9 +2095,15 @@ fn replay_workload_json(
     let checkout_request_path = options.artifact_dir.join("checkout-request.json");
     let cells_text = std::fs::read_to_string(&cells_path)?;
     let request_text = std::fs::read_to_string(&checkout_request_path)?;
-    if options.require_manifest {
-        validate_workload_artifact_manifest(options.artifact_dir, &cells_text, &request_text)?;
-    }
+    let input_bundle_manifest = if options.require_manifest {
+        Some(validate_workload_artifact_manifest(
+            options.artifact_dir,
+            &cells_text,
+            &request_text,
+        )?)
+    } else {
+        None
+    };
     let cells_artifact: serde_json::Value = serde_json::from_str(&cells_text)?;
     let request_artifact: serde_json::Value = serde_json::from_str(&request_text)?;
     let workload = workload_from_cells_artifact(&cells_artifact)?;
@@ -2133,6 +2139,9 @@ fn replay_workload_json(
         "failure_report_path": options.failure_report_path.map(|path| path.display().to_string()),
         "replay_artifact_dir": options.replay_artifact_dir.map(|path| path.display().to_string()),
         "replay_bundle_manifest": serde_json::Value::Null,
+        "input_bundle_manifest": input_bundle_manifest
+            .as_ref()
+            .map_or(serde_json::Value::Null, workload_bundle_manifest_json),
         "workload_artifacts": {
             "cells_path": cells_path.display().to_string(),
             "cells_fingerprint": fnv1a64_fingerprint(&cells_text),
@@ -2204,7 +2213,7 @@ fn validate_workload_artifact_manifest(
     artifact_dir: &Path,
     cells_text: &str,
     request_text: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<WorkloadBundleManifest, Box<dyn std::error::Error>> {
     let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
     let manifest_text = std::fs::read_to_string(&manifest_path).map_err(|error| {
         std::io::Error::other(format!("workload artifact manifest is required: {error}"))
@@ -2237,7 +2246,11 @@ fn validate_workload_artifact_manifest(
         );
     }
 
-    Ok(())
+    Ok(WorkloadBundleManifest {
+        manifest_path,
+        manifest_fingerprint: fnv1a64_fingerprint(&manifest_text),
+        manifest_bytes: manifest_text.len(),
+    })
 }
 
 fn write_workload_replay_artifact_bundle_report(
@@ -2274,6 +2287,7 @@ fn write_workload_replay_bundle_manifest(
         "input_artifact_dir": input_artifact_dir.display().to_string(),
         "kernel": report["kernel"].clone(),
         "store_path": report["store_path"].clone(),
+        "input_bundle_manifest": report["input_bundle_manifest"].clone(),
         "workload_artifacts": report["workload_artifacts"].clone(),
         "lookup_plan": report["lookup_plan"].clone(),
         "workload": report["workload"].clone(),
