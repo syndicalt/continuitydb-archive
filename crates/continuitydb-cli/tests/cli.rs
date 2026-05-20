@@ -3579,6 +3579,60 @@ fn cli_validate_local_model_bundle_accepts_response_artifact_manifest_metadata(
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_validate_local_model_bundle_accepts_response_artifact_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifacts-runner");
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifacts-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-artifacts-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let response_artifacts = json["response_artifacts"]
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("missing response artifacts"))?;
+    let first_response = &response_artifacts[0];
+
+    assert_eq!(response_artifacts.len(), 9);
+    assert_eq!(first_response["captured"].as_bool(), Some(true));
+    assert!(first_response["case_name"]
+        .as_str()
+        .is_some_and(|case_name| !case_name.is_empty()));
+    assert!(first_response["response_path"]
+        .as_str()
+        .is_some_and(|path| path.ends_with(".response.json")));
+    assert!(first_response["response_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(first_response["response_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_validate_local_model_bundle_rejects_response_artifact_manifest_path_mismatch(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path =

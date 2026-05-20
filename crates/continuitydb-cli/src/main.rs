@@ -163,6 +163,7 @@ struct LocalModelBundleValidation {
     manifest: LocalModelBundleManifest,
     benchmark_report: serde_json::Value,
     changed_case_report: serde_json::Value,
+    response_artifacts: serde_json::Value,
     response_artifact_manifest: serde_json::Value,
 }
 
@@ -785,6 +786,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "manifest": local_model_bundle_manifest_json(Some(&validation.manifest)),
                 "benchmark_report": validation.benchmark_report,
                 "changed_case_report": validation.changed_case_report,
+                "response_artifacts": validation.response_artifacts,
                 "response_artifact_manifest": validation.response_artifact_manifest,
             });
             if let Some(path) = report_path.as_ref() {
@@ -1849,6 +1851,7 @@ fn validate_local_model_bundle_manifest(
         validate_local_model_changed_case_report_manifest(artifact_dir, &manifest, &report)?;
     let response_artifact_manifest =
         validate_local_model_response_artifact_manifest(artifact_dir, &manifest, &report)?;
+    let response_artifacts = report["response_artifacts"].clone();
 
     Ok(LocalModelBundleValidation {
         manifest: LocalModelBundleManifest {
@@ -1862,6 +1865,7 @@ fn validate_local_model_bundle_manifest(
             "report_bytes": manifest_report_payload_text.len(),
         }),
         changed_case_report,
+        response_artifacts,
         response_artifact_manifest,
     })
 }
