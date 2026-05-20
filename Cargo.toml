@@ -6,6 +6,7 @@ members = [
     "crates/continuitydb-memory",
     "crates/continuitydb-revision",
     "crates/continuitydb-checkout",
+    "crates/continuitydb-query",
     "crates/continuitydb-api",
     "crates/continuitydb-cli",
     "crates/continuitydb-steward",

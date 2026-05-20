@@ -26,7 +26,7 @@
 - Create: `crates/continuitydb-query/Cargo.toml`
 - Create: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add the crate to the workspace**
+- [x] **Step 1: Add the crate to the workspace**
 
 Add the new member near `continuitydb-checkout` in the root `Cargo.toml`:
 
@@ -35,7 +35,7 @@ Add the new member near `continuitydb-checkout` in the root `Cargo.toml`:
     "crates/continuitydb-query",
 ```
 
-- [ ] **Step 2: Create crate manifest**
+- [x] **Step 2: Create crate manifest**
 
 Create `crates/continuitydb-query/Cargo.toml`:
 
@@ -58,7 +58,7 @@ thiserror.workspace = true
 workspace = true
 ```
 
-- [ ] **Step 3: Create temporary crate root**
+- [x] **Step 3: Create temporary crate root**
 
 Create `crates/continuitydb-query/src/lib.rs`:
 
@@ -66,7 +66,7 @@ Create `crates/continuitydb-query/src/lib.rs`:
 //! Typed ContinuityDB query AST.
 ```
 
-- [ ] **Step 4: Verify the empty crate builds**
+- [x] **Step 4: Verify the empty crate builds**
 
 Run:
 
