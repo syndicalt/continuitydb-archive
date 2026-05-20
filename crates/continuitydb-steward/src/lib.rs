@@ -1,6 +1,7 @@
 //! Deterministic Steward proposal substrate.
 
 mod error;
+mod frontier;
 mod ledger;
 #[cfg(feature = "local-model")]
 mod local_model;
@@ -9,6 +10,7 @@ mod policy;
 mod proposal;
 
 pub use error::StewardError;
+pub use frontier::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
 pub use ledger::{ProposalAuditRecord, ProposalLedger};
 #[cfg(feature = "local-model")]
 pub use local_model::{
@@ -34,6 +36,7 @@ mod tests {
         small_model_candidates, StewardEvaluationCase, StewardEvaluationFailure,
         StewardEvaluationSuite,
     };
+    use super::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
     #[cfg(feature = "local-model")]
     use super::{LocalModelBackend, LocalModelRequest, LocalModelSteward, LocalModelStewardInput};
     use super::{
@@ -744,5 +747,104 @@ mod tests {
             candidate.model_id() == "HuggingFaceTB/SmolLM2-360M-Instruct"
                 && candidate.role() == "ultra-small-experimental"
         }));
+    }
+
+    #[test]
+    fn frontier_watch_stale_evidence_emits_verification_request(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let steward = FrontierSteward::new(steward()?);
+        let proposals = steward.propose(
+            vec![FrontierWatchEvent::new(
+                cell_id,
+                FrontierWatchSignal::StaleEvidence,
+                "test://stale",
+                created_at(),
+            )],
+            created_at(),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert!(matches!(
+            proposals[0].action(),
+            StewardAction::RequestVerification { cell_id: actual, request }
+                if actual == &Some(cell_id) && request == "Refresh stale evidence for frontier cell."
+        ));
+        assert_eq!(proposals[0].citations(), &["test://stale".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn frontier_watch_high_impact_uncertainty_marks_frontier(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let steward = FrontierSteward::new(steward()?);
+        let proposals = steward.propose(
+            vec![FrontierWatchEvent::new(
+                cell_id,
+                FrontierWatchSignal::HighImpactUncertainty,
+                "test://uncertain",
+                created_at(),
+            )],
+            created_at(),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert!(matches!(
+            proposals[0].action(),
+            StewardAction::MarkFrontier { cell_id: actual } if actual == &cell_id
+        ));
+        assert_eq!(proposals[0].citations(), &["test://uncertain".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn frontier_watch_benign_event_emits_no_proposals() -> Result<(), Box<dyn std::error::Error>> {
+        let steward = FrontierSteward::new(steward()?);
+        let proposals = steward.propose(
+            vec![FrontierWatchEvent::new(
+                StateCellId::new(),
+                FrontierWatchSignal::Benign,
+                "test://current",
+                created_at(),
+            )],
+            created_at(),
+        )?;
+
+        assert!(proposals.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn frontier_watch_proposals_pass_policy_and_ledger() -> Result<(), Box<dyn std::error::Error>> {
+        let steward = FrontierSteward::new(steward()?);
+        let proposals = steward.propose(
+            vec![
+                FrontierWatchEvent::new(
+                    StateCellId::new(),
+                    FrontierWatchSignal::StaleEvidence,
+                    "test://stale",
+                    created_at(),
+                ),
+                FrontierWatchEvent::new(
+                    StateCellId::new(),
+                    FrontierWatchSignal::HighImpactUncertainty,
+                    "test://uncertain",
+                    created_at(),
+                ),
+            ],
+            created_at(),
+        )?;
+        let policy = ProposalPolicy::strict();
+        let mut ledger = ProposalLedger::default();
+
+        for proposal in proposals {
+            let decision = policy.evaluate(&proposal, created_at());
+            assert_eq!(decision.outcome(), ProposalOutcome::Accepted);
+            ledger.record(proposal, decision)?;
+        }
+
+        assert_eq!(ledger.records().len(), 2);
+        Ok(())
     }
 }
