@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add test imports**
+- [x] **Step 1: Add test imports**
 
 Change the test module import:
 
@@ -39,7 +39,7 @@ use super::{
 };
 ```
 
-- [ ] **Step 2: Add export file helper test**
+- [x] **Step 2: Add export file helper test**
 
 Add near the commit export JSON tests:
 
@@ -83,7 +83,7 @@ fn api_exports_commit_backup_json_file() -> Result<(), Box<dyn std::error::Error
 }
 ```
 
-- [ ] **Step 3: Add import file helper test**
+- [x] **Step 3: Add import file helper test**
 
 Add:
 
@@ -123,7 +123,7 @@ fn api_imports_commit_backup_json_file() -> Result<(), Box<dyn std::error::Error
 }
 ```
 
-- [ ] **Step 4: Add invalid JSON import file helper test**
+- [x] **Step 4: Add invalid JSON import file helper test**
 
 Add:
 
@@ -146,7 +146,7 @@ fn api_import_commit_backup_json_file_rejects_invalid_json() -> Result<(), Box<d
 }
 ```
 
-- [ ] **Step 5: Add export file I/O failure test**
+- [x] **Step 5: Add export file I/O failure test**
 
 Add:
 
@@ -181,7 +181,7 @@ fn api_export_commit_backup_json_file_reports_io_failure() -> Result<(), Box<dyn
 }
 ```
 
-- [ ] **Step 6: Run targeted API tests and verify RED**
+- [x] **Step 6: Run targeted API tests and verify RED**
 
 Run:
 
@@ -196,7 +196,7 @@ Expected: compilation fails because `CommitExportFileSummary`, `export_commits_j
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add std imports**
+- [x] **Step 1: Add std imports**
 
 Change:
 
@@ -210,7 +210,7 @@ to:
 use std::{collections::HashSet, fs, path::Path};
 ```
 
-- [ ] **Step 2: Add file I/O error variant**
+- [x] **Step 2: Add file I/O error variant**
 
 Add to `ContinuityError` after `CommitExportJson`:
 
@@ -220,7 +220,7 @@ Add to `ContinuityError` after `CommitExportJson`:
 CommitExportFileIo,
 ```
 
-- [ ] **Step 3: Add summary type**
+- [x] **Step 3: Add summary type**
 
 Add after `CommitExportBatch`:
 
@@ -235,7 +235,7 @@ pub struct CommitExportFileSummary {
 }
 ```
 
-- [ ] **Step 4: Add FileKernel helper methods**
+- [x] **Step 4: Add FileKernel helper methods**
 
 Extend `impl ContinuityDb<FileKernel>`:
 
@@ -267,7 +267,7 @@ pub fn import_commits_json_file<P: AsRef<Path>>(
 }
 ```
 
-- [ ] **Step 5: Run targeted API tests and verify GREEN**
+- [x] **Step 5: Run targeted API tests and verify GREEN**
 
 Run:
 
@@ -285,7 +285,7 @@ Expected: native file helper tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-native-commit-backup-file-helpers.md`
 
-- [ ] **Step 1: Refactor CLI imports**
+- [x] **Step 1: Refactor CLI imports**
 
 Change:
 
@@ -301,7 +301,7 @@ use continuitydb_kernel::{CommitManifestLookup, FileKernel, StorageKernel};
 use std::path::PathBuf;
 ```
 
-- [ ] **Step 2: Refactor export command**
+- [x] **Step 2: Refactor export command**
 
 Replace the export arm body with:
 
@@ -317,7 +317,7 @@ let output = serde_json::json!({
 println!("{}", serde_json::to_string_pretty(&output)?);
 ```
 
-- [ ] **Step 3: Refactor import command**
+- [x] **Step 3: Refactor import command**
 
 Replace the import arm body with:
 
@@ -332,7 +332,7 @@ let output = serde_json::json!({
 println!("{}", serde_json::to_string_pretty(&output)?);
 ```
 
-- [ ] **Step 4: Run targeted CLI tests**
+- [x] **Step 4: Run targeted CLI tests**
 
 Run:
 
@@ -342,7 +342,7 @@ cargo test -p continuitydb-cli commit
 
 Expected: CLI backup/restore tests still pass through the native helpers.
 
-- [ ] **Step 5: Update README**
+- [x] **Step 5: Update README**
 
 Add to Current Scope near the native commit export envelope bullet:
 
@@ -350,7 +350,7 @@ Add to Current Scope near the native commit export envelope bullet:
 - Native commit backup and restore file helper API.
 ```
 
-- [ ] **Step 6: Update roadmap**
+- [x] **Step 6: Update roadmap**
 
 Add a Native API milestone after the JSON envelope milestone:
 
@@ -363,7 +363,7 @@ Add a Native API milestone after the JSON envelope milestone:
 **Files:**
 - Modify: `docs/superpowers/plans/2026-05-20-native-commit-backup-file-helpers.md`
 
-- [ ] **Step 1: Run full verification gate**
+- [x] **Step 1: Run full verification gate**
 
 Run:
 
@@ -377,7 +377,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 Run:
 

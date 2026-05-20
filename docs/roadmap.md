@@ -123,6 +123,7 @@ Storage kernel
 8. Add native commit export batches. Implemented `CommitExportBatch` and `ContinuityDb::export_commits` so embedders can page commit slices with a deterministic next cursor for backup, sync, and replay flows.
 9. Add native validated commit import batches. Implemented `ContinuityDb::import_commit_batch` so exported commit batches can be validated and replayed into another store while preserving commit IDs, commit times, cell IDs, and manifest ordering.
 10. Add versioned JSON commit export envelopes. Implemented `CommitExportEnvelope` plus JSON encode/decode helpers so native commit export batches can be written to files or sync channels with explicit format/version validation.
+11. Add native commit backup and restore file helpers. Implemented `ContinuityDb<FileKernel>::export_commits_json_file` and `import_commits_json_file` so embedders can write and read versioned commit export envelope files without duplicating CLI file I/O orchestration.
 
 ## Steward Milestones
 

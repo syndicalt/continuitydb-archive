@@ -14,7 +14,7 @@ use continuitydb_revision::{
     ConflictResolutionRecommendation, ConflictResolutionScan,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::{collections::HashSet, fs, path::Path};
 use thiserror::Error;
 
 /// Wire-format marker for JSON commit export envelopes.
@@ -49,6 +49,9 @@ pub enum ContinuityError {
     /// Commit export envelope JSON could not be encoded or decoded.
     #[error("commit export envelope JSON is invalid")]
     CommitExportJson,
+    /// Commit export envelope file could not be read or written.
+    #[error("commit export envelope file I/O failed")]
+    CommitExportFileIo,
 }
 
 /// Native embeddable ContinuityDB operation boundary.
@@ -71,6 +74,15 @@ pub struct CommitSlice {
 pub struct CommitExportBatch {
     /// Exported commit slices in database visibility order.
     pub slices: Vec<CommitSlice>,
+    /// Cursor to use as `CommitManifestLookup.after` for the next export batch.
+    pub next_after: Option<CommitId>,
+}
+
+/// Summary of a commit export envelope written to a file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommitExportFileSummary {
+    /// Number of commit slices exported.
+    pub exported_commits: usize,
     /// Cursor to use as `CommitManifestLookup.after` for the next export batch.
     pub next_after: Option<CommitId>,
 }
@@ -436,6 +448,32 @@ impl ContinuityDb<FileKernel> {
     pub fn compact_file_store(&mut self) -> Result<(), ContinuityError> {
         self.kernel.compact().map_err(Into::into)
     }
+
+    /// Writes a versioned JSON commit export envelope to a file.
+    pub fn export_commits_json_file<P: AsRef<Path>>(
+        &self,
+        lookup: CommitManifestLookup,
+        output_path: P,
+    ) -> Result<CommitExportFileSummary, ContinuityError> {
+        let batch = self.export_commits(lookup)?;
+        let summary = CommitExportFileSummary {
+            exported_commits: batch.slices.len(),
+            next_after: batch.next_after,
+        };
+        let encoded = Self::encode_commit_export_json(batch)?;
+        fs::write(output_path, encoded).map_err(|_error| ContinuityError::CommitExportFileIo)?;
+        Ok(summary)
+    }
+
+    /// Imports a versioned JSON commit export envelope from a file.
+    pub fn import_commits_json_file<P: AsRef<Path>>(
+        &mut self,
+        input_path: P,
+    ) -> Result<usize, ContinuityError> {
+        let encoded = fs::read(input_path).map_err(|_error| ContinuityError::CommitExportFileIo)?;
+        let batch = Self::decode_commit_export_json(&encoded)?;
+        self.import_commit_batch(batch)
+    }
 }
 
 #[cfg(test)]
@@ -452,7 +490,9 @@ mod tests {
     };
     use continuitydb_memory::MemoryKernel;
 
-    use super::{CommitExportBatch, CommitSlice, ContinuityDb, ContinuityError};
+    use super::{
+        CommitExportBatch, CommitExportFileSummary, CommitSlice, ContinuityDb, ContinuityError,
+    };
 
     fn sample_cell(
         anchor: &str,
@@ -970,6 +1010,128 @@ mod tests {
             target.export_commits(CommitManifestLookup::default())?,
             batch
         );
+        Ok(())
+    }
+
+    #[test]
+    fn api_exports_commit_backup_json_file() -> Result<(), Box<dyn std::error::Error>> {
+        let source_path = temp_file_kernel_path("continuitydb-api-export-backup-source");
+        let backup_path = temp_file_kernel_path("continuitydb-api-export-backup-file");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut db = ContinuityDb::new(FileKernel::open(&source_path)?);
+        db.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:file-export", 0.91, 12)?],
+            committed_at,
+            commit_id,
+        )?;
+        let batch = db.export_commits(CommitManifestLookup::default())?;
+
+        let summary = db.export_commits_json_file(CommitManifestLookup::default(), &backup_path)?;
+        let encoded = std::fs::read(&backup_path)?;
+        let envelope: serde_json::Value = serde_json::from_slice(&encoded)?;
+        let decoded = ContinuityDb::<FileKernel>::decode_commit_export_json(&encoded)?;
+
+        assert_eq!(
+            summary,
+            CommitExportFileSummary {
+                exported_commits: 1,
+                next_after: batch.next_after,
+            }
+        );
+        assert_eq!(envelope["format"], "continuitydb.commit_export");
+        assert_eq!(envelope["version"], 1);
+        assert_eq!(decoded, batch);
+
+        std::fs::remove_file(source_path)?;
+        std::fs::remove_file(backup_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_imports_commit_backup_json_file() -> Result<(), Box<dyn std::error::Error>> {
+        let source_path = temp_file_kernel_path("continuitydb-api-import-backup-source");
+        let target_path = temp_file_kernel_path("continuitydb-api-import-backup-target");
+        let backup_path = temp_file_kernel_path("continuitydb-api-import-backup-file");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(FileKernel::open(&source_path)?);
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:file-import", 0.91, 12)?],
+            committed_at,
+            commit_id,
+        )?;
+        source.export_commits_json_file(CommitManifestLookup::default(), &backup_path)?;
+        let source_batch = source.export_commits(CommitManifestLookup::default())?;
+        let mut target = ContinuityDb::new(FileKernel::open(&target_path)?);
+
+        let imported = target.import_commits_json_file(&backup_path)?;
+
+        assert_eq!(imported, 1);
+        assert_eq!(
+            target.export_commits(CommitManifestLookup::default())?,
+            source_batch
+        );
+
+        std::fs::remove_file(source_path)?;
+        std::fs::remove_file(target_path)?;
+        std::fs::remove_file(backup_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_import_commit_backup_json_file_rejects_invalid_json(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let target_path = temp_file_kernel_path("continuitydb-api-import-backup-invalid-target");
+        let backup_path = temp_file_kernel_path("continuitydb-api-import-backup-invalid-file");
+        std::fs::write(&backup_path, "{not valid json}\n")?;
+        let mut target = ContinuityDb::new(FileKernel::open(&target_path)?);
+
+        let result = target.import_commits_json_file(&backup_path);
+
+        assert!(matches!(result, Err(ContinuityError::CommitExportJson)));
+
+        std::fs::remove_file(target_path)?;
+        std::fs::remove_file(backup_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_export_commit_backup_json_file_reports_io_failure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_path = temp_file_kernel_path("continuitydb-api-export-backup-io-source");
+        let missing_dir = std::env::temp_dir().join(format!(
+            "continuitydb-api-missing-dir-{:?}",
+            StateCellId::new()
+        ));
+        let backup_path = missing_dir.join("backup.json");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut db = ContinuityDb::new(FileKernel::open(&source_path)?);
+        db.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:file-export-io",
+                0.91,
+                12,
+            )?],
+            committed_at,
+            commit_id,
+        )?;
+
+        let result = db.export_commits_json_file(CommitManifestLookup::default(), backup_path);
+
+        assert!(matches!(result, Err(ContinuityError::CommitExportFileIo)));
+
+        std::fs::remove_file(source_path)?;
         Ok(())
     }
 

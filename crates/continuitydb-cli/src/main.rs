@@ -10,7 +10,7 @@ use continuitydb_core::{
 };
 use continuitydb_kernel::{CommitManifestLookup, FileKernel, StorageKernel};
 use continuitydb_memory::MemoryKernel;
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 /// ContinuityDB command-line interface.
 #[derive(Debug, Parser)]
@@ -77,16 +77,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             output_path,
         }) => {
             let db = ContinuityDb::new(FileKernel::open(&store_path)?);
-            let batch = db.export_commits(CommitManifestLookup::default())?;
-            let exported_commits = batch.slices.len();
-            let next_after = batch.next_after;
-            let encoded = ContinuityDb::<FileKernel>::encode_commit_export_json(batch)?;
-            fs::write(&output_path, encoded)?;
+            let summary =
+                db.export_commits_json_file(CommitManifestLookup::default(), &output_path)?;
             let output = serde_json::json!({
                 "path": store_path.display().to_string(),
                 "output": output_path.display().to_string(),
-                "exported_commits": exported_commits,
-                "next_after": next_after,
+                "exported_commits": summary.exported_commits,
+                "next_after": summary.next_after,
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -94,10 +91,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             store_path,
             input_path,
         }) => {
-            let encoded = fs::read(&input_path)?;
-            let batch = ContinuityDb::<FileKernel>::decode_commit_export_json(&encoded)?;
             let mut db = ContinuityDb::new(FileKernel::open(&store_path)?);
-            let imported_commits = db.import_commit_batch(batch)?;
+            let imported_commits = db.import_commits_json_file(&input_path)?;
             let output = serde_json::json!({
                 "path": store_path.display().to_string(),
                 "input": input_path.display().to_string(),
