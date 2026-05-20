@@ -31,6 +31,12 @@ pub enum KernelError {
     /// Storage kernel content could not be decoded.
     #[error("storage kernel content is corrupt")]
     StoreCorrupt,
+    /// A specific JSONL file-kernel record is corrupt.
+    #[error("storage kernel record at line {line} is corrupt")]
+    StoreCorruptRecord {
+        /// One-based physical line number in the JSONL log.
+        line: usize,
+    },
 }
 
 /// Query constraints supported by baseline storage kernels.
@@ -461,6 +467,10 @@ fn validate_file_record_checksum<T: serde::Serialize>(
     Ok(())
 }
 
+fn corrupt_record(line: usize) -> KernelError {
+    KernelError::StoreCorruptRecord { line }
+}
+
 fn encode_canonical_log<'a>(
     cells: impl IntoIterator<Item = &'a StateCell>,
     manifests: impl IntoIterator<Item = &'a CommitManifest>,
@@ -508,7 +518,8 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
     let mut seen_header = false;
     let mut seen_data = false;
 
-    for line in reader.lines() {
+    for (line_index, line) in reader.lines().enumerate() {
+        let line_number = line_index + 1;
         let line = line.map_err(|_error| KernelError::StoreIo)?;
         if line.trim().is_empty() {
             continue;
@@ -517,25 +528,30 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
         match serde_json::from_str::<FileKernelRecord>(&line) {
             Ok(FileKernelRecord::Header { format, version }) => {
                 if seen_header || seen_data {
-                    return Err(KernelError::StoreCorrupt);
+                    return Err(corrupt_record(line_number));
                 }
-                FileKernelHeader { format, version }.validate()?;
+                FileKernelHeader { format, version }
+                    .validate()
+                    .map_err(|_error| corrupt_record(line_number))?;
                 seen_header = true;
             }
             Ok(FileKernelRecord::Cell { cell, checksum }) => {
                 seen_data = true;
-                validate_file_record_checksum(cell.as_ref(), checksum.as_deref())?;
+                validate_file_record_checksum(cell.as_ref(), checksum.as_deref())
+                    .map_err(|_error| corrupt_record(line_number))?;
                 log.cells.push(*cell);
             }
             Ok(FileKernelRecord::Commit { manifest, checksum }) => {
                 seen_data = true;
-                validate_file_record_checksum(&manifest, checksum.as_deref())?;
+                validate_file_record_checksum(&manifest, checksum.as_deref())
+                    .map_err(|_error| corrupt_record(line_number))?;
                 log.explicit_manifests.push(manifest);
             }
             Err(_record_error) => {
                 seen_data = true;
                 log.cells.push(
-                    serde_json::from_str(&line).map_err(|_cell_error| KernelError::StoreCorrupt)?,
+                    serde_json::from_str(&line)
+                        .map_err(|_cell_error| corrupt_record(line_number))?,
                 );
             }
         }
@@ -1205,7 +1221,10 @@ mod tests {
 
         let result = FileKernel::open(&path);
 
-        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 1 })
+        ));
         fs::remove_file(path)?;
         Ok(())
     }
@@ -1236,7 +1255,10 @@ mod tests {
 
         let result = FileKernel::open(&path);
 
-        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 2 })
+        ));
         fs::remove_file(path)?;
         Ok(())
     }
@@ -1301,7 +1323,10 @@ mod tests {
 
         let result = FileKernel::open(&path);
 
-        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 2 })
+        ));
         fs::remove_file(path)?;
         Ok(())
     }
@@ -1333,7 +1358,10 @@ mod tests {
 
         let result = FileKernel::open(&path);
 
-        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 3 })
+        ));
         fs::remove_file(path)?;
         Ok(())
     }
@@ -1699,7 +1727,82 @@ mod tests {
 
         let result = FileKernel::open(&path);
 
-        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 1 })
+        ));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_reports_corrupt_jsonl_line_number() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-corrupt-line");
+        let cell = sample_cell("project:continuitydb:corrupt-line", 0.91, 12)?;
+        fs::write(
+            &path,
+            format!("{}\n{{not valid json}}\n", serde_json::to_string(&cell)?),
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 2 })
+        ));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_reports_unsupported_header_line_number() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-unsupported-header-line");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 999
+                })
+            ),
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 1 })
+        ));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_reports_checksum_failure_line_number() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-checksum-line");
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            append_committed(
+                &mut kernel,
+                sample_cell("project:continuitydb:checksum-line", 0.91, 12)?,
+            )?;
+        }
+        let tampered = fs::read_to_string(&path)?.replace(
+            "project:continuitydb:checksum-line",
+            "project:continuitydb:checksum-line-tampered",
+        );
+        fs::write(&path, tampered)?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(
+            result,
+            Err(KernelError::StoreCorruptRecord { line: 2 })
+        ));
         fs::remove_file(path)?;
         Ok(())
     }

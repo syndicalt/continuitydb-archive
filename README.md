@@ -38,6 +38,7 @@ The first milestone builds:
 - Explicit durable commit records in the JSONL file kernel.
 - Versioned JSONL file-kernel format headers.
 - Per-record JSONL file-kernel checksums for cell and commit records.
+- Line-addressed JSONL file-kernel corruption diagnostics.
 - JSONL file-kernel compaction into the canonical durable record format.
 - Native file-backed compaction API.
 - CLI file-backed compaction command.

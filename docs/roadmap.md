@@ -71,6 +71,7 @@ Storage kernel
 15. Add versioned JSONL file-kernel format headers. Implemented a supported `header` record for new stores while preserving legacy non-header logs and rejecting unsupported or misplaced headers.
 16. Add per-record JSONL file-kernel checksums. Implemented deterministic checksum fields for new cell and commit records, validation on reopen, and compatibility with checksum-free legacy envelope records.
 17. Add JSONL file-kernel compaction. Implemented `FileKernel::compact` to rewrite stored cells and commit manifests into the latest header plus checksummed cell and commit record format while preserving lookup and manifest listing behavior.
+18. Add line-addressed JSONL file-kernel corruption diagnostics. Implemented `KernelError::StoreCorruptRecord { line }` for decode-time header, checksum, and malformed JSONL failures so operators can locate damaged durable records.
 
 ## Checkout Milestones
 

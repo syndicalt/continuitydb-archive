@@ -21,7 +21,7 @@
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add malformed JSON line test**
+- [x] **Step 1: Add malformed JSON line test**
 
 Add this test near the existing `file_kernel_rejects_corrupt_jsonl` test:
 
@@ -43,7 +43,7 @@ fn file_kernel_reports_corrupt_jsonl_line_number() -> Result<(), Box<dyn std::er
 }
 ```
 
-- [ ] **Step 2: Add unsupported header line test**
+- [x] **Step 2: Add unsupported header line test**
 
 Add:
 
@@ -74,7 +74,7 @@ fn file_kernel_reports_unsupported_header_line_number() -> Result<(), Box<dyn st
 }
 ```
 
-- [ ] **Step 3: Add checksum line test**
+- [x] **Step 3: Add checksum line test**
 
 Add:
 
@@ -106,12 +106,12 @@ fn file_kernel_reports_checksum_failure_line_number() -> Result<(), Box<dyn std:
 }
 ```
 
-- [ ] **Step 4: Run targeted tests and verify RED**
+- [x] **Step 4: Run targeted tests and verify RED**
 
 Run:
 
 ```bash
-cargo test -p continuitydb-kernel corrupt_line
+cargo test -p continuitydb-kernel line_number
 ```
 
 Expected: compilation fails because `KernelError::StoreCorruptRecord` does not exist yet.
@@ -121,7 +121,7 @@ Expected: compilation fails because `KernelError::StoreCorruptRecord` does not e
 **Files:**
 - Modify: `crates/continuitydb-kernel/src/lib.rs`
 
-- [ ] **Step 1: Add error variant**
+- [x] **Step 1: Add error variant**
 
 Add to `KernelError`:
 
@@ -134,7 +134,7 @@ StoreCorruptRecord {
 },
 ```
 
-- [ ] **Step 2: Add helper**
+- [x] **Step 2: Add helper**
 
 Add near checksum helpers:
 
@@ -144,7 +144,7 @@ fn corrupt_record(line: usize) -> KernelError {
 }
 ```
 
-- [ ] **Step 3: Make `read_log_from_path` line-aware**
+- [x] **Step 3: Make `read_log_from_path` line-aware**
 
 Change the loop to:
 
@@ -188,12 +188,12 @@ for (line_index, line) in reader.lines().enumerate() {
 }
 ```
 
-- [ ] **Step 4: Run targeted tests and verify GREEN**
+- [x] **Step 4: Run targeted tests and verify GREEN**
 
 Run:
 
 ```bash
-cargo test -p continuitydb-kernel corrupt_line
+cargo test -p continuitydb-kernel line_number
 ```
 
 Expected: all new diagnostic tests pass.
@@ -204,7 +204,7 @@ Expected: all new diagnostic tests pass.
 - Modify: `README.md`
 - Modify: `docs/roadmap.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope:
 
@@ -212,7 +212,7 @@ Add to Current Scope:
 - Line-addressed JSONL file-kernel corruption diagnostics.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add Storage Kernel milestone:
 
@@ -220,7 +220,7 @@ Add Storage Kernel milestone:
 18. Add line-addressed JSONL file-kernel corruption diagnostics. Implemented `KernelError::StoreCorruptRecord { line }` for decode-time header, checksum, and malformed JSONL failures so operators can locate damaged durable records.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -234,7 +234,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
