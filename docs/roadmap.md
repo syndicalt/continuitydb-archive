@@ -235,6 +235,7 @@ Storage kernel
 23. Add native frontier/watch application workflow. Implemented a composed native API path that records subscribed frontier/watch proposal audits and applies accepted `RequestVerification` and `MarkFrontier` proposals through the typed dispatcher.
 24. Add local model runtime manifests. Implemented `LocalModelRuntimeManifest` so benchmark reports and durable baselines preserve the executable path and deterministic arguments used for a local model evaluation, while legacy baseline JSON remains readable.
 25. Add CLI local-model benchmark recording. Implemented a feature-gated `benchmark-local-model` command that runs the fixed Steward evaluation suite against a configured local executable, appends a JSONL baseline, and prints structured candidate, runtime, pass-count, and regression metadata.
+26. Add CLI local-model contract export. Implemented a feature-gated `local-model-contract` command that writes the Steward response JSON Schema and GBNF grammar to operator-selected files for grammar-constrained local model runs.
 
 ## Small Embeddable Model Track
 

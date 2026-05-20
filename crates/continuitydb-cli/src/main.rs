@@ -14,10 +14,12 @@ use continuitydb_kernel::{
 use continuitydb_memory::MemoryKernel;
 #[cfg(feature = "local-model")]
 use continuitydb_steward::{
-    default_steward_evaluation_suite, record_local_model_benchmark_baseline_with_regression,
+    default_steward_evaluation_suite, local_model_response_gbnf_grammar,
+    local_model_response_json_schema, record_local_model_benchmark_baseline_with_regression,
     small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
     LocalModelBenchmarkRegression, SmallModelCandidate, StewardIdentity,
+    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
@@ -202,6 +204,16 @@ enum Command {
         /// Exit non-zero when the latest matching previous baseline regresses.
         #[arg(long = "fail-on-regression")]
         fail_on_regression: bool,
+    },
+    /// Write local Steward model JSON Schema and GBNF grammar artifacts.
+    #[cfg(feature = "local-model")]
+    LocalModelContract {
+        /// Path to write the local model response JSON Schema.
+        #[arg(long = "schema-path")]
+        schema_path: PathBuf,
+        /// Path to write the local model response GBNF grammar.
+        #[arg(long = "grammar-path")]
+        grammar_path: PathBuf,
     },
 }
 
@@ -388,9 +400,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
+        #[cfg(feature = "local-model")]
+        Some(Command::LocalModelContract {
+            schema_path,
+            grammar_path,
+        }) => {
+            let output = write_local_model_contract_json(&schema_path, &grammar_path)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
         None => {}
     }
     Ok(())
+}
+
+#[cfg(feature = "local-model")]
+fn write_local_model_contract_json(
+    schema_path: &Path,
+    grammar_path: &Path,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    std::fs::write(schema_path, local_model_response_json_schema())?;
+    std::fs::write(grammar_path, local_model_response_gbnf_grammar())?;
+
+    Ok(serde_json::json!({
+        "schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+        "schema_path": schema_path.display().to_string(),
+        "grammar_path": grammar_path.display().to_string(),
+    }))
 }
 
 #[cfg(feature = "local-model")]

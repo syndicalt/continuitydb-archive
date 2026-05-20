@@ -269,6 +269,49 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     Ok(())
 }
 
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_local_model_contract_writes_schema_and_grammar() -> Result<(), Box<dyn std::error::Error>> {
+    let schema_path = temp_store_path("continuitydb-cli-local-model-schema");
+    let grammar_path = temp_store_path("continuitydb-cli-local-model-grammar");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("local-model-contract")
+        .arg("--schema-path")
+        .arg(&schema_path)
+        .arg("--grammar-path")
+        .arg(&grammar_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let schema: Value = serde_json::from_str(&fs::read_to_string(&schema_path)?)?;
+    let grammar = fs::read_to_string(&grammar_path)?;
+
+    assert_eq!(json["schema_version"].as_u64(), Some(1));
+    assert_eq!(
+        json["schema_path"].as_str(),
+        Some(schema_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        json["grammar_path"].as_str(),
+        Some(grammar_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        schema["$id"].as_str(),
+        Some("https://continuitydb.dev/schemas/local-model-response.schema.json")
+    );
+    assert_eq!(schema["x-continuitydb-schema-version"].as_u64(), Some(1));
+    assert!(grammar.contains("root ::= response"));
+    assert!(grammar.contains("request-verification-action"));
+
+    fs::remove_file(schema_path)?;
+    fs::remove_file(grammar_path)?;
+    Ok(())
+}
+
 #[test]
 fn cli_measure_workload_records_baseline_for_file_kernel() -> Result<(), Box<dyn std::error::Error>>
 {

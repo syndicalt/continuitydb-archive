@@ -65,6 +65,7 @@ The first milestone builds:
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.
 - Stable local model Steward response schema and grammar contract.
+- Feature-gated CLI local model response schema and grammar export.
 - Deterministic llama.cpp and mistral.rs runtime profiles.
 - Fixed Steward proposal-quality evaluation harness.
 - Executable local model benchmark fixture.
