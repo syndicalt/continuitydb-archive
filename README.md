@@ -89,6 +89,7 @@ The first milestone builds:
 - Local model regression changed-case failure summaries.
 - Local model regression same-outcome failure change summaries.
 - Local model regression changed-case response fingerprints.
+- Local model regression passing-response change summaries.
 - CLI local model fixed evaluation failure gating.
 - CLI local model fixed evaluation failure report artifacts.
 - CLI local model benchmark report artifact output.

@@ -2599,6 +2599,61 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn local_model_baseline_regression_summarizes_passing_response_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let previous = local_model_baseline_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://frontier"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let current = local_model_baseline_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The frontier signal is stale and should stay active.",
+                    "citations": ["test://frontier"]
+                }]
+            })
+            .to_string(),
+        )?;
+
+        let regression = LocalModelBenchmarkRegression::compare(&previous, &current);
+
+        assert!(!regression.regressed());
+        assert_eq!(regression.pass_count_delta(), 0);
+        assert!(regression.regressed_case_names().is_empty());
+        assert!(regression.recovered_case_names().is_empty());
+        let changed_case = regression
+            .changed_case_summaries()
+            .first()
+            .ok_or("missing passing response-change summary")?;
+        assert_eq!(changed_case.case_name(), "frontier baseline regression");
+        assert!(changed_case.previous_passed());
+        assert!(changed_case.current_passed());
+        assert!(changed_case.failure_count_deltas().is_empty());
+        assert_ne!(
+            changed_case.previous_response_fingerprint(),
+            changed_case.current_response_fingerprint()
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_baseline_regression_summarizes_changed_failure_reasons(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let cell_id = StateCellId::new();

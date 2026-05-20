@@ -1978,9 +1978,16 @@ fn changed_case_summaries(
         let current_failure_counts = case_failure_counts(current_report);
         let failure_count_deltas =
             failure_count_deltas(&previous_failure_counts, &current_failure_counts);
-        if previous_passed != current_passed || !failure_count_deltas.is_empty() {
-            let previous_response = previous_responses_by_name.get(name).copied();
-            let current_response = current_responses_by_name.get(name).copied();
+        let previous_response = previous_responses_by_name.get(name).copied();
+        let current_response = current_responses_by_name.get(name).copied();
+        let previous_response_fingerprint =
+            previous_response.and_then(LocalModelResponseFingerprint::response_fingerprint);
+        let current_response_fingerprint =
+            current_response.and_then(LocalModelResponseFingerprint::response_fingerprint);
+        if previous_passed != current_passed
+            || !failure_count_deltas.is_empty()
+            || previous_response_fingerprint != current_response_fingerprint
+        {
             summaries.push(LocalModelBenchmarkCaseSummary {
                 case_name: name.to_string(),
                 previous_passed,
@@ -1988,12 +1995,8 @@ fn changed_case_summaries(
                 previous_failure_counts,
                 current_failure_counts,
                 failure_count_deltas,
-                previous_response_fingerprint: previous_response
-                    .and_then(LocalModelResponseFingerprint::response_fingerprint)
-                    .map(str::to_string),
-                current_response_fingerprint: current_response
-                    .and_then(LocalModelResponseFingerprint::response_fingerprint)
-                    .map(str::to_string),
+                previous_response_fingerprint: previous_response_fingerprint.map(str::to_string),
+                current_response_fingerprint: current_response_fingerprint.map(str::to_string),
                 previous_response_bytes: previous_response
                     .map(LocalModelResponseFingerprint::response_bytes)
                     .unwrap_or_default(),
