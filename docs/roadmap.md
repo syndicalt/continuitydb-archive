@@ -291,6 +291,7 @@ Storage kernel
 79. Add local-model regression case outcome summaries. Added deterministic regressed and recovered evaluation case-name lists to compatible baseline regression reports and CLI JSON so CI can identify which fixed Steward contract cases changed without walking embedded per-case reports.
 80. Add local-model regression changed-case failure summaries. Added serializable per-case regression summaries with previous/current pass state and stable failure-code count deltas so CI can diagnose each changed fixed Steward contract case directly from baseline comparison JSON.
 81. Add local-model regression same-outcome failure change summaries. Extended changed-case regression summaries to include cases whose pass/fail outcome is unchanged but stable failure-code counts changed, so CI can detect local Steward model quality shifts that pass-count gates miss.
+82. Add local-model regression changed-case response fingerprints. Added previous/current raw response fingerprints and byte counts to each changed-case regression summary so CI artifacts can connect pass-state or failure-code movement directly to the model outputs that caused it.
 
 ## Small Embeddable Model Track
 

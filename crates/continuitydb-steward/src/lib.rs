@@ -2653,6 +2653,18 @@ mod tests {
                 .get("missing_expected_action"),
             Some(&1)
         );
+        assert!(changed_case
+            .previous_response_fingerprint()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+        assert!(changed_case
+            .current_response_fingerprint()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+        assert_ne!(
+            changed_case.previous_response_fingerprint(),
+            changed_case.current_response_fingerprint()
+        );
+        assert!(changed_case.previous_response_bytes() > 0);
+        assert!(changed_case.current_response_bytes() > 0);
         Ok(())
     }
 

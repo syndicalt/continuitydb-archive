@@ -1441,6 +1441,32 @@ printf '%s\n' '{"proposals":[]}'
         }),
         "expected same-outcome changed failure summary in {changed_cases:?}"
     );
+    let changed_case = changed_cases
+        .iter()
+        .find(|case| {
+            case["previous_passed"].as_bool() == Some(false)
+                && case["current_passed"].as_bool() == Some(false)
+                && case["failure_count_deltas"]
+                    .as_object()
+                    .is_some_and(|deltas| !deltas.is_empty())
+        })
+        .ok_or("missing same-outcome changed failure summary")?;
+    assert!(changed_case["previous_response_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(changed_case["current_response_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_ne!(
+        changed_case["previous_response_fingerprint"].as_str(),
+        changed_case["current_response_fingerprint"].as_str()
+    );
+    assert!(changed_case["previous_response_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    assert!(changed_case["current_response_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
 
     fs::remove_file(executable_path)?;
     fs::remove_file(baseline_path)?;

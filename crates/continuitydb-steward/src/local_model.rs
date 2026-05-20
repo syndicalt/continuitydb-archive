@@ -1731,6 +1731,14 @@ pub struct LocalModelBenchmarkCaseSummary {
     previous_failure_counts: BTreeMap<String, usize>,
     current_failure_counts: BTreeMap<String, usize>,
     failure_count_deltas: BTreeMap<String, isize>,
+    #[serde(default)]
+    previous_response_fingerprint: Option<String>,
+    #[serde(default)]
+    current_response_fingerprint: Option<String>,
+    #[serde(default)]
+    previous_response_bytes: usize,
+    #[serde(default)]
+    current_response_bytes: usize,
 }
 
 impl LocalModelBenchmarkCaseSummary {
@@ -1763,6 +1771,26 @@ impl LocalModelBenchmarkCaseSummary {
     pub fn failure_count_deltas(&self) -> &BTreeMap<String, isize> {
         &self.failure_count_deltas
     }
+
+    /// Returns the previous raw response fingerprint for this case when captured.
+    pub fn previous_response_fingerprint(&self) -> Option<&str> {
+        self.previous_response_fingerprint.as_deref()
+    }
+
+    /// Returns the current raw response fingerprint for this case when captured.
+    pub fn current_response_fingerprint(&self) -> Option<&str> {
+        self.current_response_fingerprint.as_deref()
+    }
+
+    /// Returns the previous raw response byte count for this case.
+    pub fn previous_response_bytes(&self) -> usize {
+        self.previous_response_bytes
+    }
+
+    /// Returns the current raw response byte count for this case.
+    pub fn current_response_bytes(&self) -> usize {
+        self.current_response_bytes
+    }
 }
 
 impl LocalModelBenchmarkRegression {
@@ -1777,8 +1805,12 @@ impl LocalModelBenchmarkRegression {
         let current_failure_counts = owned_failure_counts(current.evaluation().failure_counts());
         let failure_count_deltas =
             failure_count_deltas(&previous_failure_counts, &current_failure_counts);
-        let changed_case_summaries =
-            changed_case_summaries(previous.evaluation(), current.evaluation());
+        let changed_case_summaries = changed_case_summaries(
+            previous.evaluation(),
+            current.evaluation(),
+            previous.response_fingerprints(),
+            current.response_fingerprints(),
+        );
         let regressed_case_names = changed_case_summaries
             .iter()
             .filter(|case| case.previous_passed() && !case.current_passed())
@@ -1908,6 +1940,8 @@ fn failure_count_deltas(
 fn changed_case_summaries(
     previous: &StewardEvaluationReport,
     current: &StewardEvaluationReport,
+    previous_responses: &[LocalModelResponseFingerprint],
+    current_responses: &[LocalModelResponseFingerprint],
 ) -> Vec<LocalModelBenchmarkCaseSummary> {
     let previous_by_name: BTreeMap<&str, &StewardEvaluationCaseReport> = previous
         .case_reports()
@@ -1919,6 +1953,16 @@ fn changed_case_summaries(
         .iter()
         .map(|case| (case.name(), case))
         .collect();
+    let previous_responses_by_name: BTreeMap<&str, &LocalModelResponseFingerprint> =
+        previous_responses
+            .iter()
+            .map(|response| (response.case_name(), response))
+            .collect();
+    let current_responses_by_name: BTreeMap<&str, &LocalModelResponseFingerprint> =
+        current_responses
+            .iter()
+            .map(|response| (response.case_name(), response))
+            .collect();
     let mut summaries = Vec::new();
     let names: BTreeSet<&str> = previous_by_name
         .keys()
@@ -1935,6 +1979,8 @@ fn changed_case_summaries(
         let failure_count_deltas =
             failure_count_deltas(&previous_failure_counts, &current_failure_counts);
         if previous_passed != current_passed || !failure_count_deltas.is_empty() {
+            let previous_response = previous_responses_by_name.get(name).copied();
+            let current_response = current_responses_by_name.get(name).copied();
             summaries.push(LocalModelBenchmarkCaseSummary {
                 case_name: name.to_string(),
                 previous_passed,
@@ -1942,6 +1988,18 @@ fn changed_case_summaries(
                 previous_failure_counts,
                 current_failure_counts,
                 failure_count_deltas,
+                previous_response_fingerprint: previous_response
+                    .and_then(LocalModelResponseFingerprint::response_fingerprint)
+                    .map(str::to_string),
+                current_response_fingerprint: current_response
+                    .and_then(LocalModelResponseFingerprint::response_fingerprint)
+                    .map(str::to_string),
+                previous_response_bytes: previous_response
+                    .map(LocalModelResponseFingerprint::response_bytes)
+                    .unwrap_or_default(),
+                current_response_bytes: current_response
+                    .map(LocalModelResponseFingerprint::response_bytes)
+                    .unwrap_or_default(),
             });
         }
     }
