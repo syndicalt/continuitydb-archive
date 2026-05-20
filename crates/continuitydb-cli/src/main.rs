@@ -68,6 +68,7 @@ struct LocalModelBenchmarkOptions<'a> {
     arguments: &'a [String],
     candidate_defaults: bool,
     grammar_path: Option<&'a Path>,
+    artifact_dir: Option<&'a Path>,
     contract_dir: Option<&'a Path>,
     prompt_dir: Option<&'a Path>,
     response_dir: Option<&'a Path>,
@@ -276,6 +277,9 @@ enum Command {
         /// GBNF grammar path passed to the executable as `--grammar-file <path>`.
         #[arg(long = "grammar-path")]
         grammar_path: Option<PathBuf>,
+        /// Directory where a benchmark artifact bundle is written.
+        #[arg(long = "artifact-dir")]
+        artifact_dir: Option<PathBuf>,
         /// Directory where benchmark-local Steward schema and grammar artifacts are written.
         #[arg(long = "contract-dir")]
         contract_dir: Option<PathBuf>,
@@ -504,6 +508,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             arguments,
             candidate_defaults,
             grammar_path,
+            artifact_dir,
             contract_dir,
             prompt_dir,
             response_dir,
@@ -525,6 +530,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 arguments: &arguments,
                 candidate_defaults,
                 grammar_path: grammar_path.as_deref(),
+                artifact_dir: artifact_dir.as_deref(),
                 contract_dir: contract_dir.as_deref(),
                 prompt_dir: prompt_dir.as_deref(),
                 response_dir: response_dir.as_deref(),
@@ -538,6 +544,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
             })?;
+            if let Some(artifact_dir) = artifact_dir.as_ref() {
+                write_pretty_json_file(&artifact_dir.join("benchmark-report.json"), &output)?;
+            }
             if let Some(report_path) = report_path {
                 write_pretty_json_file(&report_path, &output)?;
             }
@@ -717,12 +726,19 @@ fn benchmark_local_model_json(
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let candidate = local_model_candidate(options.candidate_id)?;
     let suite = default_steward_evaluation_suite();
-    let contract_artifacts = options
-        .contract_dir
+    let artifact_contract_dir = options.artifact_dir.map(|dir| dir.join("contracts"));
+    let artifact_prompt_dir = options.artifact_dir.map(|dir| dir.join("prompts"));
+    let artifact_response_dir = options
+        .artifact_dir
+        .filter(|_artifact_dir| !options.dry_run)
+        .map(|dir| dir.join("responses"));
+    let effective_contract_dir = options.contract_dir.or(artifact_contract_dir.as_deref());
+    let effective_prompt_dir = options.prompt_dir.or(artifact_prompt_dir.as_deref());
+    let effective_response_dir = options.response_dir.or(artifact_response_dir.as_deref());
+    let contract_artifacts = effective_contract_dir
         .map(write_local_model_contract_artifacts)
         .transpose()?;
-    let prompt_artifacts = options
-        .prompt_dir
+    let prompt_artifacts = effective_prompt_dir
         .map(|prompt_dir| write_local_model_prompt_artifacts(prompt_dir, &suite))
         .transpose()?
         .unwrap_or_default();
@@ -808,17 +824,16 @@ fn benchmark_local_model_json(
         return Err(std::io::Error::other("local model benchmark stability check failed").into());
     }
 
-    let (report, responses) = if options.response_dir.is_some() {
+    let (report, responses) = if effective_response_dir.is_some() {
         benchmark.run_with_responses(identity)
     } else {
         (benchmark.run(identity), Vec::new())
     };
-    let response_artifacts = options
-        .response_dir
+    let response_artifacts = effective_response_dir
         .map(|response_dir| write_local_model_response_artifacts(response_dir, &responses))
         .transpose()?
         .unwrap_or_default();
-    let response_manifest = if let Some(response_dir) = options.response_dir {
+    let response_manifest = if let Some(response_dir) = effective_response_dir {
         Some(write_local_model_response_artifact_manifest(
             response_dir,
             &response_artifacts,

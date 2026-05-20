@@ -737,6 +737,138 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     Ok(())
 }
 
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_benchmark_local_model_artifact_dir_writes_real_run_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-artifact-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-artifact-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-artifact-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    let script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"request_verification","cell_id":"00000000-0000-0000-0000-000000000007","request":"Refresh the stale high-impact frontier signal."},"rationale":"The stale high-impact frontier signal needs a refresh from current evidence.","citations":["continuitydb://evaluation/targeted-verification-evidence"]},{"action":{"type":"create_cell_draft","anchors":["project:continuitydb:benchmark-result"],"payload_text":"ContinuityDB local Steward benchmark produced a new result requiring review."},"rationale":"The new benchmark evidence supports drafting a StateCell for review.","citations":["continuitydb://evaluation/new-benchmark-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
+"#;
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout_json: Value = serde_json::from_slice(&output)?;
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+
+    assert_eq!(stdout_json, report_json);
+    assert_eq!(stdout_json["passed"].as_bool(), Some(true));
+    assert_eq!(
+        stdout_json["contract_artifacts"]["schema_path"].as_str(),
+        Some(
+            artifact_dir
+                .join("contracts/local-model-response.schema.json")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+    assert_eq!(
+        stdout_json["prompt_artifacts"].as_array().map(Vec::len),
+        Some(9)
+    );
+    assert_eq!(
+        stdout_json["response_artifacts"].as_array().map(Vec::len),
+        Some(9)
+    );
+    assert!(artifact_dir
+        .join("responses/local-model-responses.manifest.json")
+        .exists());
+    assert!(stdout_json["response_artifact_manifest"]["manifest_path"]
+        .as_str()
+        .is_some_and(|path| path.ends_with("responses/local-model-responses.manifest.json")));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_benchmark_local_model_artifact_dir_writes_dry_run_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-artifact-dry-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-artifact-dry-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout_json: Value = serde_json::from_slice(&output)?;
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+
+    assert_eq!(stdout_json, report_json);
+    assert_eq!(stdout_json["dry_run"].as_bool(), Some(true));
+    assert!(artifact_dir
+        .join("contracts/local-model-response.schema.json")
+        .exists());
+    assert_eq!(
+        stdout_json["prompt_artifacts"].as_array().map(Vec::len),
+        Some(9)
+    );
+    assert_eq!(
+        stdout_json["response_artifacts"].as_array().map(Vec::len),
+        Some(0)
+    );
+    assert!(stdout_json["response_artifact_manifest"].is_null());
+    assert!(!artifact_dir.join("responses").exists());
+    assert!(!baseline_path.exists());
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_benchmark_local_model_failure_report_path_dry_run_reports_gate(
