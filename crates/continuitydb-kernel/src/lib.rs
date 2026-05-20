@@ -150,6 +150,9 @@ pub trait StorageKernel {
 
 const FILE_KERNEL_FORMAT: &str = "continuitydb.file_kernel";
 const FILE_KERNEL_FORMAT_VERSION: u32 = 1;
+const FILE_KERNEL_CHECKSUM_ALGORITHM: &str = "continuitydb-fnv1a64";
+const FNV1A64_OFFSET: u64 = 0xcbf29ce484222325;
+const FNV1A64_PRIME: u64 = 0x100000001b3;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 struct FileKernelHeader {
@@ -177,9 +180,18 @@ impl FileKernelHeader {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum FileKernelRecord {
-    Header { format: String, version: u32 },
-    Cell { cell: Box<StateCell> },
-    Commit { manifest: CommitManifest },
+    Header {
+        format: String,
+        version: u32,
+    },
+    Cell {
+        cell: Box<StateCell>,
+        checksum: Option<String>,
+    },
+    Commit {
+        manifest: CommitManifest,
+        checksum: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -394,6 +406,28 @@ fn ensure_file_header(path: &Path) -> Result<(), KernelError> {
     writeln!(file, "{encoded}").map_err(|_error| KernelError::StoreIo)
 }
 
+fn file_record_checksum<T: serde::Serialize>(payload: &T) -> Result<String, KernelError> {
+    let bytes = serde_json::to_vec(payload).map_err(|_error| KernelError::StoreCorrupt)?;
+    let mut hash = FNV1A64_OFFSET;
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV1A64_PRIME);
+    }
+    Ok(format!("{FILE_KERNEL_CHECKSUM_ALGORITHM}:{hash:016x}"))
+}
+
+fn validate_file_record_checksum<T: serde::Serialize>(
+    payload: &T,
+    checksum: Option<&str>,
+) -> Result<(), KernelError> {
+    if let Some(checksum) = checksum {
+        if file_record_checksum(payload)? != checksum {
+            return Err(KernelError::StoreCorrupt);
+        }
+    }
+    Ok(())
+}
+
 fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
     let file = File::open(path).map_err(|_error| KernelError::StoreIo)?;
     let reader = BufReader::new(file);
@@ -415,12 +449,14 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
                 FileKernelHeader { format, version }.validate()?;
                 seen_header = true;
             }
-            Ok(FileKernelRecord::Cell { cell }) => {
+            Ok(FileKernelRecord::Cell { cell, checksum }) => {
                 seen_data = true;
+                validate_file_record_checksum(cell.as_ref(), checksum.as_deref())?;
                 log.cells.push(*cell);
             }
-            Ok(FileKernelRecord::Commit { manifest }) => {
+            Ok(FileKernelRecord::Commit { manifest, checksum }) => {
                 seen_data = true;
+                validate_file_record_checksum(&manifest, checksum.as_deref())?;
                 log.explicit_manifests.push(manifest);
             }
             Err(_record_error) => {
@@ -486,6 +522,7 @@ impl StorageKernel for FileKernel {
             encoded.push_str(
                 &serde_json::to_string(&FileKernelRecord::Cell {
                     cell: Box::new(cell.clone()),
+                    checksum: Some(file_record_checksum(cell)?),
                 })
                 .map_err(|_error| KernelError::StoreCorrupt)?,
             );
@@ -494,6 +531,7 @@ impl StorageKernel for FileKernel {
         encoded.push_str(
             &serde_json::to_string(&FileKernelRecord::Commit {
                 manifest: manifest.clone(),
+                checksum: Some(file_record_checksum(&manifest)?),
             })
             .map_err(|_error| KernelError::StoreCorrupt)?,
         );
@@ -1126,6 +1164,142 @@ mod tests {
         let result = FileKernel::open(&path);
 
         assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_writes_checksums_for_cell_and_commit_records(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-checksummed-records");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let cell = sample_cell("project:continuitydb:checksummed", 0.91, 12)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell_at_with_commit_id(cell, committed_at, commit_id)?;
+        }
+
+        let lines = fs::read_to_string(&path)?
+            .lines()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        assert_eq!(lines[1]["type"], "cell");
+        assert!(lines[1]["checksum"]
+            .as_str()
+            .ok_or_else(|| std::io::Error::other("missing cell checksum"))?
+            .starts_with("continuitydb-fnv1a64:"));
+        assert_eq!(lines[2]["type"], "commit");
+        assert!(lines[2]["checksum"]
+            .as_str()
+            .ok_or_else(|| std::io::Error::other("missing commit checksum"))?
+            .starts_with("continuitydb-fnv1a64:"));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_tampered_cell_checksum() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-tampered-cell-checksum");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let cell = sample_cell("project:continuitydb:tampered-cell", 0.91, 12)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell_at_with_commit_id(cell, committed_at, commit_id)?;
+        }
+        let mut records = fs::read_to_string(&path)?
+            .lines()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<Result<Vec<_>, _>>()?;
+        records[1]["cell"]["payload"] = serde_json::json!({
+            "Text": "tampered payload"
+        });
+        fs::write(
+            &path,
+            records
+                .into_iter()
+                .map(|record| record.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_rejects_tampered_commit_checksum() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-tampered-commit-checksum");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let cell = sample_cell("project:continuitydb:tampered-commit", 0.91, 12)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_cell_at_with_commit_id(cell, committed_at, commit_id)?;
+        }
+        let mut records = fs::read_to_string(&path)?
+            .lines()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<Result<Vec<_>, _>>()?;
+        records[2]["manifest"]["cell_ids"] = serde_json::json!([]);
+        fs::write(
+            &path,
+            records
+                .into_iter()
+                .map(|record| record.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::StoreCorrupt)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_still_opens_checksum_free_envelope_records(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-checksum-free-envelope");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:checksum-free", 0.91, 12)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
+        let manifest =
+            continuitydb_core::CommitManifest::new(commit_id, committed_at, vec![cell.id]);
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n{}\n",
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 1
+                }),
+                serde_json::json!({
+                    "type": "cell",
+                    "cell": cell
+                }),
+                serde_json::json!({
+                    "type": "commit",
+                    "manifest": manifest
+                })
+            ),
+        )?;
+
+        let kernel = FileKernel::open(&path)?;
+
+        assert_eq!(kernel.lookup_cells(CellLookup::default())?.len(), 1);
+        assert!(kernel.lookup_commit_manifest(commit_id)?.is_some());
         fs::remove_file(path)?;
         Ok(())
     }
