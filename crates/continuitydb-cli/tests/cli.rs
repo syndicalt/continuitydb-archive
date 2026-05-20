@@ -138,10 +138,7 @@ fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::err
         json["capabilities"]["explicit_commit_records"].as_bool(),
         Some(true)
     );
-    assert_eq!(
-        json["capabilities"]["durable_flush"].as_bool(),
-        Some(true)
-    );
+    assert_eq!(json["capabilities"]["durable_flush"].as_bool(), Some(true));
     assert_eq!(json["capabilities"]["compaction"].as_bool(), Some(true));
 
     fs::remove_file(path)?;

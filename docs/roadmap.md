@@ -114,6 +114,7 @@ Storage kernel
 1. Expose deterministic checkout JSON from the CLI. Implemented as `continuitydb demo-checkout`, showing selected cells, audit traces, uncertainty, frontier recommendations, and alternatives.
 2. Expose JSONL file-store compaction from the CLI. Implemented as `continuitydb compact-file <path>` so operators can compact a file-backed store into the current canonical durable record format.
 3. Expose commit backup and restore from the CLI. Implemented `continuitydb export-commits <store-path> <output-path>` and `continuitydb import-commits <store-path> <input-path>` over the versioned commit export envelope so file-backed stores can be copied through a validated portable backup file.
+4. Expose kernel capability inspection from the CLI. Implemented `continuitydb inspect-kernel <store-path> [--require <profile>]` so operators and CI can inspect file-backed storage guarantees and fail early when a requested profile is not satisfied.
 
 ## Native API Milestones
 
