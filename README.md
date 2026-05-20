@@ -46,6 +46,7 @@ The first milestone builds:
 - CLI file-backed compaction command.
 - Native commit cell materialization API.
 - Native commit slice materialization API for cursor-selected commit replay.
+- Native commit export batch API for backup and sync flows.
 - Native typed operation API for ingest, checkout, and audit.
 - Native typed utility feedback revision API.
 - Native read-only conflict analysis API.

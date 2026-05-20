@@ -47,6 +47,15 @@ pub struct CommitSlice {
     pub cells: Vec<StateCell>,
 }
 
+/// Cursor-selected commit slices ready for backup, sync, or replay export.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommitExportBatch {
+    /// Exported commit slices in database visibility order.
+    pub slices: Vec<CommitSlice>,
+    /// Cursor to use as `CommitManifestLookup.after` for the next export batch.
+    pub next_after: Option<CommitId>,
+}
+
 impl<K> ContinuityDb<K> {
     /// Creates a database wrapper over an existing storage kernel.
     pub fn new(kernel: K) -> Self {
@@ -193,6 +202,16 @@ impl<K: StorageKernel> ContinuityDb<K> {
             .collect()
     }
 
+    /// Returns a cursor-selected commit export batch for backup, sync, and replay flows.
+    pub fn export_commits(
+        &self,
+        lookup: CommitManifestLookup,
+    ) -> Result<CommitExportBatch, ContinuityError> {
+        let slices = self.commit_slices(lookup)?;
+        let next_after = slices.last().map(|slice| slice.manifest.commit_id);
+        Ok(CommitExportBatch { slices, next_after })
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -308,7 +327,7 @@ mod tests {
     };
     use continuitydb_memory::MemoryKernel;
 
-    use super::{ContinuityDb, ContinuityError};
+    use super::{CommitExportBatch, ContinuityDb, ContinuityError};
 
     fn sample_cell(
         anchor: &str,
@@ -691,6 +710,77 @@ mod tests {
 
         assert!(slices.is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn api_exports_commit_batch_with_next_cursor() -> Result<(), Box<dyn std::error::Error>> {
+        let first_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:export-first", 0.91, 12)?;
+        let second_a = sample_cell("project:continuitydb:export-second-a", 0.83, 15)?;
+        let second_b = sample_cell("project:continuitydb:export-second-b", 0.82, 16)?;
+        let expected_second_ids = vec![second_a.id, second_b.id];
+
+        db.ingest_cells_at_with_commit_id(vec![first], first_time, first_commit)?;
+        db.ingest_cells_at_with_commit_id(vec![second_a, second_b], second_time, second_commit)?;
+
+        let batch = db.export_commits(CommitManifestLookup {
+            after: Some(first_commit),
+            limit: Some(1),
+        })?;
+
+        assert_eq!(batch.next_after, Some(second_commit));
+        assert_eq!(batch.slices.len(), 1);
+        assert_eq!(batch.slices[0].manifest.commit_id, second_commit);
+        assert_eq!(
+            batch.slices[0]
+                .cells
+                .iter()
+                .map(|cell| cell.id)
+                .collect::<Vec<_>>(),
+            expected_second_ids
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_exports_empty_commit_batch() -> Result<(), Box<dyn std::error::Error>> {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let batch = db.export_commits(CommitManifestLookup::default())?;
+
+        assert_eq!(
+            batch,
+            CommitExportBatch {
+                slices: Vec::new(),
+                next_after: None,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_export_commits_reports_unknown_cursor() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let result = db.export_commits(CommitManifestLookup {
+            after: Some(CommitId::new()),
+            limit: Some(10),
+        });
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Kernel(KernelError::CommitNotFound))
+        ));
     }
 
     #[test]

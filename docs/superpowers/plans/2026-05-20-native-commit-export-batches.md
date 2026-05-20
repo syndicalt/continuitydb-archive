@@ -21,7 +21,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Import new type in tests**
+- [x] **Step 1: Import new type in tests**
 
 Change:
 
@@ -35,7 +35,7 @@ to:
 use super::{CommitExportBatch, ContinuityDb, ContinuityError};
 ```
 
-- [ ] **Step 2: Add export batch order and cursor test**
+- [x] **Step 2: Add export batch order and cursor test**
 
 Add this test near `api_returns_commit_slices_after_cursor_with_limit`:
 
@@ -81,7 +81,7 @@ fn api_exports_commit_batch_with_next_cursor() -> Result<(), Box<dyn std::error:
 }
 ```
 
-- [ ] **Step 3: Add empty export test**
+- [x] **Step 3: Add empty export test**
 
 Add:
 
@@ -103,7 +103,7 @@ fn api_exports_empty_commit_batch() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-- [ ] **Step 4: Add unknown cursor test**
+- [x] **Step 4: Add unknown cursor test**
 
 Add:
 
@@ -124,7 +124,7 @@ fn api_export_commits_reports_unknown_cursor() {
 }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify RED**
+- [x] **Step 5: Run targeted tests and verify RED**
 
 Run:
 
@@ -139,7 +139,7 @@ Expected: compilation fails because `CommitExportBatch` and `export_commits` do 
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add export batch type**
+- [x] **Step 1: Add export batch type**
 
 Add below `CommitSlice`:
 
@@ -154,7 +154,7 @@ pub struct CommitExportBatch {
 }
 ```
 
-- [ ] **Step 2: Add export method**
+- [x] **Step 2: Add export method**
 
 Add near `commit_slices`:
 
@@ -170,13 +170,13 @@ pub fn export_commits(
 }
 ```
 
-- [ ] **Step 3: Run targeted tests and verify GREEN**
+- [x] **Step 3: Run targeted tests and verify GREEN**
 
 Run:
 
 ```bash
 cargo test -p continuitydb-api export_commits
-cargo test -p continuitydb-api export_commit_batch
+cargo test -p continuitydb-api exports_
 ```
 
 Expected: all export batch tests pass.
@@ -188,7 +188,7 @@ Expected: all export batch tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-native-commit-export-batches.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope:
 
@@ -196,7 +196,7 @@ Add to Current Scope:
 - Native commit export batch API for backup and sync flows.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add Native API milestone:
 
@@ -204,7 +204,7 @@ Add Native API milestone:
 8. Add native commit export batches. Implemented `CommitExportBatch` and `ContinuityDb::export_commits` so embedders can page commit slices with a deterministic next cursor for backup, sync, and replay flows.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -218,7 +218,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
