@@ -21,8 +21,9 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
-    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    record_local_model_benchmark_baseline, small_model_candidates,
+    FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
+    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkReport,
     LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
     MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
@@ -37,8 +38,9 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 mod tests {
     #[cfg(feature = "local-model")]
     use super::{
-        small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
-        LocalModelBenchmark, LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
+        record_local_model_benchmark_baseline, small_model_candidates,
+        FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
+        LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
         MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, StewardEvaluationCase,
         StewardEvaluationFailure, StewardEvaluationSuite,
     };
@@ -1128,6 +1130,53 @@ mod tests {
         assert_eq!(baseline.candidate_role(), "default-feasibility");
         assert_eq!(baseline.recorded_at(), created_at());
         assert_eq!(baseline.evaluation().case_reports().len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_records_baseline_in_store() -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let script = write_local_model_script(
+            "continuitydb-local-model-baseline-record",
+            &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier baseline record",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+
+        let baseline = record_local_model_benchmark_baseline(
+            &benchmark,
+            steward()?,
+            created_at(),
+            &mut store,
+        )?;
+
+        assert!(baseline.passed());
+        assert_eq!(baseline.candidate_model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
+        assert_eq!(baseline.candidate_role(), "default-feasibility");
+        assert_eq!(store.list_baselines()?, vec![baseline]);
         Ok(())
     }
 

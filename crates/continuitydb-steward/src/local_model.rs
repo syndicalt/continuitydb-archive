@@ -662,6 +662,21 @@ impl LocalModelBenchmarkBaseline {
     }
 }
 
+/// Runs a configured local model benchmark and records the resulting baseline.
+pub fn record_local_model_benchmark_baseline<S>(
+    benchmark: &LocalModelBenchmark,
+    identity: StewardIdentity,
+    recorded_at: DateTime<Utc>,
+    store: &mut S,
+) -> Result<LocalModelBenchmarkBaseline, StewardError>
+where
+    S: LocalModelBenchmarkBaselineStore,
+{
+    let baseline = LocalModelBenchmarkBaseline::from_report(benchmark.run(identity), recorded_at);
+    store.append_baseline(baseline.clone())?;
+    Ok(baseline)
+}
+
 /// Storage contract for append-only local model benchmark baselines.
 pub trait LocalModelBenchmarkBaselineStore {
     /// Appends a benchmark baseline.
