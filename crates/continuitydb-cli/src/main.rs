@@ -8,7 +8,10 @@ use continuitydb_core::{
     ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
     SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
 };
-use continuitydb_kernel::{CommitManifestLookup, FileKernel, StorageKernel};
+use continuitydb_kernel::{
+    CommitManifestLookup, FileKernel, KernelCapabilities, KernelDurability, KernelRequirements,
+    StorageKernel,
+};
 use continuitydb_memory::MemoryKernel;
 use std::path::PathBuf;
 
@@ -24,6 +27,17 @@ struct Cli {
     command: Option<Command>,
 }
 
+/// Named kernel requirement profiles understood by the CLI.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum RequirementProfile {
+    /// Allow temporary in-process correctness kernels.
+    Ephemeral,
+    /// Require durable append-log storage.
+    DurableAppendLog,
+    /// Require future durable storage with persistent indexes.
+    IndexedEmbedded,
+}
+
 /// Supported commands.
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -35,6 +49,14 @@ enum Command {
     CompactFile {
         /// Path to the JSONL file-backed store.
         path: PathBuf,
+    },
+    /// Inspect file-backed kernel capabilities and optionally enforce a requirement profile.
+    InspectKernel {
+        /// Path to the JSONL file-backed store.
+        store_path: PathBuf,
+        /// Required storage profile.
+        #[arg(long = "require")]
+        require: Option<RequirementProfile>,
     },
     /// Export all file-backed commit slices to a versioned JSON backup envelope.
     ExportCommits {
@@ -52,7 +74,14 @@ enum Command {
     },
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -62,6 +91,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::DemoCheckout) => {
             let slice = demo_checkout()?;
             println!("{}", serde_json::to_string_pretty(&slice)?);
+        }
+        Some(Command::InspectKernel {
+            store_path,
+            require,
+        }) => {
+            let db = ContinuityDb::new(FileKernel::open(&store_path)?);
+            let capabilities = db.kernel_capabilities();
+            let required = require.map(profile_name);
+            let satisfies = require
+                .map(|profile| db.kernel_satisfies(requirements_for_profile(profile)))
+                .unwrap_or(true);
+            if let Some(profile) = require {
+                db.ensure_kernel_requirements(requirements_for_profile(profile))?;
+            }
+            let output = serde_json::json!({
+                "path": store_path.display().to_string(),
+                "capabilities": capabilities_json(capabilities),
+                "required": required,
+                "satisfies": satisfies,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::CompactFile { path }) => {
             let mut db = ContinuityDb::new(FileKernel::open(&path)?);
@@ -103,6 +153,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => {}
     }
     Ok(())
+}
+
+fn requirements_for_profile(profile: RequirementProfile) -> KernelRequirements {
+    match profile {
+        RequirementProfile::Ephemeral => KernelRequirements::ephemeral(),
+        RequirementProfile::DurableAppendLog => KernelRequirements::durable_append_log(),
+        RequirementProfile::IndexedEmbedded => KernelRequirements::indexed_embedded(),
+    }
+}
+
+fn profile_name(profile: RequirementProfile) -> &'static str {
+    match profile {
+        RequirementProfile::Ephemeral => "ephemeral",
+        RequirementProfile::DurableAppendLog => "durable-append-log",
+        RequirementProfile::IndexedEmbedded => "indexed-embedded",
+    }
+}
+
+fn durability_name(durability: KernelDurability) -> &'static str {
+    match durability {
+        KernelDurability::Ephemeral => "ephemeral",
+        KernelDurability::AppendLog => "append-log",
+        KernelDurability::IndexedEmbedded => "indexed-embedded",
+    }
+}
+
+fn capabilities_json(capabilities: KernelCapabilities) -> serde_json::Value {
+    serde_json::json!({
+        "durability": durability_name(capabilities.durability),
+        "append_only": capabilities.append_only,
+        "derived_indexes": capabilities.derived_indexes,
+        "persistent_indexes": capabilities.persistent_indexes,
+        "explicit_commit_records": capabilities.explicit_commit_records,
+        "durable_flush": capabilities.durable_flush,
+        "compaction": capabilities.compaction,
+    })
 }
 
 fn demo_checkout() -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::error::Error>> {

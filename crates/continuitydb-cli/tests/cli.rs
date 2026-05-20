@@ -105,6 +105,92 @@ fn cli_compact_file_fails_for_corrupt_store() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
+fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["path"].as_str(), path.to_str());
+    assert!(json["required"].is_null());
+    assert_eq!(json["satisfies"].as_bool(), Some(true));
+    assert_eq!(
+        json["capabilities"]["durability"].as_str(),
+        Some("append-log")
+    );
+    assert_eq!(json["capabilities"]["append_only"].as_bool(), Some(true));
+    assert_eq!(
+        json["capabilities"]["derived_indexes"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        json["capabilities"]["persistent_indexes"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        json["capabilities"]["explicit_commit_records"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        json["capabilities"]["durable_flush"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(json["capabilities"]["compaction"].as_bool(), Some(true));
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_inspect_kernel_accepts_durable_append_log_requirement(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-require-durable");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--require")
+        .arg("durable-append-log")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["required"].as_str(), Some("durable-append-log"));
+    assert_eq!(json["satisfies"].as_bool(), Some(true));
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_inspect_kernel_rejects_indexed_embedded_requirement(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-require-indexed");
+
+    Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--require")
+        .arg("indexed-embedded")
+        .assert()
+        .failure()
+        .stderr(contains("storage kernel requirements are not met"));
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Error>> {
     let source_path = temp_store_path("continuitydb-cli-export-source");
     let target_path = temp_store_path("continuitydb-cli-import-target");
