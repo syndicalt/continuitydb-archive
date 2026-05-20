@@ -453,7 +453,7 @@ cargo test -p continuitydb-query
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit query AST implementation**
+- [x] **Step 3: Commit query AST implementation**
 
 ```bash
 git add crates/continuitydb-query/src/lib.rs
@@ -467,7 +467,7 @@ git commit -m "feat: add continuity query ast"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-continuity-query-ast.md`
 
-- [ ] **Step 1: Update README current scope**
+- [x] **Step 1: Update README current scope**
 
 Add this bullet near deterministic checkout:
 
@@ -475,7 +475,7 @@ Add this bullet near deterministic checkout:
 - Typed Continuity Query AST compiling checkout semantics into native requests.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add this section after Checkout Milestones:
 
@@ -485,7 +485,7 @@ Add this section after Checkout Milestones:
 1. Add a typed Continuity Query AST. Implemented `continuitydb-query` with structured checkout query types and compilation into `CheckoutRequest`, establishing the semantic target for future text syntax and API bindings.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -499,7 +499,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-continuity-query-ast.md

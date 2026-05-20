@@ -94,6 +94,10 @@ Storage kernel
 9. Add commit-scoped checkout constraints. Implemented `CheckoutRequest.commit_id` with pushdown into `CellLookup.commit_id`, allowing continuity slices to be materialized for one explicit database commit boundary.
 10. Add commit-aware audit traces. Implemented `AuditTrace.commit_id` so direct audit and checkout-selected audit traces expose the database commit boundary that wrote each cell.
 
+## Query Language Milestones
+
+1. Add a typed Continuity Query AST. Implemented `continuitydb-query` with structured checkout query types and compilation into `CheckoutRequest`, establishing the semantic target for future text syntax and API bindings.
+
 ## Utility Feedback Milestones
 
 1. Add first-class StateCell utility feedback primitives. Implemented as bounded relevance, recency, and decision-impact scores in `continuitydb-core`, with neutral defaults for new and previously serialized cells.

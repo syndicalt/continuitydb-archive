@@ -13,6 +13,7 @@ The first milestone builds:
 - An in-memory kernel for correctness tests.
 - Basic revision links.
 - Deterministic checkout.
+- Typed Continuity Query AST compiling checkout semantics into native requests.
 - Commit-scoped checkout.
 - Audit traces.
 - Commit-aware audit traces.
