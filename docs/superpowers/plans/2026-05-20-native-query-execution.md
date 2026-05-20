@@ -228,7 +228,7 @@ cargo test -p continuitydb-api checkout_continuity_query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit implementation**
+- [x] **Step 4: Commit implementation**
 
 ```bash
 git add crates/continuitydb-api/Cargo.toml crates/continuitydb-api/src/lib.rs Cargo.lock docs/superpowers/plans/2026-05-20-native-query-execution.md
@@ -242,7 +242,7 @@ git commit -m "feat: execute typed queries through native api"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-native-query-execution.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add this current-scope bullet near the query AST bullet:
 
@@ -250,7 +250,7 @@ Add this current-scope bullet near the query AST bullet:
 - Native typed query execution through the embeddable API.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add this Query Language milestone after the typed AST milestone:
 
@@ -266,7 +266,7 @@ Add this Native API milestone after typed embeddable operations:
 
 Renumber the following Native API milestones.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -280,7 +280,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-native-query-execution.md
