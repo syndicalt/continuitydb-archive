@@ -114,6 +114,7 @@ The first milestone builds:
 - CLI local model benchmark artifact bundle directory.
 - CLI local model benchmark bundle manifests.
 - CLI local model fixed-failure artifact bundles.
+- CLI local model regression artifact bundles.
 - Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.

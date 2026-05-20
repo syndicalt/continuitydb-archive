@@ -892,6 +892,22 @@ fn benchmark_local_model_json(
             .as_ref()
             .is_some_and(LocalModelBenchmarkRegression::regressed)
     {
+        if let Some(artifact_dir) = options.artifact_dir {
+            let report = local_model_benchmark_json(
+                options.baseline_path,
+                options.compare_baseline,
+                &current_baseline,
+                regression.as_ref(),
+                LocalModelBenchmarkArtifacts {
+                    contract: contract_artifacts.as_ref(),
+                    prompts: &prompt_artifacts,
+                    responses: &response_artifacts,
+                    response_manifest: response_manifest.as_ref(),
+                },
+                stability.as_ref(),
+            );
+            write_local_model_artifact_bundle_report(artifact_dir, report)?;
+        }
         return Err(std::io::Error::other("local model benchmark regression detected").into());
     }
     store.append_baseline(current_baseline.clone())?;

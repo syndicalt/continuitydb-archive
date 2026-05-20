@@ -1128,6 +1128,111 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_benchmark_local_model_artifact_dir_writes_regression_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-regression-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-regression-bundle-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-regression-bundle-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    fs::write(&executable_path, passing_local_model_runner_script())?;
+    let regressed_script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]}]}'
+"#;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+    fs::write(&executable_path, regressed_script)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--fail-on-regression")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("local model benchmark regression detected"));
+
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    assert_eq!(baseline_text.lines().count(), 1);
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let bundle_manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let bundle_manifest: Value = serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+
+    assert_eq!(report["passed"].as_bool(), Some(false));
+    assert_eq!(
+        report["baseline_comparison"]["regressed"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["previous_passed_cases"].as_u64(),
+        Some(9)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["current_passed_cases"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["pass_count_delta"].as_i64(),
+        Some(-8)
+    );
+    assert_eq!(
+        report["bundle_manifest"]["manifest_path"].as_str(),
+        Some(bundle_manifest_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["benchmark_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["response_artifacts"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+    assert!(
+        bundle_manifest["response_artifact_manifest"]["manifest_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("responses/local-model-responses.manifest.json"))
+    );
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-passing-gate-runner");
@@ -3240,6 +3345,14 @@ fn cli_import_commits_fails_for_invalid_envelope() -> Result<(), Box<dyn std::er
 
 fn temp_store_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{name}-{:?}.jsonl", StateCellId::new()))
+}
+
+#[cfg(all(feature = "local-model", unix))]
+fn passing_local_model_runner_script() -> &'static str {
+    r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"request_verification","cell_id":"00000000-0000-0000-0000-000000000007","request":"Refresh the stale high-impact frontier signal."},"rationale":"The stale high-impact frontier signal needs a refresh from current evidence.","citations":["continuitydb://evaluation/targeted-verification-evidence"]},{"action":{"type":"create_cell_draft","anchors":["project:continuitydb:benchmark-result"],"payload_text":"ContinuityDB local Steward benchmark produced a new result requiring review."},"rationale":"The new benchmark evidence supports drafting a StateCell for review.","citations":["continuitydb://evaluation/new-benchmark-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
+"#
 }
 
 fn write_committed_store(path: &PathBuf, anchor: &str) -> Result<(), Box<dyn std::error::Error>> {
