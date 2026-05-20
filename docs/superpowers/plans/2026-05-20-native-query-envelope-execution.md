@@ -208,7 +208,7 @@ git commit -m "feat: execute query envelopes through native api"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-native-query-envelope-execution.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add this current-scope bullet near the existing native query bullets:
 
@@ -216,7 +216,7 @@ Add this current-scope bullet near the existing native query bullets:
 - Native API execution for versioned typed query envelopes.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add this Native API milestone after native typed query execution:
 
@@ -226,7 +226,7 @@ Add this Native API milestone after native typed query execution:
 
 Renumber the following Native API milestones.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -240,7 +240,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-native-query-envelope-execution.md
