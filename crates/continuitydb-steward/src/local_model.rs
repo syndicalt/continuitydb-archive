@@ -662,6 +662,84 @@ impl LocalModelBenchmarkBaseline {
     }
 }
 
+/// Deterministic comparison between two local model benchmark baselines.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelBenchmarkRegression {
+    candidate_model_id: String,
+    candidate_role: String,
+    previous_recorded_at: DateTime<Utc>,
+    current_recorded_at: DateTime<Utc>,
+    previous_passed_cases: usize,
+    current_passed_cases: usize,
+    pass_count_delta: isize,
+    regressed: bool,
+}
+
+impl LocalModelBenchmarkRegression {
+    /// Compares a previous baseline with a current baseline for regression gating.
+    pub fn compare(
+        previous: &LocalModelBenchmarkBaseline,
+        current: &LocalModelBenchmarkBaseline,
+    ) -> Self {
+        let previous_passed_cases = passed_case_count(previous.evaluation());
+        let current_passed_cases = passed_case_count(current.evaluation());
+        let pass_count_delta = current_passed_cases as isize - previous_passed_cases as isize;
+        let regressed = current_passed_cases < previous_passed_cases
+            || (previous.passed() && !current.passed());
+
+        Self {
+            candidate_model_id: current.candidate_model_id().to_string(),
+            candidate_role: current.candidate_role().to_string(),
+            previous_recorded_at: previous.recorded_at(),
+            current_recorded_at: current.recorded_at(),
+            previous_passed_cases,
+            current_passed_cases,
+            pass_count_delta,
+            regressed,
+        }
+    }
+
+    /// Returns the evaluated model identifier.
+    pub fn candidate_model_id(&self) -> &str {
+        &self.candidate_model_id
+    }
+
+    /// Returns the evaluated model role.
+    pub fn candidate_role(&self) -> &str {
+        &self.candidate_role
+    }
+
+    /// Returns when the previous baseline was recorded.
+    pub fn previous_recorded_at(&self) -> DateTime<Utc> {
+        self.previous_recorded_at
+    }
+
+    /// Returns when the current baseline was recorded.
+    pub fn current_recorded_at(&self) -> DateTime<Utc> {
+        self.current_recorded_at
+    }
+
+    /// Returns the number of passing cases in the previous baseline.
+    pub fn previous_passed_cases(&self) -> usize {
+        self.previous_passed_cases
+    }
+
+    /// Returns the number of passing cases in the current baseline.
+    pub fn current_passed_cases(&self) -> usize {
+        self.current_passed_cases
+    }
+
+    /// Returns current passing cases minus previous passing cases.
+    pub fn pass_count_delta(&self) -> isize {
+        self.pass_count_delta
+    }
+
+    /// Returns whether the current baseline regressed versus the previous baseline.
+    pub fn regressed(&self) -> bool {
+        self.regressed
+    }
+}
+
 /// Runs a configured local model benchmark and records the resulting baseline.
 pub fn record_local_model_benchmark_baseline<S>(
     benchmark: &LocalModelBenchmark,
@@ -675,6 +753,14 @@ where
     let baseline = LocalModelBenchmarkBaseline::from_report(benchmark.run(identity), recorded_at);
     store.append_baseline(baseline.clone())?;
     Ok(baseline)
+}
+
+fn passed_case_count(evaluation: &StewardEvaluationReport) -> usize {
+    evaluation
+        .case_reports()
+        .iter()
+        .filter(|case| case.passed())
+        .count()
 }
 
 /// Storage contract for append-only local model benchmark baselines.

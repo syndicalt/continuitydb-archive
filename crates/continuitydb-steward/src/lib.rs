@@ -24,8 +24,8 @@ pub use local_model::{
     record_local_model_benchmark_baseline, small_model_candidates,
     FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
-    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkReport,
-    LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
+    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression,
+    LocalModelBenchmarkReport, LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
     MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
     StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
     StewardEvaluationReport, StewardEvaluationSuite,
@@ -41,8 +41,9 @@ mod tests {
         record_local_model_benchmark_baseline, small_model_candidates,
         FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
         LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
-        MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, StewardEvaluationCase,
-        StewardEvaluationFailure, StewardEvaluationSuite,
+        LocalModelBenchmarkRegression, MemoryLocalModelBenchmarkBaselineStore,
+        MistralRsRuntimeProfile, StewardEvaluationCase, StewardEvaluationFailure,
+        StewardEvaluationSuite,
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
@@ -103,6 +104,34 @@ mod tests {
     #[cfg(feature = "local-model")]
     fn temp_local_model_baseline_store_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("{name}-{:?}.jsonl", ProposalId::new()))
+    }
+
+    #[cfg(feature = "local-model")]
+    fn local_model_baseline_for_response(
+        cell_id: StateCellId,
+        response: String,
+    ) -> Result<LocalModelBenchmarkBaseline, Box<dyn std::error::Error>> {
+        let script = write_local_model_script(
+            "continuitydb-local-model-baseline-regression",
+            &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier baseline regression",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+
+        Ok(LocalModelBenchmarkBaseline::from_report(
+            benchmark.run(steward()?),
+            created_at(),
+        ))
     }
 
     #[test]
@@ -1177,6 +1206,75 @@ mod tests {
         assert_eq!(baseline.candidate_model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
         assert_eq!(baseline.candidate_role(), "default-feasibility");
         assert_eq!(store.list_baselines()?, vec![baseline]);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_baseline_regression_detects_pass_count_drop(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let previous = local_model_baseline_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://frontier"]
+                }]
+            })
+            .to_string(),
+        )?;
+        let current = local_model_baseline_for_response(
+            cell_id,
+            serde_json::json!({
+                "proposals": [{
+                    "action": {
+                        "type": "mark_frontier",
+                        "cell_id": cell_id,
+                    },
+                    "rationale": "The supplied evidence is stale.",
+                    "citations": ["test://other"]
+                }]
+            })
+            .to_string(),
+        )?;
+
+        let regression = LocalModelBenchmarkRegression::compare(&previous, &current);
+
+        assert!(regression.regressed());
+        assert_eq!(regression.previous_passed_cases(), 1);
+        assert_eq!(regression.current_passed_cases(), 0);
+        assert_eq!(regression.pass_count_delta(), -1);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_baseline_regression_allows_equal_quality(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let previous = local_model_baseline_for_response(cell_id, response.clone())?;
+        let current = local_model_baseline_for_response(cell_id, response)?;
+
+        let regression = LocalModelBenchmarkRegression::compare(&previous, &current);
+
+        assert!(!regression.regressed());
+        assert_eq!(regression.pass_count_delta(), 0);
         Ok(())
     }
 
