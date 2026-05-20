@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use continuitydb_core::{Scope, StateCell};
 use std::{
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
@@ -53,6 +53,13 @@ impl FileKernel {
     /// Opens an append-only JSONL kernel at the supplied path.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, KernelError> {
         let path = path.as_ref().to_path_buf();
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|_error| KernelError::StoreIo)?;
+        }
+
         OpenOptions::new()
             .create(true)
             .append(true)
@@ -220,6 +227,28 @@ mod tests {
 
         assert!(matches!(result, Err(KernelError::StoreCorrupt)));
         fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_open_creates_missing_parent_directories(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "continuitydb-file-kernel-nested-{:?}",
+            StateCellId::new()
+        ));
+        let path = root.join("db").join("cells.jsonl");
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("missing parent"))?;
+        assert!(!parent.exists());
+
+        let kernel = FileKernel::open(&path)?;
+
+        assert_eq!(kernel.path(), path.as_path());
+        assert!(parent.exists());
+        assert!(path.exists());
+        fs::remove_dir_all(root)?;
         Ok(())
     }
 }

@@ -56,7 +56,7 @@ Storage kernel
 
 1. Define the minimal `StorageKernel` append and lookup contract. Implemented in `continuitydb-kernel`.
 2. Provide an in-memory correctness kernel for deterministic tests. Implemented in `continuitydb-memory`.
-3. Add the first durable embedded kernel. Implemented as an append-only JSONL `FileKernel` in `continuitydb-kernel`; indexed production storage remains future work.
+3. Add the first durable embedded kernel. Implemented as an append-only JSONL `FileKernel` in `continuitydb-kernel` with nested database directory creation; indexed production storage remains future work.
 
 ## Steward Milestones
 
