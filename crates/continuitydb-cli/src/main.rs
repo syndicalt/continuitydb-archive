@@ -1709,12 +1709,66 @@ fn validate_local_model_response_artifact_manifest(
         )
         .into());
     }
+    let response_manifest: serde_json::Value = serde_json::from_str(&manifest_text)?;
+    validate_local_model_response_artifact_files(artifact_dir, &response_manifest)?;
 
     Ok(serde_json::json!({
         "manifest_path": manifest_path.display().to_string(),
         "manifest_fingerprint": current_response_fingerprint,
         "manifest_bytes": manifest_text.len(),
     }))
+}
+
+#[cfg(feature = "local-model")]
+fn validate_local_model_response_artifact_files(
+    artifact_dir: &Path,
+    response_manifest: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if response_manifest["format"].as_str() != Some("continuitydb.local_model.responses")
+        || response_manifest["format_version"].as_u64() != Some(1)
+    {
+        return Err(
+            std::io::Error::other("unsupported local model response artifact manifest").into(),
+        );
+    }
+
+    let response_dir = artifact_dir.join("responses");
+    let artifacts = response_manifest["artifacts"].as_array().ok_or_else(|| {
+        std::io::Error::other("local model response artifact manifest missing artifacts")
+    })?;
+
+    for artifact in artifacts {
+        if artifact["captured"].as_bool() != Some(true) {
+            continue;
+        }
+
+        let response_path_text = required_json_string(artifact, "response_path")?;
+        let response_path = Path::new(response_path_text);
+        if response_path.strip_prefix(&response_dir).is_err() {
+            return Err(
+                std::io::Error::other("local model response artifact path mismatch").into(),
+            );
+        }
+        let response_text = std::fs::read_to_string(response_path)?;
+
+        let manifest_response_bytes = required_json_u64(artifact, "response_bytes")?;
+        if manifest_response_bytes != response_text.len() as u64 {
+            return Err(
+                std::io::Error::other("local model response artifact byte count mismatch").into(),
+            );
+        }
+
+        let manifest_response_fingerprint = required_json_string(artifact, "response_fingerprint")?;
+        let current_response_fingerprint = local_model_contract_fingerprint(&response_text);
+        if manifest_response_fingerprint != current_response_fingerprint {
+            return Err(std::io::Error::other(
+                "local model response artifact fingerprint mismatch",
+            )
+            .into());
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "local-model")]

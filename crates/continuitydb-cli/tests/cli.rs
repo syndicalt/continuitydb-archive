@@ -145,6 +145,28 @@ fn write_real_local_model_bundle(
     Ok(())
 }
 
+#[cfg(feature = "local-model")]
+fn refresh_local_model_response_manifest_metadata(
+    artifact_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let response_manifest_text = fs::read_to_string(&response_manifest_path)?;
+    let bundle_manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let mut bundle_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+    bundle_manifest["response_artifact_manifest"]["manifest_bytes"] =
+        Value::from(response_manifest_text.len());
+    bundle_manifest["response_artifact_manifest"]["manifest_fingerprint"] =
+        Value::from(test_fnv1a64_fingerprint(&response_manifest_text));
+    fs::write(
+        &bundle_manifest_path,
+        serde_json::to_string_pretty(&bundle_manifest)?,
+    )?;
+    Ok(())
+}
+
 #[test]
 fn cli_reports_version() -> Result<(), Box<dyn std::error::Error>> {
     let mut command = Command::cargo_bin("continuitydb")?;
@@ -2780,6 +2802,195 @@ fn cli_validate_local_model_bundle_rejects_response_artifact_manifest_fingerprin
         .stderr(contains(
             "local model benchmark manifest response artifact manifest fingerprint mismatch",
         ));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_validate_local_model_bundle_rejects_tampered_response_artifact(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-runner");
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-artifact-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let response_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&response_manifest_path)?)?;
+    let response_path = response_manifest["artifacts"][0]["response_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing response path"))?;
+    let original_response = fs::read_to_string(response_path)?;
+    fs::write(response_path, "x".repeat(original_response.len()))?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model response artifact fingerprint mismatch",
+        ));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_validate_local_model_bundle_rejects_response_artifact_byte_count_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-bytes-runner");
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-bytes-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-artifact-bytes-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let mut response_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&response_manifest_path)?)?;
+    response_manifest["artifacts"][0]["response_bytes"] = Value::from(1);
+    fs::write(
+        &response_manifest_path,
+        serde_json::to_string_pretty(&response_manifest)?,
+    )?;
+    refresh_local_model_response_manifest_metadata(&artifact_dir)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model response artifact byte count mismatch",
+        ));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_validate_local_model_bundle_rejects_response_artifact_fingerprint_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path(
+        "continuitydb-cli-local-model-validate-response-artifact-fingerprint-runner",
+    );
+    let baseline_path = temp_store_path(
+        "continuitydb-cli-local-model-validate-response-artifact-fingerprint-baseline",
+    );
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-artifact-fingerprint-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let mut response_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&response_manifest_path)?)?;
+    response_manifest["artifacts"][0]["response_fingerprint"] =
+        Value::from("fnv1a64:0000000000000000");
+    fs::write(
+        &response_manifest_path,
+        serde_json::to_string_pretty(&response_manifest)?,
+    )?;
+    refresh_local_model_response_manifest_metadata(&artifact_dir)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model response artifact fingerprint mismatch",
+        ));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_validate_local_model_bundle_rejects_response_artifact_path_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-path-runner");
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-path-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-artifact-path-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let mut response_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&response_manifest_path)?)?;
+    response_manifest["artifacts"][0]["response_path"] = Value::from(
+        artifact_dir
+            .join("outside-response-artifact.json")
+            .display()
+            .to_string(),
+    );
+    fs::write(
+        &response_manifest_path,
+        serde_json::to_string_pretty(&response_manifest)?,
+    )?;
+    refresh_local_model_response_manifest_metadata(&artifact_dir)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains("local model response artifact path mismatch"));
 
     fs::remove_file(executable_path)?;
     fs::remove_file(baseline_path)?;

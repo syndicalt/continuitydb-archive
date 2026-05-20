@@ -349,6 +349,7 @@ Storage kernel
 92. Add CLI local-model benchmark report artifact metadata validation. Added `validate-local-model-bundle --artifact-dir` so archived Steward benchmark bundles can validate `benchmark_report_fingerprint` and `benchmark_report_bytes` against the canonical benchmark report payload with `bundle_manifest` normalized out, preserving report integrity without cyclic manifest/report fingerprints.
 93. Add CLI local-model changed-case report artifact metadata validation. Extended `validate-local-model-bundle --artifact-dir` to validate changed-case report path, fingerprint, and byte-count metadata against archived `changed-cases.json` when a benchmark bundle includes changed-case drift evidence.
 94. Add CLI local-model response artifact manifest metadata validation. Extended `validate-local-model-bundle --artifact-dir` to validate nested response artifact manifest path, fingerprint, and byte-count metadata against archived `responses/local-model-responses.manifest.json` when a benchmark bundle includes raw local-model responses.
+95. Add CLI local-model response artifact metadata validation. Extended `validate-local-model-bundle --artifact-dir` to parse nested response manifests and validate each captured raw response artifact path, fingerprint, and byte-count metadata against archived response files.
 
 ## Small Embeddable Model Track
 
