@@ -598,10 +598,24 @@ impl FileKernelIndex {
             candidates.push(self.positions_at_valid_time(valid_at));
         }
 
-        candidates
+        let Some((smallest_index, _positions)) = candidates
+            .iter()
+            .enumerate()
+            .min_by_key(|(_index, positions)| positions.len())
+        else {
+            return (0..self.cells.len()).collect();
+        };
+        let mut selected = candidates.swap_remove(smallest_index);
+        let remaining_candidates = candidates
             .into_iter()
-            .min_by_key(Vec::len)
-            .unwrap_or_else(|| (0..self.cells.len()).collect())
+            .map(|positions| positions.into_iter().collect::<HashSet<_>>())
+            .collect::<Vec<_>>();
+        selected.retain(|position| {
+            remaining_candidates
+                .iter()
+                .all(|positions| positions.contains(position))
+        });
+        selected
     }
 
     fn apply_explicit_manifest(&mut self, manifest: CommitManifest) -> Result<(), KernelError> {
@@ -3777,6 +3791,59 @@ mod tests {
         assert_eq!(candidate_positions, vec![narrow_position]);
         assert_eq!(lookup_results.len(), 1);
         assert_eq!(lookup_results[0].id, narrow_id);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_candidate_selection_intersects_indexed_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-candidate-index-intersection");
+        let mut matching = sample_cell(
+            "project:continuitydb:candidate-index-intersection-match",
+            0.91,
+            12,
+        )?;
+        matching.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let matching_id = matching.id;
+        let broad_first = sample_cell(
+            "project:continuitydb:candidate-index-intersection-broad-first",
+            0.83,
+            15,
+        )?;
+        let broad_second = sample_cell(
+            "project:continuitydb:candidate-index-intersection-broad-second",
+            0.82,
+            15,
+        )?;
+        let mut wrong_scope = sample_cell(
+            "project:continuitydb:candidate-index-intersection-wrong-scope",
+            0.89,
+            11,
+        )?;
+        wrong_scope.scope = Scope::Team("platform".to_string());
+        wrong_scope.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, broad_first)?;
+        append_committed(&mut kernel, matching)?;
+        append_committed(&mut kernel, broad_second)?;
+        append_committed(&mut kernel, wrong_scope)?;
+        let matching_position = kernel
+            .index
+            .position_by_id(matching_id)
+            .ok_or_else(|| std::io::Error::other("missing indexed matching cell"))?;
+        let lookup = CellLookup {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            answerability_question: Some("what changed?".to_string()),
+            ..CellLookup::default()
+        };
+
+        let candidate_positions = kernel.index.candidate_positions(&lookup);
+        let lookup_results = kernel.lookup_cells(lookup)?;
+
+        assert_eq!(candidate_positions, vec![matching_position]);
+        assert_eq!(lookup_results.len(), 1);
+        assert_eq!(lookup_results[0].id, matching_id);
         fs::remove_file(path)?;
         Ok(())
     }
