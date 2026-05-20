@@ -250,6 +250,7 @@ Storage kernel
 38. Add CLI small-model candidate registry output. Exposed the fixed local Steward candidate registry through `local-model-candidates` JSON so operators can inspect supported model IDs and roles before benchmark runs.
 39. Add CLI local-model benchmark dry-run preflight output. Added `benchmark-local-model --dry-run` so operators can inspect candidate, runtime, schema, suite fingerprint, and baseline target metadata without executing a model or mutating baseline records.
 40. Add CLI local-model contract fingerprints. Added deterministic schema and grammar fingerprints to contract export and benchmark dry-run JSON so operators can connect archived constraint files to preflight artifacts.
+41. Add durable local-model contract fingerprints. Persisted schema and grammar fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
 
 ## Small Embeddable Model Track
 

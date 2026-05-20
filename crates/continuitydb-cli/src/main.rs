@@ -696,6 +696,8 @@ fn local_model_benchmark_json(
         "evaluation": baseline.evaluation(),
         "response_schema_version": baseline.response_schema_version(),
         "evaluation_suite_fingerprint": baseline.evaluation_suite_fingerprint(),
+        "schema_fingerprint": baseline.schema_fingerprint(),
+        "grammar_fingerprint": baseline.grammar_fingerprint(),
         "runtime": {
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),

@@ -1474,6 +1474,26 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn local_model_benchmark_report_and_baseline_preserve_contract_fingerprints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let benchmark = LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("llama-cli")),
+            StewardEvaluationSuite::new(Vec::new()),
+        );
+
+        let report = benchmark.run(steward()?);
+        let baseline = LocalModelBenchmarkBaseline::from_report(report.clone(), created_at());
+
+        assert!(report.schema_fingerprint().starts_with("fnv1a64:"));
+        assert!(report.grammar_fingerprint().starts_with("fnv1a64:"));
+        assert_eq!(baseline.schema_fingerprint(), report.schema_fingerprint());
+        assert_eq!(baseline.grammar_fingerprint(), report.grammar_fingerprint());
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_benchmark_baseline_decodes_legacy_json_without_runtime_manifest(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let encoded = serde_json::json!({
@@ -1507,6 +1527,27 @@ mod tests {
         let baseline: LocalModelBenchmarkBaseline = serde_json::from_value(encoded)?;
 
         assert_eq!(baseline.evaluation_suite_fingerprint(), "");
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_baseline_decodes_legacy_json_without_contract_fingerprints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let encoded = serde_json::json!({
+            "candidate_model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "candidate_role": "default-feasibility",
+            "response_schema_version": LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+            "evaluation_suite_fingerprint": default_steward_evaluation_suite().fingerprint(),
+            "runtime": { "executable": "sh", "arguments": [] },
+            "evaluation": { "case_reports": [] },
+            "recorded_at": created_at(),
+        });
+
+        let baseline: LocalModelBenchmarkBaseline = serde_json::from_value(encoded)?;
+
+        assert_eq!(baseline.schema_fingerprint(), "");
+        assert_eq!(baseline.grammar_fingerprint(), "");
         Ok(())
     }
 
@@ -1898,6 +1939,41 @@ mod tests {
         let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
         store.append_baseline(old_compatible.clone())?;
         store.append_baseline(incompatible_suite)?;
+
+        let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
+
+        assert_eq!(latest, Some(old_compatible));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn latest_compatible_local_model_baseline_requires_contract_fingerprints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let old_compatible = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let mut incompatible_json = serde_json::to_value(local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 2, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?)?;
+        incompatible_json["schema_fingerprint"] = serde_json::json!("fnv1a64:0000000000000000");
+        let incompatible_contract: LocalModelBenchmarkBaseline =
+            serde_json::from_value(incompatible_json)?;
+        let current = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 3, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(old_compatible.clone())?;
+        store.append_baseline(incompatible_contract)?;
 
         let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
 

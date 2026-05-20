@@ -267,6 +267,12 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert!(json["evaluation_suite_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["schema_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["grammar_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
     assert_eq!(
         json["baseline_path"].as_str(),
         Some(baseline_path.display().to_string().as_str())
@@ -293,6 +299,14 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert_eq!(
         records[0]["evaluation_suite_fingerprint"].as_str(),
         json["evaluation_suite_fingerprint"].as_str()
+    );
+    assert_eq!(
+        records[0]["schema_fingerprint"].as_str(),
+        json["schema_fingerprint"].as_str()
+    );
+    assert_eq!(
+        records[0]["grammar_fingerprint"].as_str(),
+        json["grammar_fingerprint"].as_str()
     );
 
     fs::remove_file(executable_path)?;

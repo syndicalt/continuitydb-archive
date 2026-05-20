@@ -986,6 +986,8 @@ impl LocalModelBenchmark {
             candidate: self.candidate,
             response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
             evaluation_suite_fingerprint: self.suite.fingerprint(),
+            schema_fingerprint: fingerprint_text(local_model_response_json_schema()),
+            grammar_fingerprint: fingerprint_text(local_model_response_gbnf_grammar()),
             runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
             evaluation: self.suite.evaluate(&steward),
         }
@@ -998,6 +1000,8 @@ pub struct LocalModelBenchmarkReport {
     candidate: SmallModelCandidate,
     response_schema_version: u32,
     evaluation_suite_fingerprint: String,
+    schema_fingerprint: String,
+    grammar_fingerprint: String,
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
 }
@@ -1016,6 +1020,16 @@ impl LocalModelBenchmarkReport {
     /// Returns the deterministic fingerprint for the evaluated suite contract.
     pub fn evaluation_suite_fingerprint(&self) -> &str {
         &self.evaluation_suite_fingerprint
+    }
+
+    /// Returns the deterministic fingerprint for the response JSON Schema text.
+    pub fn schema_fingerprint(&self) -> &str {
+        &self.schema_fingerprint
+    }
+
+    /// Returns the deterministic fingerprint for the response GBNF grammar text.
+    pub fn grammar_fingerprint(&self) -> &str {
+        &self.grammar_fingerprint
     }
 
     /// Returns the runtime manifest for the evaluated local model invocation.
@@ -1049,6 +1063,10 @@ pub struct LocalModelBenchmarkBaseline {
     #[serde(default)]
     evaluation_suite_fingerprint: String,
     #[serde(default)]
+    schema_fingerprint: String,
+    #[serde(default)]
+    grammar_fingerprint: String,
+    #[serde(default)]
     runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
     recorded_at: DateTime<Utc>,
@@ -1062,6 +1080,8 @@ impl LocalModelBenchmarkBaseline {
             candidate_role: report.candidate.role().to_string(),
             response_schema_version: report.response_schema_version,
             evaluation_suite_fingerprint: report.evaluation_suite_fingerprint,
+            schema_fingerprint: report.schema_fingerprint,
+            grammar_fingerprint: report.grammar_fingerprint,
             runtime: report.runtime,
             evaluation: report.evaluation,
             recorded_at,
@@ -1086,6 +1106,16 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the deterministic fingerprint for the evaluated suite contract.
     pub fn evaluation_suite_fingerprint(&self) -> &str {
         &self.evaluation_suite_fingerprint
+    }
+
+    /// Returns the deterministic fingerprint for the response JSON Schema text.
+    pub fn schema_fingerprint(&self) -> &str {
+        &self.schema_fingerprint
+    }
+
+    /// Returns the deterministic fingerprint for the response GBNF grammar text.
+    pub fn grammar_fingerprint(&self) -> &str {
+        &self.grammar_fingerprint
     }
 
     /// Returns the runtime manifest that produced this baseline.
@@ -1297,8 +1327,19 @@ where
         .filter(|baseline| {
             baseline.evaluation_suite_fingerprint() == current.evaluation_suite_fingerprint()
         })
+        .filter(|baseline| baseline.schema_fingerprint() == current.schema_fingerprint())
+        .filter(|baseline| baseline.grammar_fingerprint() == current.grammar_fingerprint())
         .filter(|baseline| baseline.runtime() == current.runtime())
         .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
+}
+
+fn fingerprint_text(text: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
 }
 
 fn fingerprint_fields(fields: &[String]) -> String {
