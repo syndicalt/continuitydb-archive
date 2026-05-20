@@ -30,14 +30,14 @@ pub use local_model::{
     record_local_model_benchmark_baseline_with_regression, small_model_candidates,
     FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
-    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
-    LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
-    LocalModelResponseFingerprint, LocalModelRuntimeManifest, LocalModelStabilityCaseReport,
-    LocalModelStabilityReport, LocalModelSteward, LocalModelStewardInput,
-    MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
-    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationCaseResponse,
-    StewardEvaluationFailure, StewardEvaluationReport, StewardEvaluationSuite,
-    StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkCaseSummary,
+    LocalModelBenchmarkGateReport, LocalModelBenchmarkRegression, LocalModelBenchmarkReport,
+    LocalModelRequest, LocalModelResponseFingerprint, LocalModelRuntimeManifest,
+    LocalModelStabilityCaseReport, LocalModelStabilityReport, LocalModelSteward,
+    LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile,
+    SmallModelCandidate, StewardEvaluationCase, StewardEvaluationCaseReport,
+    StewardEvaluationCaseResponse, StewardEvaluationFailure, StewardEvaluationReport,
+    StewardEvaluationSuite, StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -2550,6 +2550,24 @@ mod tests {
             &["frontier baseline regression".to_string()]
         );
         assert!(regression.recovered_case_names().is_empty());
+        let changed_case = regression
+            .changed_case_summaries()
+            .first()
+            .ok_or("missing changed case summary")?;
+        assert_eq!(changed_case.case_name(), "frontier baseline regression");
+        assert!(changed_case.previous_passed());
+        assert!(!changed_case.current_passed());
+        assert!(changed_case.previous_failure_counts().is_empty());
+        assert_eq!(
+            changed_case
+                .current_failure_counts()
+                .get("missing_citation"),
+            Some(&1)
+        );
+        assert_eq!(
+            changed_case.failure_count_deltas().get("missing_citation"),
+            Some(&1)
+        );
         Ok(())
     }
 

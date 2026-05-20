@@ -1412,6 +1412,7 @@ fn local_model_benchmark_json(
                 "failure_count_deltas": regression.failure_count_deltas(),
                 "regressed_cases": regression.regressed_case_names(),
                 "recovered_cases": regression.recovered_case_names(),
+                "changed_case_summaries": regression.changed_case_summaries(),
                 "pass_count_delta": regression.pass_count_delta(),
             })
         }).or_else(|| compared.then(|| serde_json::json!({

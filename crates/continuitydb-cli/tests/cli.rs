@@ -1348,6 +1348,19 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
             .map(Vec::len),
         Some(0)
     );
+    let changed_cases = report["baseline_comparison"]["changed_case_summaries"]
+        .as_array()
+        .ok_or("missing changed case summaries")?;
+    let conflict_case = changed_cases
+        .iter()
+        .find(|case| case["case_name"] == "conflict classification")
+        .ok_or("missing conflict case summary")?;
+    assert_eq!(conflict_case["previous_passed"].as_bool(), Some(true));
+    assert_eq!(conflict_case["current_passed"].as_bool(), Some(false));
+    assert_eq!(
+        conflict_case["failure_count_deltas"]["missing_expected_action"].as_i64(),
+        Some(1)
+    );
     assert!(report["bundle_manifest"].is_null());
 
     fs::remove_file(executable_path)?;

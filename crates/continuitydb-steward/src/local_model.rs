@@ -1717,8 +1717,52 @@ pub struct LocalModelBenchmarkRegression {
     failure_count_deltas: BTreeMap<String, isize>,
     regressed_case_names: Vec<String>,
     recovered_case_names: Vec<String>,
+    changed_case_summaries: Vec<LocalModelBenchmarkCaseSummary>,
     pass_count_delta: isize,
     regressed: bool,
+}
+
+/// Deterministic per-case outcome summary for compatible baseline comparisons.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelBenchmarkCaseSummary {
+    case_name: String,
+    previous_passed: bool,
+    current_passed: bool,
+    previous_failure_counts: BTreeMap<String, usize>,
+    current_failure_counts: BTreeMap<String, usize>,
+    failure_count_deltas: BTreeMap<String, isize>,
+}
+
+impl LocalModelBenchmarkCaseSummary {
+    /// Returns the fixed evaluation case name.
+    pub fn case_name(&self) -> &str {
+        &self.case_name
+    }
+
+    /// Returns whether the previous compatible baseline passed this case.
+    pub fn previous_passed(&self) -> bool {
+        self.previous_passed
+    }
+
+    /// Returns whether the current baseline passed this case.
+    pub fn current_passed(&self) -> bool {
+        self.current_passed
+    }
+
+    /// Returns stable failure-code counts for the previous case report.
+    pub fn previous_failure_counts(&self) -> &BTreeMap<String, usize> {
+        &self.previous_failure_counts
+    }
+
+    /// Returns stable failure-code counts for the current case report.
+    pub fn current_failure_counts(&self) -> &BTreeMap<String, usize> {
+        &self.current_failure_counts
+    }
+
+    /// Returns current failure counts minus previous failure counts by stable code.
+    pub fn failure_count_deltas(&self) -> &BTreeMap<String, isize> {
+        &self.failure_count_deltas
+    }
 }
 
 impl LocalModelBenchmarkRegression {
@@ -1733,8 +1777,18 @@ impl LocalModelBenchmarkRegression {
         let current_failure_counts = owned_failure_counts(current.evaluation().failure_counts());
         let failure_count_deltas =
             failure_count_deltas(&previous_failure_counts, &current_failure_counts);
-        let (regressed_case_names, recovered_case_names) =
-            case_outcome_deltas(previous.evaluation(), current.evaluation());
+        let changed_case_summaries =
+            changed_case_summaries(previous.evaluation(), current.evaluation());
+        let regressed_case_names = changed_case_summaries
+            .iter()
+            .filter(|case| case.previous_passed() && !case.current_passed())
+            .map(|case| case.case_name().to_string())
+            .collect();
+        let recovered_case_names = changed_case_summaries
+            .iter()
+            .filter(|case| !case.previous_passed() && case.current_passed())
+            .map(|case| case.case_name().to_string())
+            .collect();
         let pass_count_delta = current_passed_cases as isize - previous_passed_cases as isize;
         let regressed = current_passed_cases < previous_passed_cases
             || (previous.passed() && !current.passed());
@@ -1751,6 +1805,7 @@ impl LocalModelBenchmarkRegression {
             failure_count_deltas,
             regressed_case_names,
             recovered_case_names,
+            changed_case_summaries,
             pass_count_delta,
             regressed,
         }
@@ -1811,6 +1866,11 @@ impl LocalModelBenchmarkRegression {
         &self.recovered_case_names
     }
 
+    /// Returns changed per-case outcome summaries.
+    pub fn changed_case_summaries(&self) -> &[LocalModelBenchmarkCaseSummary] {
+        &self.changed_case_summaries
+    }
+
     /// Returns current passing cases minus previous passing cases.
     pub fn pass_count_delta(&self) -> isize {
         self.pass_count_delta
@@ -1845,37 +1905,57 @@ fn failure_count_deltas(
     deltas
 }
 
-fn case_outcome_deltas(
+fn changed_case_summaries(
     previous: &StewardEvaluationReport,
     current: &StewardEvaluationReport,
-) -> (Vec<String>, Vec<String>) {
-    let previous_by_name: BTreeMap<&str, bool> = previous
+) -> Vec<LocalModelBenchmarkCaseSummary> {
+    let previous_by_name: BTreeMap<&str, &StewardEvaluationCaseReport> = previous
         .case_reports()
         .iter()
-        .map(|case| (case.name(), case.passed()))
+        .map(|case| (case.name(), case))
         .collect();
-    let current_by_name: BTreeMap<&str, bool> = current
+    let current_by_name: BTreeMap<&str, &StewardEvaluationCaseReport> = current
         .case_reports()
         .iter()
-        .map(|case| (case.name(), case.passed()))
+        .map(|case| (case.name(), case))
         .collect();
-    let mut regressed = Vec::new();
-    let mut recovered = Vec::new();
+    let mut summaries = Vec::new();
     let names: BTreeSet<&str> = previous_by_name
         .keys()
         .chain(current_by_name.keys())
         .copied()
         .collect();
     for name in names {
-        let previous_passed = previous_by_name.get(name).copied().unwrap_or(false);
-        let current_passed = current_by_name.get(name).copied().unwrap_or(false);
-        match (previous_passed, current_passed) {
-            (true, false) => regressed.push(name.to_string()),
-            (false, true) => recovered.push(name.to_string()),
-            _ => {}
+        let previous_report = previous_by_name.get(name).copied();
+        let current_report = current_by_name.get(name).copied();
+        let previous_passed = previous_report.is_some_and(StewardEvaluationCaseReport::passed);
+        let current_passed = current_report.is_some_and(StewardEvaluationCaseReport::passed);
+        if previous_passed != current_passed {
+            let previous_failure_counts = case_failure_counts(previous_report);
+            let current_failure_counts = case_failure_counts(current_report);
+            let failure_count_deltas =
+                failure_count_deltas(&previous_failure_counts, &current_failure_counts);
+            summaries.push(LocalModelBenchmarkCaseSummary {
+                case_name: name.to_string(),
+                previous_passed,
+                current_passed,
+                previous_failure_counts,
+                current_failure_counts,
+                failure_count_deltas,
+            });
         }
     }
-    (regressed, recovered)
+    summaries
+}
+
+fn case_failure_counts(report: Option<&StewardEvaluationCaseReport>) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    if let Some(report) = report {
+        for failure in report.failures() {
+            *counts.entry(failure.code().to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 /// Result of recording a current benchmark baseline and comparing with prior state.

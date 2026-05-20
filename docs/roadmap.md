@@ -289,6 +289,7 @@ Storage kernel
 77. Add local-model regression failure count comparisons. Extended compatible baseline regression reports with previous and current stable failure-code count maps so CI can identify which failure classes changed across local Steward model baseline regressions.
 78. Add local-model regression failure count delta summaries. Added deterministic current-minus-previous failure-code deltas to compatible baseline regression reports and CLI JSON so CI can classify newly introduced and cleared local Steward model failure classes directly.
 79. Add local-model regression case outcome summaries. Added deterministic regressed and recovered evaluation case-name lists to compatible baseline regression reports and CLI JSON so CI can identify which fixed Steward contract cases changed without walking embedded per-case reports.
+80. Add local-model regression changed-case failure summaries. Added serializable per-case regression summaries with previous/current pass state and stable failure-code count deltas so CI can diagnose each changed fixed Steward contract case directly from baseline comparison JSON.
 
 ## Small Embeddable Model Track
 
