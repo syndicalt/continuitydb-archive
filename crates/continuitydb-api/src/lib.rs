@@ -4,8 +4,9 @@ use chrono::{DateTime, Utc};
 use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
-use continuitydb_core::{StateCell, StateCellId};
+use continuitydb_core::{StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
+use continuitydb_revision::revise_utility_feedback;
 use thiserror::Error;
 
 /// Errors produced by the native ContinuityDB operation API.
@@ -77,16 +78,43 @@ impl<K: StorageKernel> ContinuityDb<K> {
         checkout(&self.kernel, request).map_err(Into::into)
     }
 
+    /// Records utility feedback as an append-only successor StateCell.
+    pub fn record_utility_feedback(
+        &mut self,
+        cell_id: StateCellId,
+        feedback: UtilityFeedback,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_utility_feedback_at(cell_id, feedback, Utc::now())
+    }
+
+    /// Records utility feedback as an append-only successor at a deterministic system time.
+    pub fn record_utility_feedback_at(
+        &mut self,
+        cell_id: StateCellId,
+        feedback: UtilityFeedback,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_utility_feedback(&previous, feedback);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        Ok(successor_id)
+    }
+
     /// Produces an audit trace for a stored StateCell.
     pub fn audit_cell(&self, cell_id: StateCellId) -> Result<AuditTrace, ContinuityError> {
+        self.lookup_one_cell(cell_id).map(|cell| audit(&cell))
+    }
+
+    fn lookup_one_cell(&self, cell_id: StateCellId) -> Result<StateCell, ContinuityError> {
         let cells = self.kernel.lookup_cells(CellLookup {
             cell_id: Some(cell_id),
             ..CellLookup::default()
         })?;
 
         cells
-            .first()
-            .map(audit)
+            .into_iter()
+            .next()
             .ok_or(ContinuityError::CellNotFound { cell_id })
     }
 }
@@ -97,8 +125,10 @@ mod tests {
     use continuitydb_checkout::CheckoutRequest;
     use continuitydb_core::{
         Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
-        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
+        ValidTimeRange,
     };
+    use continuitydb_kernel::{CellLookup, StorageKernel};
     use continuitydb_memory::MemoryKernel;
 
     use super::{ContinuityDb, ContinuityError};
@@ -200,5 +230,77 @@ mod tests {
             result,
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
+    }
+
+    #[test]
+    fn api_records_utility_feedback_as_successor_cell() -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let feedback_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:feedback-api", 0.91, 12)?;
+        let original_feedback = UtilityFeedback::default();
+        let feedback = UtilityFeedback::new(
+            Confidence::new(0.9)?,
+            Confidence::new(0.8)?,
+            Confidence::new(0.7)?,
+        );
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+
+        let successor_id = db.record_utility_feedback_at(original_id, feedback, feedback_commit)?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(db.audit_cell(successor_id)?.cell_id, successor_id);
+        assert_eq!(original.utility_feedback, original_feedback);
+        assert_eq!(successor.utility_feedback, feedback);
+        assert_eq!(successor.system_time.from(), feedback_commit);
+        Ok(())
+    }
+
+    #[test]
+    fn api_record_utility_feedback_reports_missing_id() -> Result<(), Box<dyn std::error::Error>> {
+        let feedback_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_id = StateCellId::new();
+        let feedback = UtilityFeedback::new(
+            Confidence::new(0.9)?,
+            Confidence::new(0.8)?,
+            Confidence::new(0.7)?,
+        );
+
+        let result = db.record_utility_feedback_at(missing_id, feedback, feedback_commit);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        Ok(())
     }
 }

@@ -29,6 +29,7 @@ The first milestone builds:
 - Durable frontier/watch subscription stores.
 - Deterministic frontier subscription runner.
 - Native typed operation API for ingest, checkout, and audit.
+- Native typed utility feedback revision API.
 - A thin CLI over library APIs.
 
 ## Roadmap

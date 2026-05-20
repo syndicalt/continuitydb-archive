@@ -203,6 +203,7 @@ dependencies = [
  "continuitydb-core",
  "continuitydb-kernel",
  "continuitydb-memory",
+ "continuitydb-revision",
  "thiserror",
 ]
 

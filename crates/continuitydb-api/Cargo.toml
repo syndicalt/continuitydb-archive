@@ -11,6 +11,7 @@ chrono.workspace = true
 continuitydb-checkout = { path = "../continuitydb-checkout" }
 continuitydb-core = { path = "../continuitydb-core" }
 continuitydb-kernel = { path = "../continuitydb-kernel" }
+continuitydb-revision = { path = "../continuitydb-revision" }
 thiserror.workspace = true
 
 [dev-dependencies]
