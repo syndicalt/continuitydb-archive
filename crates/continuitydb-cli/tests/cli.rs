@@ -2878,6 +2878,51 @@ fn cli_validate_local_model_bundle_accepts_report_metadata(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_validate_local_model_bundle_report_path_writes_validation_artifact(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-validate-report-baseline");
+    let report_path =
+        temp_store_path("continuitydb-cli-local-model-validate-report").with_extension("json");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-report-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if report_path.exists() {
+        fs::remove_file(&report_path)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--report-path")
+        .arg(&report_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout_json: Value = serde_json::from_slice(&output)?;
+    let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+
+    assert_eq!(report_json, stdout_json);
+    assert_eq!(
+        report_json["report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(report_path)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_validate_local_model_bundle_rejects_report_byte_count_mismatch(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let baseline_path = temp_store_path("continuitydb-cli-local-model-validate-bytes-baseline");

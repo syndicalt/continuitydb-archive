@@ -445,6 +445,9 @@ enum Command {
         /// Directory containing benchmark-report.json and local-model-benchmark.manifest.json.
         #[arg(long = "artifact-dir")]
         artifact_dir: PathBuf,
+        /// Optional path to write successful local-model bundle validation JSON.
+        #[arg(long = "report-path")]
+        report_path: Option<PathBuf>,
     },
     /// Write local Steward model JSON Schema and GBNF grammar artifacts.
     #[cfg(feature = "local-model")]
@@ -753,15 +756,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         #[cfg(feature = "local-model")]
-        Some(Command::ValidateLocalModelBundle { artifact_dir }) => {
+        Some(Command::ValidateLocalModelBundle {
+            artifact_dir,
+            report_path,
+        }) => {
             let validation = validate_local_model_bundle_manifest(&artifact_dir)?;
             let output = serde_json::json!({
                 "artifact_dir": artifact_dir.display().to_string(),
+                "report_path": report_path.as_ref().map(|path| path.display().to_string()),
                 "manifest": local_model_bundle_manifest_json(Some(&validation.manifest)),
                 "benchmark_report": validation.benchmark_report,
                 "changed_case_report": validation.changed_case_report,
                 "response_artifact_manifest": validation.response_artifact_manifest,
             });
+            if let Some(path) = report_path.as_ref() {
+                write_pretty_json_file(path, &output)?;
+            }
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         #[cfg(feature = "local-model")]
