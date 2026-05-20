@@ -3109,6 +3109,76 @@ fn cli_measure_workload_compares_baseline_and_fails_on_regression(
 }
 
 #[test]
+fn cli_measure_workload_failure_report_path_records_regression(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-measure-workload-failure-report-baseline");
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-measure-workload-failure-report").with_extension("json");
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("memory-compare")
+        .assert()
+        .success();
+
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    let mut record: Value = serde_json::from_str(
+        baseline_text
+            .lines()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing baseline record"))?,
+    )?;
+    record["snapshot"]["workload"]["cell_count"] = Value::from(7);
+    fs::write(
+        &baseline_path,
+        format!("{}\n", serde_json::to_string(&record)?),
+    )?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("memory-compare")
+        .arg("--compare-baseline")
+        .arg("--fail-on-regression")
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .arg("--max-elapsed-growth-percent")
+        .arg("1000000000000")
+        .assert()
+        .failure()
+        .stderr(contains("workload baseline regression detected"));
+
+    let report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    assert_eq!(
+        report["baseline_comparison"]["passed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["regressions"][0]["WorkloadCellCountChanged"]["previous"]
+            .as_u64(),
+        Some(7)
+    );
+    assert_eq!(
+        report["failure_report_path"].as_str(),
+        Some(failure_report_path.display().to_string().as_str())
+    );
+    assert_eq!(fs::read_to_string(&baseline_path)?.lines().count(), 1);
+
+    fs::remove_file(baseline_path)?;
+    fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_measure_workload_compares_baseline_requires_baseline_path(
 ) -> Result<(), Box<dyn std::error::Error>> {
     Command::cargo_bin("continuitydb")?

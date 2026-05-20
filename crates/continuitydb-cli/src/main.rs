@@ -49,6 +49,7 @@ struct WorkloadMeasureOptions<'a> {
     kernel: WorkloadKernelProfile,
     store_path: Option<&'a PathBuf>,
     report_path: Option<&'a PathBuf>,
+    failure_report_path: Option<&'a PathBuf>,
     cells: usize,
     token_budget: i64,
     frontier_every: usize,
@@ -183,6 +184,9 @@ enum Command {
         /// Optional path to write the successful workload measurement JSON report.
         #[arg(long = "report-path")]
         report_path: Option<PathBuf>,
+        /// Optional path to write workload measurement JSON when a regression gate fails.
+        #[arg(long = "failure-report-path")]
+        failure_report_path: Option<PathBuf>,
         /// Number of deterministic StateCells to generate.
         #[arg(long = "cells", default_value_t = 8)]
         cells: usize,
@@ -383,6 +387,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             kernel,
             store_path,
             report_path,
+            failure_report_path,
             cells,
             token_budget,
             frontier_every,
@@ -397,6 +402,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 kernel,
                 store_path: store_path.as_ref(),
                 report_path: report_path.as_ref(),
+                failure_report_path: failure_report_path.as_ref(),
                 cells,
                 token_budget,
                 frontier_every,
@@ -1648,11 +1654,20 @@ fn measure_workload_json(
         options.max_elapsed_growth_percent,
     )?;
 
+    let output = workload_measurement_json(
+        &options,
+        comparison.as_ref(),
+        lookup_plan.clone(),
+        measurement.clone(),
+    );
     let regression_detected = match comparison.as_ref() {
         Some(comparison) => !comparison.passed(),
         None => false,
     };
     if options.fail_on_regression && regression_detected {
+        if let Some(path) = options.failure_report_path {
+            write_pretty_json_file(path, &output)?;
+        }
         return Err(std::io::Error::other("workload baseline regression detected").into());
     }
 
@@ -1665,12 +1680,7 @@ fn measure_workload_json(
         )?;
     }
 
-    Ok(workload_measurement_json(
-        &options,
-        comparison.as_ref(),
-        lookup_plan,
-        measurement,
-    ))
+    Ok(output)
 }
 
 fn workload_measurement_json(
@@ -1683,6 +1693,7 @@ fn workload_measurement_json(
         "kernel": workload_kernel_name(options.kernel),
         "store_path": options.store_path.map(|path| path.display().to_string()),
         "report_path": options.report_path.map(|path| path.display().to_string()),
+        "failure_report_path": options.failure_report_path.map(|path| path.display().to_string()),
         "baseline_path": options.baseline_path.map(|path| path.display().to_string()),
         "baseline_label": options.baseline_path.map(|_| options.label),
         "baseline_comparison": comparison.map(workload_baseline_comparison_json),

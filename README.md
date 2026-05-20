@@ -17,6 +17,7 @@ The first milestone builds:
 - Durable file workload lookup-plan baseline snapshots.
 - File workload lookup-plan baseline regression detection.
 - CLI workload measurement report artifact output.
+- CLI workload regression failure report artifact output.
 - CLI workload measurement baseline recording.
 - Deterministic workload baseline regression comparison.
 - CLI workload baseline regression comparison and failure gating.

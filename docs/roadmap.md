@@ -176,6 +176,7 @@ Storage kernel
 9. Add durable file workload lookup-plan baseline snapshots. Extended workload measurement snapshots with optional serialized file lookup-plan diagnostics so JSONL baselines preserve indexed constraint labels, per-index candidate counts, final candidate counts, and full-scan status for future planner regression analysis.
 10. Add file workload lookup-plan baseline regression detection. Extended workload baseline comparison with deterministic lookup-plan presence, indexed constraint, candidate count, full-scan, and per-constraint candidate-count regressions so persisted planner evidence can fail CI before selected checkout counts change.
 11. Add CLI workload report artifacts. Added `measure-workload --report-path` so successful workload measurements can write the same structured JSON printed to stdout into an archiveable artifact for CI and storage-engine trials.
+12. Add CLI workload regression failure report artifacts. Added `measure-workload --failure-report-path` so regression-gated workload runs can preserve structured comparison evidence before exiting non-zero without recording the regressed run as a new baseline.
 
 ## Native API Milestones
 
