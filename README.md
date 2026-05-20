@@ -43,6 +43,7 @@ The first milestone builds:
 - Audit traces.
 - Commit-aware audit traces.
 - Revision-link-aware direct audit traces.
+- Revision-link-aware checkout audit traces.
 - Deterministic Steward proposal substrate.
 - Pluggable proposal audit ledger store contract.
 - JSONL file-backed proposal audit store.

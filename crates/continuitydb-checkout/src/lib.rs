@@ -5,7 +5,7 @@ use continuitydb_core::{
     ActivationState, CellDependencyKind, CommitId, Confidence, CoreError, RevisionLinkRecord,
     Scope, SemanticAnchor, StateCell, StateCellId, TrustSignal,
 };
-use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
+use continuitydb_kernel::{CellLookup, KernelError, RevisionLinkLookup, StorageKernel};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -199,7 +199,14 @@ pub fn checkout<K: StorageKernel>(
         }
     }
 
-    let audit_traces: Vec<AuditTrace> = cells.iter().map(audit).collect();
+    let audit_traces = cells
+        .iter()
+        .map(|cell| {
+            let mut trace = audit(cell);
+            trace.revision_links = revision_links_for_cell(kernel, cell.id)?;
+            Ok(trace)
+        })
+        .collect::<Result<Vec<_>, CheckoutError>>()?;
     let uncertainty = cells
         .iter()
         .map(|cell| {
@@ -257,6 +264,25 @@ pub fn audit(cell: &StateCell) -> AuditTrace {
     }
 }
 
+fn revision_links_for_cell<K: StorageKernel>(
+    kernel: &K,
+    cell_id: StateCellId,
+) -> Result<Vec<RevisionLinkRecord>, CheckoutError> {
+    let mut links = kernel.list_revision_links(RevisionLinkLookup {
+        source: Some(cell_id),
+        ..RevisionLinkLookup::default()
+    })?;
+    for link in kernel.list_revision_links(RevisionLinkLookup {
+        target: Some(cell_id),
+        ..RevisionLinkLookup::default()
+    })? {
+        if !links.contains(&link) {
+            links.push(link);
+        }
+    }
+    Ok(links)
+}
+
 fn citations(cell: &StateCell) -> Vec<String> {
     cell.evidence
         .iter()
@@ -289,8 +315,9 @@ mod tests {
     use chrono::{DateTime, TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-        Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
-        StateCellId, SystemTimeRange, TrustSignal, UtilityFeedback, ValidTimeRange,
+        Citation, CommitId, Confidence, Evidence, RevisionLinkKind, RevisionLinkRecord, Scope,
+        SemanticAnchor, SourceId, StateCell, StateCellId, SystemTimeRange, TrustSignal,
+        UtilityFeedback, ValidTimeRange,
     };
     use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
@@ -1031,6 +1058,108 @@ mod tests {
             slice.frontier_recommendations[0].citations,
             vec!["test://project:continuitydb:frontier".to_string()]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_audit_traces_include_native_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let selected = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:checkout-link-selected", 0.95, 10)?,
+        )?;
+        let superseded = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:checkout-link-superseded", 0.83, 10)?,
+        )?;
+        let predecessor = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:checkout-link-predecessor", 0.72, 10)?,
+        )?;
+        let committed_at = test_commit_time()?;
+        let source_link = RevisionLinkRecord::new(
+            selected.id,
+            RevisionLinkKind::Supersedes,
+            superseded.id,
+            committed_at,
+        );
+        let target_link = RevisionLinkRecord::new(
+            predecessor.id,
+            RevisionLinkKind::Predecessor,
+            selected.id,
+            committed_at,
+        );
+        kernel.append_revision_link(source_link.clone())?;
+        kernel.append_revision_link(target_link.clone())?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                semantic_anchor: Some(SemanticAnchor::new(
+                    "project:continuitydb:checkout-link-selected",
+                )),
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                system_at: None,
+                commit_id: None,
+                activation: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 20,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![selected]);
+        assert_eq!(
+            slice.audit_traces[0].revision_links,
+            vec![source_link, target_link]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_audit_traces_deduplicate_self_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let selected = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:checkout-link-self", 0.95, 10)?,
+        )?;
+        let committed_at = test_commit_time()?;
+        let self_link = RevisionLinkRecord::new(
+            selected.id,
+            RevisionLinkKind::DerivesFrom,
+            selected.id,
+            committed_at,
+        );
+        kernel.append_revision_link(self_link.clone())?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                semantic_anchor: Some(SemanticAnchor::new(
+                    "project:continuitydb:checkout-link-self",
+                )),
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                system_at: None,
+                commit_id: None,
+                activation: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 20,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![selected]);
+        assert_eq!(slice.audit_traces[0].revision_links, vec![self_link]);
         Ok(())
     }
 

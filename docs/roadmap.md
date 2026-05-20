@@ -97,6 +97,7 @@ Storage kernel
 11. Add commit-scoped checkout constraints. Implemented `CheckoutRequest.commit_id` with pushdown into `CellLookup.commit_id`, allowing continuity slices to be materialized for one explicit database commit boundary.
 12. Add commit-aware audit traces. Implemented `AuditTrace.commit_id` so direct audit and checkout-selected audit traces expose the database commit boundary that wrote each cell.
 13. Add revision-link-aware audit traces. Implemented `AuditTrace.revision_links` and direct native API audit enrichment so callers can see native supersession, predecessor, conflict, and derivation links where an audited StateCell participates.
+14. Add checkout-selected revision-link audit traces. Implemented kernel-backed enrichment for checkout-selected audit traces so materialized continuity slices carry native revision-link context without changing selection, ranking, alternatives, uncertainty, or frontier metadata.
 
 ## Query Language Milestones
 
