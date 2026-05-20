@@ -317,6 +317,75 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     Ok(())
 }
 
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_benchmark_local_model_dry_run_reports_compatible_baseline_preflight(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-preflight-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-preflight-baseline");
+    let script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]}]}'
+"#;
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--temp")
+        .arg("--arg")
+        .arg("0")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+    let before = fs::read_to_string(&baseline_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--compare-baseline")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--temp")
+        .arg("--arg")
+        .arg("0")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["baseline_preflight"]["compared"].as_bool(), Some(true));
+    assert_eq!(
+        json["baseline_preflight"]["compatible_baseline_found"].as_bool(),
+        Some(true)
+    );
+    assert!(json["baseline_preflight"]["previous_recorded_at"].is_string());
+    assert_eq!(fs::read_to_string(&baseline_path)?, before);
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
@@ -353,6 +422,7 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
     );
     assert_eq!(json["candidate_role"].as_str(), Some("default-feasibility"));
     assert_eq!(json["response_schema_version"].as_u64(), Some(1));
+    assert!(json.get("baseline_preflight").is_none());
     assert!(json["evaluation_suite_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
@@ -381,6 +451,42 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
     assert_eq!(json["runtime"]["arguments"][2].as_str(), Some("--temp"));
     assert_eq!(json["runtime"]["arguments"][3].as_str(), Some("0"));
     assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_benchmark_local_model_dry_run_compare_reports_missing_baseline_without_creating_file(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-dry-run-missing-baseline");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--compare-baseline")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("llama-cli")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["baseline_preflight"]["compared"].as_bool(), Some(true));
+    assert_eq!(
+        json["baseline_preflight"]["compatible_baseline_found"].as_bool(),
+        Some(false)
+    );
+    assert!(json["baseline_preflight"]["previous_recorded_at"].is_null());
+    assert!(!baseline_path.exists());
+
     Ok(())
 }
 

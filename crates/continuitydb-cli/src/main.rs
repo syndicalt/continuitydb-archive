@@ -21,8 +21,8 @@ use continuitydb_steward::{
     local_model_response_json_schema, record_local_model_benchmark_baseline_with_regression,
     small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
-    LocalModelBenchmarkRegression, SmallModelCandidate, StewardAction, StewardEvaluationSuite,
-    StewardIdentity, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression, SmallModelCandidate,
+    StewardAction, StewardEvaluationSuite, StewardIdentity, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
@@ -689,12 +689,23 @@ fn benchmark_local_model_json(
         config = config.with_argument(argument);
     }
     if options.dry_run {
+        let baseline_preflight = if options.compare_baseline {
+            Some(local_model_baseline_preflight_json(
+                options.baseline_path,
+                candidate,
+                &suite,
+                &config,
+            )?)
+        } else {
+            None
+        };
         return Ok(local_model_benchmark_dry_run_json(
             candidate,
             &config,
             options.baseline_path,
             contract_artifacts.as_ref(),
             &prompt_artifacts,
+            baseline_preflight,
         ));
     }
 
@@ -729,8 +740,9 @@ fn local_model_benchmark_dry_run_json(
     baseline_path: &Path,
     contract_artifacts: Option<&LocalModelContractArtifacts>,
     prompt_artifacts: &[LocalModelPromptArtifact],
+    baseline_preflight: Option<serde_json::Value>,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "dry_run": true,
         "will_record_baseline": false,
         "candidate_model_id": candidate.model_id(),
@@ -747,7 +759,56 @@ fn local_model_benchmark_dry_run_json(
             "executable": config.executable().display().to_string(),
             "arguments": config.command_arguments(),
         },
-    })
+    });
+    if let Some(baseline_preflight) = baseline_preflight {
+        value["baseline_preflight"] = baseline_preflight;
+    }
+    value
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_baseline_preflight_json(
+    baseline_path: &Path,
+    candidate: SmallModelCandidate,
+    suite: &StewardEvaluationSuite,
+    config: &LocalExecutableRunnerConfig,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let latest = if baseline_path.exists() {
+        let store = FileLocalModelBenchmarkBaselineStore::open(baseline_path)?;
+        let runtime_executable = config.executable().to_string_lossy().to_string();
+        let runtime_arguments = config.command_arguments();
+        let response_schema_version = LOCAL_MODEL_RESPONSE_SCHEMA_VERSION;
+        let evaluation_suite_fingerprint = suite.fingerprint();
+        let schema_fingerprint =
+            local_model_contract_fingerprint(local_model_response_json_schema());
+        let grammar_fingerprint =
+            local_model_contract_fingerprint(local_model_response_gbnf_grammar());
+        let prompt_fingerprint = local_model_prompt_fingerprint_for_suite(suite);
+
+        store
+            .list_baselines()?
+            .into_iter()
+            .filter(|baseline| baseline.candidate_model_id() == candidate.model_id())
+            .filter(|baseline| baseline.candidate_role() == candidate.role())
+            .filter(|baseline| baseline.response_schema_version() == response_schema_version)
+            .filter(|baseline| {
+                baseline.evaluation_suite_fingerprint() == evaluation_suite_fingerprint
+            })
+            .filter(|baseline| baseline.schema_fingerprint() == schema_fingerprint)
+            .filter(|baseline| baseline.grammar_fingerprint() == grammar_fingerprint)
+            .filter(|baseline| baseline.prompt_fingerprint() == prompt_fingerprint)
+            .filter(|baseline| baseline.runtime().executable() == runtime_executable)
+            .filter(|baseline| baseline.runtime().arguments() == runtime_arguments.as_slice())
+            .max_by_key(LocalModelBenchmarkBaseline::recorded_at)
+    } else {
+        None
+    };
+
+    Ok(serde_json::json!({
+        "compared": true,
+        "compatible_baseline_found": latest.is_some(),
+        "previous_recorded_at": latest.as_ref().map(LocalModelBenchmarkBaseline::recorded_at),
+    }))
 }
 
 #[cfg(feature = "local-model")]

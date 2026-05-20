@@ -259,6 +259,7 @@ Storage kernel
 47. Add CLI local-model benchmark contract artifact directory. Added `benchmark-local-model --contract-dir` so dry-runs and benchmark runs can materialize schema and grammar artifacts, report their fingerprints, and use the generated grammar path for strict grammar-required candidates.
 48. Add CLI local-model benchmark prompt artifact directory. Added `benchmark-local-model --prompt-dir` so dry-runs and benchmark runs can write deterministic per-case prompt artifacts and report their fingerprints for reproducible local Steward model trials.
 49. Add durable local-model prompt fingerprints. Persisted deterministic prompt-rendering fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
+50. Add CLI local-model dry-run baseline compatibility preflight. Added read-only `benchmark-local-model --dry-run --compare-baseline` baseline inspection so operators can see whether the current runtime and contract metadata have a compatible previous baseline before executing a model.
 
 ## Small Embeddable Model Track
 
