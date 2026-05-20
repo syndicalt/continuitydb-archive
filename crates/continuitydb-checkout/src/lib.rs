@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
-    ActivationState, CellDependencyKind, CommitId, Confidence, CoreError, Scope, SemanticAnchor,
-    StateCell, StateCellId, TrustSignal,
+    ActivationState, CellDependencyKind, CommitId, Confidence, CoreError, RevisionLinkRecord,
+    Scope, SemanticAnchor, StateCell, StateCellId, TrustSignal,
 };
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use serde::{Deserialize, Serialize};
@@ -117,6 +117,8 @@ pub struct AuditTrace {
     pub evidence: Vec<AuditEvidence>,
     /// Dependency and causality links referenced by the cell.
     pub dependencies: Vec<AuditDependency>,
+    /// Native revision-link records where this cell participates.
+    pub revision_links: Vec<RevisionLinkRecord>,
 }
 
 /// Evidence metadata included in an audit trace.
@@ -251,6 +253,7 @@ pub fn audit(cell: &StateCell) -> AuditTrace {
                 rationale: dependency.rationale.clone(),
             })
             .collect(),
+        revision_links: Vec::new(),
     }
 }
 

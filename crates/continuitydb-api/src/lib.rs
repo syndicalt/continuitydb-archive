@@ -1051,7 +1051,29 @@ impl<K: StorageKernel> ContinuityDb<K> {
 
     /// Produces an audit trace for a stored StateCell.
     pub fn audit_cell(&self, cell_id: StateCellId) -> Result<AuditTrace, ContinuityError> {
-        self.lookup_one_cell(cell_id).map(|cell| audit(&cell))
+        let cell = self.lookup_one_cell(cell_id)?;
+        let mut trace = audit(&cell);
+        trace.revision_links = self.revision_links_for_cell(cell_id)?;
+        Ok(trace)
+    }
+
+    fn revision_links_for_cell(
+        &self,
+        cell_id: StateCellId,
+    ) -> Result<Vec<RevisionLinkRecord>, ContinuityError> {
+        let mut links = self.kernel.list_revision_links(RevisionLinkLookup {
+            source: Some(cell_id),
+            ..RevisionLinkLookup::default()
+        })?;
+        for link in self.kernel.list_revision_links(RevisionLinkLookup {
+            target: Some(cell_id),
+            ..RevisionLinkLookup::default()
+        })? {
+            if !links.contains(&link) {
+                links.push(link);
+            }
+        }
+        Ok(links)
     }
 
     fn lookup_cells_in_order<I>(&self, cell_ids: I) -> Result<Vec<StateCell>, ContinuityError>
@@ -3284,6 +3306,68 @@ WHERE scope = project("continuitydb")
             trace.evidence[0].trust,
             vec![TrustSignal::DirectObservation]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn api_audit_cell_includes_native_revision_links() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 16, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let audited_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:audit-link-audited", 0.91, 12)?,
+            committed_at,
+        )?;
+        let superseded_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:audit-link-superseded", 0.41, 12)?,
+            committed_at,
+        )?;
+        let predecessor_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:audit-link-predecessor", 0.83, 12)?,
+            committed_at,
+        )?;
+        let source_link = db.record_revision_link_at(
+            audited_id,
+            RevisionLinkKind::Supersedes,
+            superseded_id,
+            committed_at,
+        )?;
+        let target_link = db.record_revision_link_at(
+            predecessor_id,
+            RevisionLinkKind::Predecessor,
+            audited_id,
+            committed_at,
+        )?;
+
+        let trace = db.audit_cell(audited_id)?;
+
+        assert_eq!(trace.revision_links, vec![source_link, target_link]);
+        Ok(())
+    }
+
+    #[test]
+    fn api_audit_cell_deduplicates_self_revision_links() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 16, 15, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:audit-link-self", 0.91, 12)?,
+            committed_at,
+        )?;
+        let self_link = db.record_revision_link_at(
+            cell_id,
+            RevisionLinkKind::DerivesFrom,
+            cell_id,
+            committed_at,
+        )?;
+
+        let trace = db.audit_cell(cell_id)?;
+
+        assert_eq!(trace.revision_links, vec![self_link]);
         Ok(())
     }
 
