@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `crates/continuitydb-cli/tests/cli.rs`
 
-- [ ] **Step 1: Add query envelope test imports**
+- [x] **Step 1: Add query envelope test imports**
 
 Update the existing `continuitydb_query` import in `crates/continuitydb-cli/tests/cli.rs` to include `QueryEnvelope`, `QUERY_ENVELOPE_FORMAT`, `QUERY_ENVELOPE_FORMAT_VERSION`, and `encode_query_json`:
 
@@ -35,7 +35,7 @@ use continuitydb_query::{
 };
 ```
 
-- [ ] **Step 2: Add successful envelope checkout test**
+- [x] **Step 2: Add successful envelope checkout test**
 
 Add this test after `cli_checkout_query_executes_serialized_typed_query`:
 
@@ -81,7 +81,7 @@ fn cli_checkout_query_executes_versioned_query_envelope(
 }
 ```
 
-- [ ] **Step 3: Add invalid envelope rejection test**
+- [x] **Step 3: Add invalid envelope rejection test**
 
 Add this test after the successful envelope checkout test:
 
@@ -116,7 +116,7 @@ fn cli_checkout_query_rejects_invalid_query_envelope(
 }
 ```
 
-- [ ] **Step 4: Verify RED**
+- [x] **Step 4: Verify RED**
 
 Run:
 
@@ -131,7 +131,7 @@ Expected: FAIL because envelope files are not decoded by `checkout-query`.
 **Files:**
 - Modify: `crates/continuitydb-cli/src/main.rs`
 
-- [ ] **Step 1: Import envelope decoder**
+- [x] **Step 1: Import envelope decoder**
 
 Change the query import in `crates/continuitydb-cli/src/main.rs` to:
 
@@ -139,7 +139,7 @@ Change the query import in `crates/continuitydb-cli/src/main.rs` to:
 use continuitydb_query::{decode_query_json, ContinuityQuery};
 ```
 
-- [ ] **Step 2: Route checkout query file through decode helper**
+- [x] **Step 2: Route checkout query file through decode helper**
 
 Change `checkout_query_file` so it calls `decode_query_file`:
 
@@ -155,7 +155,7 @@ fn checkout_query_file(
 }
 ```
 
-- [ ] **Step 3: Add decode helper**
+- [x] **Step 3: Add decode helper**
 
 Add this helper near `checkout_query_file`:
 
@@ -168,7 +168,7 @@ fn decode_query_file(bytes: &[u8]) -> Result<ContinuityQuery, Box<dyn std::error
 }
 ```
 
-- [ ] **Step 4: Add envelope-shape helper**
+- [x] **Step 4: Add envelope-shape helper**
 
 Add this helper after `decode_query_file`:
 
@@ -179,7 +179,7 @@ fn is_query_envelope_shape(bytes: &[u8]) -> Result<bool, Box<dyn std::error::Err
 }
 ```
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run:
 
@@ -189,7 +189,7 @@ cargo test -p continuitydb-cli cli_checkout_query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit implementation**
+- [x] **Step 6: Commit implementation**
 
 ```bash
 git add crates/continuitydb-cli/src/main.rs crates/continuitydb-cli/tests/cli.rs docs/superpowers/plans/2026-05-20-cli-query-envelope.md

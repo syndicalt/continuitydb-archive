@@ -9,8 +9,9 @@ use continuitydb_core::{
 };
 use continuitydb_kernel::{CommitManifestLookup, FileKernel};
 use continuitydb_query::{
-    CheckoutQuery, ContinuityQuery, QueryOptimization, QueryRequirements, QueryReturnShape,
-    QueryTask,
+    encode_query_json, CheckoutQuery, ContinuityQuery, QueryEnvelope, QueryOptimization,
+    QueryRequirements, QueryReturnShape, QueryTask, QUERY_ENVELOPE_FORMAT,
+    QUERY_ENVELOPE_FORMAT_VERSION,
 };
 use predicates::str::contains;
 use serde_json::Value;
@@ -99,6 +100,77 @@ fn cli_checkout_query_executes_serialized_typed_query() -> Result<(), Box<dyn st
         json["audit_traces"][0]["evidence"].as_array().map(Vec::len),
         Some(1)
     );
+
+    fs::remove_file(store_path)?;
+    fs::remove_file(query_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_checkout_query_executes_versioned_query_envelope() -> Result<(), Box<dyn std::error::Error>>
+{
+    let store_path = temp_store_path("continuitydb-cli-checkout-query-envelope-store");
+    let query_path = temp_store_path("continuitydb-cli-checkout-query-envelope-query");
+    write_committed_store(&store_path, "project:continuitydb:cli-query-envelope")?;
+    let query = ContinuityQuery::Checkout(
+        CheckoutQuery::new(QueryTask::new("stored-facts", "what is stored?")).with_requirements(
+            QueryRequirements {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 1200,
+                ..QueryRequirements::default()
+            },
+        ),
+    );
+    fs::write(&query_path, encode_query_json(query)?)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("checkout-query")
+        .arg(&store_path)
+        .arg(&query_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["cells"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        json["cells"][0]["payload"]["Text"].as_str(),
+        Some("project:continuitydb:cli-query-envelope")
+    );
+
+    fs::remove_file(store_path)?;
+    fs::remove_file(query_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_checkout_query_rejects_invalid_query_envelope() -> Result<(), Box<dyn std::error::Error>> {
+    let store_path = temp_store_path("continuitydb-cli-checkout-query-invalid-envelope-store");
+    let query_path = temp_store_path("continuitydb-cli-checkout-query-invalid-envelope-query");
+    write_committed_store(
+        &store_path,
+        "project:continuitydb:cli-query-invalid-envelope",
+    )?;
+    let envelope = QueryEnvelope {
+        format: QUERY_ENVELOPE_FORMAT.to_string(),
+        version: QUERY_ENVELOPE_FORMAT_VERSION + 1,
+        query: ContinuityQuery::Checkout(CheckoutQuery::new(QueryTask::new(
+            "stored-facts",
+            "what is stored?",
+        ))),
+    };
+    fs::write(&query_path, serde_json::to_vec(&envelope)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("checkout-query")
+        .arg(&store_path)
+        .arg(&query_path)
+        .assert()
+        .failure()
+        .stderr(contains("query envelope is invalid"));
 
     fs::remove_file(store_path)?;
     fs::remove_file(query_path)?;
