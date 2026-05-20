@@ -1506,18 +1506,27 @@ mod tests {
     fn api_reports_file_store_status() -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_file_kernel_path("api-file-store-status");
         let mut db = ContinuityDb::open_file(&path)?;
-        db.ingest_cells_at_with_commit_id(
-            vec![sample_cell("project:continuitydb:file-status", 0.91, 12)?],
-            Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
-                .single()
-                .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?,
-            CommitId::new(),
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let source = sample_cell("project:continuitydb:file-status-source", 0.91, 12)?;
+        let target = sample_cell("project:continuitydb:file-status-target", 0.89, 12)?;
+        let source_id = source.id;
+        let target_id = target.id;
+        db.ingest_cells_at_with_commit_id(vec![source, target], committed_at, CommitId::new())?;
+        db.record_revision_link_at(
+            source_id,
+            RevisionLinkKind::Supersedes,
+            target_id,
+            committed_at,
         )?;
 
         let status = db.file_store_status()?;
 
-        assert_eq!(status.cell_count, 1);
+        assert_eq!(status.cell_count, 2);
         assert_eq!(status.commit_count, 1);
+        assert_eq!(status.revision_link_count, 1);
         assert!(status.file_size_bytes > 0);
 
         fs::remove_file(path)?;

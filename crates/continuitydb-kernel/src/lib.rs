@@ -721,6 +721,8 @@ pub struct FileKernelStatus {
     pub cell_count: usize,
     /// Number of visible commit manifests.
     pub commit_count: usize,
+    /// Number of visible revision-link records.
+    pub revision_link_count: usize,
     /// Current durable file size in bytes.
     pub file_size_bytes: u64,
 }
@@ -815,6 +817,7 @@ impl FileKernel {
         Ok(FileKernelStatus {
             cell_count: self.index.cells.len(),
             commit_count: self.index.manifest_order.len(),
+            revision_link_count: self.index.revision_links.len(),
             file_size_bytes,
         })
     }
@@ -1484,6 +1487,7 @@ mod tests {
 
         assert_eq!(status.cell_count, 0);
         assert_eq!(status.commit_count, 0);
+        assert_eq!(status.revision_link_count, 0);
         assert!(status.file_size_bytes > 0);
 
         fs::remove_file(path)?;
@@ -1491,20 +1495,29 @@ mod tests {
     }
 
     #[test]
-    fn file_kernel_status_reports_visible_cells_and_commits(
+    fn file_kernel_status_reports_visible_cells_commits_and_revision_links(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_kernel_path("continuitydb-file-kernel-status-populated");
         let committed_at = test_commit_time()?;
         let commit_id = CommitId::new();
         let first = sample_cell("project:continuitydb:status-first", 0.91, 12)?;
         let second = sample_cell("project:continuitydb:status-second", 0.83, 15)?;
+        let first_id = first.id;
+        let second_id = second.id;
         let mut kernel = FileKernel::open(&path)?;
         kernel.append_cells_at_with_commit_id(vec![first, second], committed_at, commit_id)?;
+        kernel.append_revision_link(RevisionLinkRecord::new(
+            first_id,
+            RevisionLinkKind::Supersedes,
+            second_id,
+            committed_at,
+        ))?;
 
         let status = kernel.status()?;
 
         assert_eq!(status.cell_count, 2);
         assert_eq!(status.commit_count, 1);
+        assert_eq!(status.revision_link_count, 1);
         assert!(status.file_size_bytes > 0);
 
         fs::remove_file(path)?;

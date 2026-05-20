@@ -78,10 +78,11 @@ Storage kernel
 22. Add file-kernel secondary indexes for activation and dependency lookups. Implemented derived in-process indexes for activation states, dependency targets, and dependency target/kind pairs so frontier and causality filters can start from indexed candidates while preserving append-order results.
 23. Add typed storage-kernel capability introspection. Implemented `KernelDurability`, `KernelCapabilities`, `StorageKernel::capabilities`, and native API exposure so embedders can distinguish ephemeral, append-log, and future indexed embedded kernels without depending on concrete kernel types.
 24. Add typed storage-kernel requirement matching. Implemented `KernelRequirements` and `KernelCapabilities::satisfies` so embedders can express ephemeral, durable append-log, and future indexed embedded storage requirements without duplicating capability comparison logic.
-25. Add file-backed store status. Implemented `FileKernelStatus` and `FileKernel::status` so operators and embedders can inspect visible cell counts, commit counts, and durable file size after open-time validation.
+25. Add file-backed store status. Implemented `FileKernelStatus` and `FileKernel::status` so operators and embedders can inspect visible cell counts, commit counts, revision-link counts, and durable file size after open-time validation.
 26. Add file-backed store health reporting. Implemented `FileKernelHealth` and `FileKernel::health` so validated readable stores report whether they are canonical, legacy raw, checksum-free, or compaction-worthy.
 27. Add native revision-link record storage. Implemented `RevisionLinkLookup`, append/list storage-kernel methods, in-memory revision-link storage, and checksummed JSONL file-kernel records that survive reopen and compaction.
 28. Add file-kernel secondary indexes for revision-link lookups. Implemented derived in-process indexes for revision-link source, target, kind, source-kind, target-kind, source-target, and source-target-kind filters while preserving append-order results and the canonical log as source of truth.
+29. Add revision-link-aware file-store status. Extended `FileKernelStatus` and inspection surfaces with visible revision-link counts so native revision graph records are operationally visible alongside cells and commits.
 
 ## Checkout Milestones
 
@@ -139,7 +140,7 @@ Storage kernel
 3. Expose commit backup and restore from the CLI. Implemented `continuitydb export-commits <store-path> <output-path>` and `continuitydb import-commits <store-path> <input-path>` over the versioned commit export envelope so file-backed stores can be copied through a validated portable backup file.
 4. Expose kernel capability inspection from the CLI. Implemented `continuitydb inspect-kernel <store-path> [--require <profile>]` so operators and CI can inspect file-backed storage guarantees and fail early when a requested profile is not satisfied.
 5. Route file-backed CLI commands through native open helpers. Refactored inspection, compaction, export, and import commands to use `ContinuityDb<FileKernel>::open_file` or `open_file_with_requirements`, keeping operational tooling aligned with the embeddable API boundary.
-6. Include file-store status in kernel inspection. Extended `continuitydb inspect-kernel` JSON with visible cell count, commit count, and durable file size.
+6. Include file-store status in kernel inspection. Extended `continuitydb inspect-kernel` JSON with visible cell count, commit count, revision-link count, and durable file size.
 7. Include file-store health in kernel inspection. Extended `continuitydb inspect-kernel` JSON with file-format health and compaction recommendation metadata.
 8. Add canonical file-store inspection gate. Implemented `continuitydb inspect-kernel --require-canonical` so CI and operators can fail early when a readable file store needs compaction.
 9. Add conditional file-store compaction. Implemented `continuitydb compact-file --if-needed` so operators can compact only when health recommends it.
@@ -179,7 +180,7 @@ Storage kernel
 16. Add native commit backup and restore file helpers. Implemented `ContinuityDb<FileKernel>::export_commits_json_file` and `import_commits_json_file` so embedders can write and read versioned commit export envelope files without duplicating CLI file I/O orchestration.
 17. Add native kernel requirement enforcement. Implemented `ContinuityDb::kernel_satisfies` and `ensure_kernel_requirements` with a typed `KernelRequirementsNotMet` error so embedders can fail early when a backing kernel lacks required production guarantees.
 18. Add file-backed open helpers with requirement enforcement. Implemented `ContinuityDb<FileKernel>::open_file` and `open_file_with_requirements` so embedders can enforce storage profiles before receiving a usable file-backed database handle.
-19. Add native file-store status. Implemented `ContinuityDb<FileKernel>::file_store_status` so embedders can inspect file-backed store shape without depending on kernel internals.
+19. Add native file-store status. Implemented `ContinuityDb<FileKernel>::file_store_status` so embedders can inspect file-backed store shape, including native revision-link counts, without depending on kernel internals.
 20. Add native file-store health reporting. Implemented `ContinuityDb<FileKernel>::file_store_health` so embedders can inspect file format health without depending on kernel internals.
 21. Add canonical file-store requirement gate. Implemented `ensure_file_store_canonical` and `open_canonical_file` so embedders can reject readable but compaction-worthy file stores without automatic mutation.
 22. Add conditional file-store compaction. Implemented `compact_file_store_if_needed` with before/after health summaries so embedders can automate explicit maintenance without rewriting canonical stores.

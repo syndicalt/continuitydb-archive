@@ -586,6 +586,7 @@ fn file_status_json(
     Ok(serde_json::json!({
         "cell_count": status.cell_count,
         "commit_count": status.commit_count,
+        "revision_link_count": status.revision_link_count,
         "file_size_bytes": status.file_size_bytes,
     }))
 }

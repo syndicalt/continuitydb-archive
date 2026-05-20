@@ -4,8 +4,9 @@ use assert_cmd::Command;
 use chrono::{TimeZone, Utc};
 use continuitydb_api::ContinuityDb;
 use continuitydb_core::{
-    Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence, Scope,
-    SemanticAnchor, SourceId, StateCell, StateCellId, SystemTimeRange, TrustSignal, ValidTimeRange,
+    Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence,
+    RevisionLinkKind, Scope, SemanticAnchor, SourceId, StateCell, StateCellId, SystemTimeRange,
+    TrustSignal, ValidTimeRange,
 };
 use continuitydb_kernel::{CommitManifestLookup, FileKernel};
 use continuitydb_query::{
@@ -621,6 +622,7 @@ fn cli_compact_file_fails_for_corrupt_store() -> Result<(), Box<dyn std::error::
 #[test]
 fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-inspect");
+    write_revision_link_store(&path)?;
 
     let output = Command::cargo_bin("continuitydb")?
         .arg("inspect-kernel")
@@ -654,8 +656,9 @@ fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::err
     );
     assert_eq!(json["capabilities"]["durable_flush"].as_bool(), Some(true));
     assert_eq!(json["capabilities"]["compaction"].as_bool(), Some(true));
-    assert_eq!(json["status"]["cell_count"].as_u64(), Some(0));
-    assert_eq!(json["status"]["commit_count"].as_u64(), Some(0));
+    assert_eq!(json["status"]["cell_count"].as_u64(), Some(2));
+    assert_eq!(json["status"]["commit_count"].as_u64(), Some(1));
+    assert_eq!(json["status"]["revision_link_count"].as_u64(), Some(1));
     assert!(
         json["status"]["file_size_bytes"]
             .as_u64()
@@ -665,7 +668,7 @@ fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::err
     assert_eq!(json["health"]["has_header"].as_bool(), Some(true));
     assert_eq!(json["health"]["legacy_raw_cells"].as_u64(), Some(0));
     assert_eq!(json["health"]["checksum_free_records"].as_u64(), Some(0));
-    assert_eq!(json["health"]["canonical_records"].as_u64(), Some(0));
+    assert_eq!(json["health"]["canonical_records"].as_u64(), Some(4));
     assert_eq!(
         json["health"]["compaction_recommended"].as_bool(),
         Some(false)
@@ -1228,6 +1231,26 @@ fn write_committed_store(path: &PathBuf, anchor: &str) -> Result<(), Box<dyn std
     let commit_id = CommitId::new();
     let mut db = ContinuityDb::new(FileKernel::open(path)?);
     db.ingest_cells_at_with_commit_id(vec![test_cell(anchor)?], committed_at, commit_id)?;
+    Ok(())
+}
+
+fn write_revision_link_store(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let committed_at = Utc
+        .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let source = test_cell("project:continuitydb:cli-status-source")?;
+    let target = test_cell("project:continuitydb:cli-status-target")?;
+    let source_id = source.id;
+    let target_id = target.id;
+    let mut db = ContinuityDb::new(FileKernel::open(path)?);
+    db.ingest_cells_at_with_commit_id(vec![source, target], committed_at, CommitId::new())?;
+    db.record_revision_link_at(
+        source_id,
+        RevisionLinkKind::Supersedes,
+        target_id,
+        committed_at,
+    )?;
     Ok(())
 }
 

@@ -83,7 +83,7 @@ The first milestone builds:
 - File-kernel secondary indexes for revision-link lookups.
 - Typed storage-kernel capability introspection for embedders.
 - Typed storage-kernel requirement checks for production readiness gates.
-- File-backed store status for visible cell/commit counts and durable file size.
+- File-backed store status for visible cell, commit, revision-link, and durable file size counts.
 - File-backed store health reporting for canonical and compaction-worthy logs.
 - Canonical file-store requirement gate for production open/inspection paths.
 - Line-addressed JSONL file-kernel corruption diagnostics.
