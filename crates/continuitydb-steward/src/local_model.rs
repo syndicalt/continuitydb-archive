@@ -4,6 +4,12 @@ use chrono::{DateTime, Utc};
 use continuitydb_core::{SemanticAnchor, StateCellId};
 use continuitydb_revision::RevisionLinkKind;
 use serde::Deserialize;
+use std::{
+    ffi::OsStr,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
 
 use crate::{
     ProposalId, ProposalOutcome, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
@@ -14,6 +20,100 @@ use crate::{
 pub trait LocalModelBackend {
     /// Runs inference for a prompt and returns a JSON proposal response.
     fn infer(&self, request: LocalModelRequest) -> Result<String, StewardError>;
+}
+
+/// Configuration for a local executable model runner.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalExecutableRunnerConfig {
+    executable: PathBuf,
+    model_path: Option<PathBuf>,
+    arguments: Vec<String>,
+}
+
+impl LocalExecutableRunnerConfig {
+    /// Creates local executable runner configuration.
+    pub fn new(executable: impl Into<PathBuf>) -> Self {
+        Self {
+            executable: executable.into(),
+            model_path: None,
+            arguments: Vec::new(),
+        }
+    }
+
+    /// Sets the model path passed to the executable as `--model <path>`.
+    pub fn with_model_path(mut self, model_path: impl Into<PathBuf>) -> Self {
+        self.model_path = Some(model_path.into());
+        self
+    }
+
+    /// Appends an argument passed to the executable after any model path.
+    pub fn with_argument(mut self, argument: impl AsRef<OsStr>) -> Self {
+        self.arguments
+            .push(argument.as_ref().to_string_lossy().to_string());
+        self
+    }
+
+    /// Returns the executable path.
+    pub fn executable(&self) -> &Path {
+        &self.executable
+    }
+
+    /// Returns deterministic command arguments.
+    pub fn command_arguments(&self) -> Vec<String> {
+        let mut arguments = Vec::new();
+        if let Some(model_path) = &self.model_path {
+            arguments.push("--model".to_string());
+            arguments.push(model_path.to_string_lossy().to_string());
+        }
+        arguments.extend(self.arguments.clone());
+        arguments
+    }
+}
+
+/// Local executable backend for model inference.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalExecutableRunner {
+    config: LocalExecutableRunnerConfig,
+}
+
+impl LocalExecutableRunner {
+    /// Creates a runner from configuration.
+    pub fn new(config: LocalExecutableRunnerConfig) -> Self {
+        Self { config }
+    }
+
+    /// Returns runner configuration.
+    pub fn config(&self) -> &LocalExecutableRunnerConfig {
+        &self.config
+    }
+}
+
+impl LocalModelBackend for LocalExecutableRunner {
+    fn infer(&self, request: LocalModelRequest) -> Result<String, StewardError> {
+        let mut child = Command::new(self.config.executable())
+            .args(self.config.command_arguments())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|_error| StewardError::LocalModelExecutionFailed)?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(request.prompt().as_bytes())
+                .map_err(|_error| StewardError::LocalModelExecutionFailed)?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|_error| StewardError::LocalModelExecutionFailed)?;
+
+        if !output.status.success() {
+            return Err(StewardError::LocalModelExecutionFailed);
+        }
+
+        String::from_utf8(output.stdout).map_err(|_error| StewardError::LocalModelExecutionFailed)
+    }
 }
 
 /// Request sent to a local model backend.

@@ -17,10 +17,10 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    small_model_candidates, LocalModelBackend, LocalModelRequest, LocalModelSteward,
-    LocalModelStewardInput, SmallModelCandidate, StewardEvaluationCase,
-    StewardEvaluationCaseReport, StewardEvaluationFailure, StewardEvaluationReport,
-    StewardEvaluationSuite,
+    small_model_candidates, LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend,
+    LocalModelRequest, LocalModelSteward, LocalModelStewardInput, SmallModelCandidate,
+    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
+    StewardEvaluationReport, StewardEvaluationSuite,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -33,6 +33,8 @@ mod tests {
     use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "local-model")]
     use std::cell::RefCell;
+    #[cfg(feature = "local-model")]
+    use std::{fs, path::PathBuf};
 
     #[cfg(feature = "local-model")]
     use super::{
@@ -41,7 +43,10 @@ mod tests {
     };
     use super::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
     #[cfg(feature = "local-model")]
-    use super::{LocalModelBackend, LocalModelRequest, LocalModelSteward, LocalModelStewardInput};
+    use super::{
+        LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelRequest,
+        LocalModelSteward, LocalModelStewardInput,
+    };
     use super::{
         MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule, ProposalDecision,
         ProposalId, ProposalLedger, ProposalOutcome, ProposalPolicy, StewardAction, StewardError,
@@ -750,6 +755,81 @@ mod tests {
             candidate.model_id() == "HuggingFaceTB/SmolLM2-360M-Instruct"
                 && candidate.role() == "ultra-small-experimental"
         }));
+    }
+
+    #[cfg(feature = "local-model")]
+    fn write_local_model_script(
+        name: &str,
+        body: &str,
+    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!("{name}-{:?}.sh", ProposalId::new()));
+        fs::write(&path, body)?;
+        Ok(path)
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_executable_runner_builds_deterministic_arguments() {
+        let config = LocalExecutableRunnerConfig::new("llama-cli")
+            .with_model_path("models/qwen2.5-0.5b.gguf")
+            .with_argument("--ctx-size")
+            .with_argument("4096")
+            .with_argument("--json-schema")
+            .with_argument("steward-proposal.schema.json");
+
+        assert_eq!(
+            config.command_arguments(),
+            &[
+                "--model".to_string(),
+                "models/qwen2.5-0.5b.gguf".to_string(),
+                "--ctx-size".to_string(),
+                "4096".to_string(),
+                "--json-schema".to_string(),
+                "steward-proposal.schema.json".to_string(),
+            ]
+        );
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_executable_runner_returns_stdout_response() -> Result<(), Box<dyn std::error::Error>> {
+        let script = write_local_model_script(
+            "continuitydb-local-model-ok",
+            "cat >/dev/null\nprintf '%s\\n' '{\"proposals\":[]}'\n",
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let steward = LocalModelSteward::new(steward()?, runner);
+
+        let proposals = steward.propose(LocalModelStewardInput::new(
+            created_at(),
+            "return no proposals",
+        ))?;
+
+        assert!(proposals.is_empty());
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_executable_runner_maps_process_failure() -> Result<(), Box<dyn std::error::Error>> {
+        let script = write_local_model_script(
+            "continuitydb-local-model-fail",
+            "cat >/dev/null\nprintf '%s\\n' 'model failed' >&2\nexit 7\n",
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let steward = LocalModelSteward::new(steward()?, runner);
+
+        let result = steward.propose(LocalModelStewardInput::new(created_at(), "fail"));
+
+        assert!(matches!(
+            result,
+            Err(StewardError::LocalModelExecutionFailed)
+        ));
+        Ok(())
     }
 
     #[test]

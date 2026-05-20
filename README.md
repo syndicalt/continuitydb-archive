@@ -18,6 +18,7 @@ The first milestone builds:
 - Pluggable proposal audit ledger store contract.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
+- Local executable Steward model runner.
 - Fixed Steward proposal-quality evaluation harness.
 - Deterministic frontier/watch Steward proposal integration.
 - A thin CLI over library APIs.

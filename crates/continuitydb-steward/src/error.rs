@@ -20,4 +20,7 @@ pub enum StewardError {
     /// Local model response could not be decoded into Steward proposals.
     #[error("local model response is not a valid Steward proposal response")]
     InvalidModelResponse,
+    /// Local model executable failed to produce a usable response.
+    #[error("local model executable failed")]
+    LocalModelExecutionFailed,
 }
