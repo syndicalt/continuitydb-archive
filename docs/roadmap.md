@@ -88,11 +88,12 @@ Storage kernel
 3. Add deterministic checkout alternatives. Implemented token-budget omission metadata with reason, citations, and confidence in `continuitydb-checkout`.
 4. Rank checkout candidates by deterministic utility-aware score. Implemented by combining max evidence confidence with `StateCell` utility feedback before token-budget packing in `continuitydb-checkout`.
 5. Add dependency-aware checkout constraints. Implemented dependency target and kind filters in `CheckoutRequest` with pushdown into `CellLookup`.
-6. Add system-time checkout constraints. Implemented `CheckoutRequest.system_at` with pushdown into `CellLookup.system_at`, allowing continuity slices to be materialized as of a database transaction time.
-7. Add dependency-aware audit traces. Implemented `AuditDependency` metadata in checkout audit traces so selected cells explain dependency and causality links alongside citations.
-8. Add structured evidence audit traces. Implemented `AuditEvidence` metadata in checkout audit traces so selected cells expose source IDs, citation locators, confidence scores, and trust signals.
-9. Add commit-scoped checkout constraints. Implemented `CheckoutRequest.commit_id` with pushdown into `CellLookup.commit_id`, allowing continuity slices to be materialized for one explicit database commit boundary.
-10. Add commit-aware audit traces. Implemented `AuditTrace.commit_id` so direct audit and checkout-selected audit traces expose the database commit boundary that wrote each cell.
+6. Add activation-aware checkout constraints. Implemented `CheckoutRequest.activation` with pushdown into `CellLookup.activation` so callers can materialize dormant, active, frontier, or retired StateCells through deterministic checkout.
+7. Add system-time checkout constraints. Implemented `CheckoutRequest.system_at` with pushdown into `CellLookup.system_at`, allowing continuity slices to be materialized as of a database transaction time.
+8. Add dependency-aware audit traces. Implemented `AuditDependency` metadata in checkout audit traces so selected cells explain dependency and causality links alongside citations.
+9. Add structured evidence audit traces. Implemented `AuditEvidence` metadata in checkout audit traces so selected cells expose source IDs, citation locators, confidence scores, and trust signals.
+10. Add commit-scoped checkout constraints. Implemented `CheckoutRequest.commit_id` with pushdown into `CellLookup.commit_id`, allowing continuity slices to be materialized for one explicit database commit boundary.
+11. Add commit-aware audit traces. Implemented `AuditTrace.commit_id` so direct audit and checkout-selected audit traces expose the database commit boundary that wrote each cell.
 
 ## Query Language Milestones
 
@@ -105,6 +106,7 @@ Storage kernel
 7. Add first strict text parser for checkout queries. Implemented `parse_query_text` for a minimal `CHECKOUT "task" ANSWER "question"` syntax with deterministic `WHERE` constraints for scope, minimum confidence, token budget, and evidence source.
 8. Add temporal and commit constraints to text checkout queries. Implemented strict `valid_at`, `system_at`, and `commit_id` constraints so text `CHECKOUT` syntax can express bitemporal and commit-scoped materialization already available in the typed AST.
 9. Add dependency constraints to text checkout queries. Implemented `dependency_target` and `dependency_kind` constraints, backed by `StateCellId` text parsing, so strict text `CHECKOUT` can express causality-aware materialization already available in the typed AST.
+10. Add activation constraints to typed and text checkout queries. Implemented `QueryRequirements.activation` and strict text `activation = ...` parsing so query files can materialize activation-scoped continuity slices.
 
 ## Utility Feedback Milestones
 

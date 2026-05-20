@@ -324,7 +324,7 @@ cargo test -p continuitydb-query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit query implementation**
+- [x] **Step 7: Commit query implementation**
 
 ```bash
 git add crates/continuitydb-query/src/lib.rs crates/continuitydb-query/src/text.rs docs/superpowers/plans/2026-05-20-activation-aware-checkout.md
@@ -338,7 +338,7 @@ git commit -m "feat: add activation query constraints"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-activation-aware-checkout.md`
 
-- [ ] **Step 1: Update README current scope**
+- [x] **Step 1: Update README current scope**
 
 Add this bullet after deterministic checkout:
 
@@ -346,7 +346,7 @@ Add this bullet after deterministic checkout:
 - Activation-aware checkout and strict text query constraints.
 ```
 
-- [ ] **Step 2: Update Checkout roadmap**
+- [x] **Step 2: Update Checkout roadmap**
 
 Add this milestone after dependency-aware checkout constraints and renumber later checkout milestones:
 
@@ -354,7 +354,7 @@ Add this milestone after dependency-aware checkout constraints and renumber late
 6. Add activation-aware checkout constraints. Implemented `CheckoutRequest.activation` with pushdown into `CellLookup.activation` so callers can materialize dormant, active, frontier, or retired StateCells through deterministic checkout.
 ```
 
-- [ ] **Step 3: Update Query Language roadmap**
+- [x] **Step 3: Update Query Language roadmap**
 
 Add this milestone after dependency constraints:
 
@@ -362,7 +362,7 @@ Add this milestone after dependency constraints:
 10. Add activation constraints to typed and text checkout queries. Implemented `QueryRequirements.activation` and strict text `activation = ...` parsing so query files can materialize activation-scoped continuity slices.
 ```
 
-- [ ] **Step 4: Run full verification gate**
+- [x] **Step 4: Run full verification gate**
 
 Run:
 
@@ -376,7 +376,7 @@ git diff --check
 
 Expected: all commands exit successfully.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 5: Commit documentation**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-activation-aware-checkout.md
