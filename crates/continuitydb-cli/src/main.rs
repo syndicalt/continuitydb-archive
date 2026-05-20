@@ -1666,12 +1666,13 @@ fn write_local_model_bundle_validation_failure_report(
     message: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let manifest = local_model_validation_failure_manifest_json(artifact_dir);
+    let benchmark_report = local_model_validation_failure_report_json(artifact_dir);
     let output = serde_json::json!({
         "artifact_dir": artifact_dir.display().to_string(),
         "report_path": report_path.map(|path| path.display().to_string()),
         "failure_report_path": failure_report_path.display().to_string(),
         "manifest": manifest,
-        "benchmark_report": serde_json::Value::Null,
+        "benchmark_report": benchmark_report,
         "changed_case_report": serde_json::Value::Null,
         "response_artifact_manifest": serde_json::Value::Null,
         "failure": {
@@ -1694,6 +1695,24 @@ fn local_model_validation_failure_manifest_json(artifact_dir: &Path) -> serde_js
         "manifest_path": manifest_path.display().to_string(),
         "manifest_fingerprint": local_model_contract_fingerprint(&manifest_text),
         "manifest_bytes": manifest_text.len(),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_validation_failure_report_json(artifact_dir: &Path) -> serde_json::Value {
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let Ok(report_text) = std::fs::read_to_string(&report_path) else {
+        return serde_json::Value::Null;
+    };
+    let canonical_report_text = serde_json::from_str::<serde_json::Value>(&report_text)
+        .ok()
+        .and_then(|report| local_model_benchmark_report_manifest_payload_text(&report).ok())
+        .unwrap_or_else(|| report_text.clone());
+
+    serde_json::json!({
+        "report_path": report_path.display().to_string(),
+        "report_fingerprint": local_model_contract_fingerprint(&canonical_report_text),
+        "report_bytes": canonical_report_text.len(),
     })
 }
 
