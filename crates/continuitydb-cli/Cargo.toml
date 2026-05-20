@@ -11,14 +11,18 @@ name = "continuitydb"
 path = "src/main.rs"
 
 [dependencies]
+chrono.workspace = true
 clap.workspace = true
 continuitydb-checkout = { path = "../continuitydb-checkout" }
 continuitydb-core = { path = "../continuitydb-core" }
+continuitydb-kernel = { path = "../continuitydb-kernel" }
 continuitydb-memory = { path = "../continuitydb-memory" }
+serde_json.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

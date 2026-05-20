@@ -211,11 +211,14 @@ name = "continuitydb-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "chrono",
  "clap",
  "continuitydb-checkout",
  "continuitydb-core",
+ "continuitydb-kernel",
  "continuitydb-memory",
  "predicates",
+ "serde_json",
 ]
 
 [[package]]

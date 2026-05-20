@@ -67,6 +67,10 @@ Storage kernel
 2. Add selected-cell metadata to checkout slices. Implemented audit traces, uncertainty entries, and frontier recommendations in `continuitydb-checkout`.
 3. Add deterministic checkout alternatives. Implemented token-budget omission metadata with reason, citations, and confidence in `continuitydb-checkout`.
 
+## CLI Milestones
+
+1. Expose deterministic checkout JSON from the CLI. Implemented as `continuitydb demo-checkout`, showing selected cells, audit traces, uncertainty, frontier recommendations, and alternatives.
+
 ## Steward Milestones
 
 1. Define `StewardProposal` types without invoking any model. Implemented in `continuitydb-steward`.
