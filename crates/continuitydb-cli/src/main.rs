@@ -1233,29 +1233,13 @@ fn write_local_model_changed_case_report(
     path: &Path,
     benchmark_report: &serde_json::Value,
 ) -> Result<LocalModelChangedCaseReportArtifact, Box<dyn std::error::Error>> {
-    let comparison = benchmark_report
-        .get("baseline_comparison")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
     let changed_case_report = serde_json::json!({
         "format": "continuitydb.local_model.changed_cases",
         "format_version": 1,
         "candidate_model_id": benchmark_report["candidate_model_id"].clone(),
         "baseline_path": benchmark_report["baseline_path"].clone(),
         "changed_case_report_path": path.display().to_string(),
-        "comparison": {
-            "compared": comparison["compared"].as_bool().unwrap_or(false),
-            "regressed": comparison["regressed"].as_bool().unwrap_or(false),
-            "previous_recorded_at": comparison["previous_recorded_at"].clone(),
-            "current_recorded_at": comparison["current_recorded_at"].clone(),
-            "changed_cases": comparison["changed_cases"].as_u64().unwrap_or(0),
-            "outcome_changed_cases": comparison["outcome_changed_cases"].as_u64().unwrap_or(0),
-            "failure_count_changed_cases": comparison["failure_count_changed_cases"].as_u64().unwrap_or(0),
-            "response_changed_cases": comparison["response_changed_cases"].as_u64().unwrap_or(0),
-            "regressed_cases": comparison["regressed_cases"].clone(),
-            "recovered_cases": comparison["recovered_cases"].clone(),
-            "changed_case_summaries": comparison["changed_case_summaries"].clone(),
-        },
+        "comparison": local_model_changed_case_report_projection(benchmark_report),
     });
     let report_text = serde_json::to_string_pretty(&changed_case_report)?;
     if let Some(parent) = path
@@ -1646,7 +1630,7 @@ fn validate_local_model_bundle_manifest(
         );
     }
     let changed_case_report =
-        validate_local_model_changed_case_report_manifest(artifact_dir, &manifest)?;
+        validate_local_model_changed_case_report_manifest(artifact_dir, &manifest, &report)?;
     let response_artifact_manifest =
         validate_local_model_response_artifact_manifest(artifact_dir, &manifest)?;
 
@@ -1775,6 +1759,7 @@ fn validate_local_model_response_artifact_files(
 fn validate_local_model_changed_case_report_manifest(
     artifact_dir: &Path,
     manifest: &serde_json::Value,
+    benchmark_report: &serde_json::Value,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if manifest["changed_case_report"].is_null() && manifest["changed_case_report_path"].is_null() {
         return Ok(serde_json::Value::Null);
@@ -1817,12 +1802,65 @@ fn validate_local_model_changed_case_report_manifest(
         )
         .into());
     }
+    let changed_case_report: serde_json::Value = serde_json::from_str(&report_text)?;
+    validate_local_model_changed_case_report_content(
+        &report_path,
+        &changed_case_report,
+        benchmark_report,
+    )?;
 
     Ok(serde_json::json!({
         "report_path": report_path.display().to_string(),
         "report_fingerprint": current_report_fingerprint,
         "report_bytes": report_text.len(),
     }))
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_changed_case_report_projection(
+    benchmark_report: &serde_json::Value,
+) -> serde_json::Value {
+    let comparison = benchmark_report
+        .get("baseline_comparison")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "compared": comparison["compared"].as_bool().unwrap_or(false),
+        "regressed": comparison["regressed"].as_bool().unwrap_or(false),
+        "previous_recorded_at": comparison["previous_recorded_at"].clone(),
+        "current_recorded_at": comparison["current_recorded_at"].clone(),
+        "changed_cases": comparison["changed_cases"].as_u64().unwrap_or(0),
+        "outcome_changed_cases": comparison["outcome_changed_cases"].as_u64().unwrap_or(0),
+        "failure_count_changed_cases": comparison["failure_count_changed_cases"].as_u64().unwrap_or(0),
+        "response_changed_cases": comparison["response_changed_cases"].as_u64().unwrap_or(0),
+        "regressed_cases": comparison["regressed_cases"].clone(),
+        "recovered_cases": comparison["recovered_cases"].clone(),
+        "changed_case_summaries": comparison["changed_case_summaries"].clone(),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn validate_local_model_changed_case_report_content(
+    report_path: &Path,
+    changed_case_report: &serde_json::Value,
+    benchmark_report: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let expected_report_path = report_path.display().to_string();
+    let expected_comparison = local_model_changed_case_report_projection(benchmark_report);
+    if changed_case_report["format"].as_str() != Some("continuitydb.local_model.changed_cases")
+        || changed_case_report["format_version"].as_u64() != Some(1)
+        || changed_case_report["candidate_model_id"] != benchmark_report["candidate_model_id"]
+        || changed_case_report["baseline_path"] != benchmark_report["baseline_path"]
+        || changed_case_report["changed_case_report_path"].as_str()
+            != Some(expected_report_path.as_str())
+        || changed_case_report["comparison"] != expected_comparison
+    {
+        return Err(
+            std::io::Error::other("local model changed-case report content mismatch").into(),
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "local-model")]

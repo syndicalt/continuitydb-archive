@@ -167,6 +167,7 @@ The first milestone builds:
 - CLI local model changed-case report bundle artifacts.
 - CLI local model changed-case report artifact metadata.
 - CLI local model changed-case report artifact metadata validation.
+- CLI local model changed-case report content validation.
 - CLI local model fixed-failure artifact bundles.
 - CLI local model regression artifact bundles.
 - CLI local model instability artifact bundles.
