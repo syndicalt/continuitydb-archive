@@ -148,6 +148,40 @@ fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::err
             .unwrap_or_default()
             > 0
     );
+    assert_eq!(json["health"]["has_header"].as_bool(), Some(true));
+    assert_eq!(json["health"]["legacy_raw_cells"].as_u64(), Some(0));
+    assert_eq!(json["health"]["checksum_free_records"].as_u64(), Some(0));
+    assert_eq!(json["health"]["canonical_records"].as_u64(), Some(0));
+    assert_eq!(
+        json["health"]["compaction_recommended"].as_bool(),
+        Some(false)
+    );
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_inspect_kernel_reports_legacy_health() -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-legacy-health");
+    write_legacy_store(&path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["health"]["has_header"].as_bool(), Some(false));
+    assert_eq!(json["health"]["legacy_raw_cells"].as_u64(), Some(1));
+    assert_eq!(
+        json["health"]["compaction_recommended"].as_bool(),
+        Some(true)
+    );
 
     fs::remove_file(path)?;
     Ok(())

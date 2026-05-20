@@ -1365,8 +1365,8 @@ mod tests {
     }
 
     #[test]
-    fn file_kernel_compaction_updates_health_to_canonical(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn file_kernel_compaction_updates_health_to_canonical() -> Result<(), Box<dyn std::error::Error>>
+    {
         let path = temp_kernel_path("continuitydb-file-kernel-health-compact");
         let committed_at = test_commit_time()?;
         let commit_id = CommitId::new();

@@ -102,6 +102,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let capabilities = db.kernel_capabilities();
             let status = file_status_json(&db)?;
+            let health = file_health_json(&db);
             let required = require.map(profile_name);
             let satisfies = require
                 .map(|profile| db.kernel_satisfies(requirements_for_profile(profile)))
@@ -110,6 +111,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "path": store_path.display().to_string(),
                 "capabilities": capabilities_json(capabilities),
                 "status": status,
+                "health": health,
                 "required": required,
                 "satisfies": satisfies,
             });
@@ -202,6 +204,17 @@ fn file_status_json(
         "commit_count": status.commit_count,
         "file_size_bytes": status.file_size_bytes,
     }))
+}
+
+fn file_health_json(db: &ContinuityDb<continuitydb_kernel::FileKernel>) -> serde_json::Value {
+    let health = db.file_store_health();
+    serde_json::json!({
+        "has_header": health.has_header,
+        "legacy_raw_cells": health.legacy_raw_cells,
+        "checksum_free_records": health.checksum_free_records,
+        "canonical_records": health.canonical_records,
+        "compaction_recommended": health.compaction_recommended,
+    })
 }
 
 fn open_file_database(

@@ -6,8 +6,8 @@ use continuitydb_checkout::{
 };
 use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{
-    CellLookup, CommitManifestLookup, FileKernel, FileKernelStatus, KernelCapabilities,
-    KernelError, KernelRequirements, StorageKernel,
+    CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelStatus,
+    KernelCapabilities, KernelError, KernelRequirements, StorageKernel,
 };
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
@@ -501,6 +501,11 @@ impl ContinuityDb<FileKernel> {
         self.kernel.status().map_err(Into::into)
     }
 
+    /// Returns the file-format health report for the backing file store.
+    pub fn file_store_health(&self) -> FileKernelHealth {
+        self.kernel.health()
+    }
+
     /// Writes a versioned JSON commit export envelope to a file.
     pub fn export_commits_json_file<P: AsRef<Path>>(
         &self,
@@ -662,6 +667,23 @@ mod tests {
         assert_eq!(status.cell_count, 1);
         assert_eq!(status.commit_count, 1);
         assert!(status.file_size_bytes > 0);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_reports_file_store_health() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-file-store-health");
+        let db = ContinuityDb::open_file(&path)?;
+
+        let health = db.file_store_health();
+
+        assert!(health.has_header);
+        assert_eq!(health.legacy_raw_cells, 0);
+        assert_eq!(health.checksum_free_records, 0);
+        assert_eq!(health.canonical_records, 0);
+        assert!(!health.compaction_recommended);
 
         fs::remove_file(path)?;
         Ok(())
