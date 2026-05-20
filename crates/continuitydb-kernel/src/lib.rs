@@ -353,6 +353,7 @@ struct FileKernelLog {
     cells: Vec<StateCell>,
     explicit_manifests: Vec<CommitManifest>,
     has_header: bool,
+    health: FileKernelHealth,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -539,6 +540,7 @@ impl FileKernelIndex {
 pub struct FileKernel {
     path: PathBuf,
     index: FileKernelIndex,
+    health: FileKernelHealth,
 }
 
 /// Observable status for a file-backed storage kernel.
@@ -550,6 +552,46 @@ pub struct FileKernelStatus {
     pub commit_count: usize,
     /// Current durable file size in bytes.
     pub file_size_bytes: u64,
+}
+
+/// Operational health report for a file-backed storage kernel.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileKernelHealth {
+    /// Whether the log starts with the supported current header.
+    pub has_header: bool,
+    /// Number of legacy raw StateCell records accepted during open.
+    pub legacy_raw_cells: usize,
+    /// Number of typed cell or commit records that lacked checksums.
+    pub checksum_free_records: usize,
+    /// Number of typed cell or commit records with valid checksums.
+    pub canonical_records: usize,
+    /// Whether compaction should rewrite the store into the canonical format.
+    pub compaction_recommended: bool,
+}
+
+impl FileKernelHealth {
+    fn from_counts(
+        has_header: bool,
+        legacy_raw_cells: usize,
+        checksum_free_records: usize,
+        canonical_records: usize,
+    ) -> Self {
+        Self {
+            has_header,
+            legacy_raw_cells,
+            checksum_free_records,
+            canonical_records,
+            compaction_recommended: !has_header
+                || legacy_raw_cells > 0
+                || checksum_free_records > 0,
+        }
+    }
+}
+
+impl Default for FileKernelHealth {
+    fn default() -> Self {
+        Self::from_counts(false, 0, 0, 0)
+    }
 }
 
 impl PartialEq for FileKernel {
@@ -579,9 +621,14 @@ impl FileKernel {
 
         ensure_file_header(&path)?;
         let log = read_log_from_path(&path)?;
+        let health = log.health;
         let index = FileKernelIndex::rebuild(log)?;
 
-        Ok(Self { path, index })
+        Ok(Self {
+            path,
+            index,
+            health,
+        })
     }
 
     /// Returns the backing file path.
@@ -601,6 +648,11 @@ impl FileKernel {
         })
     }
 
+    /// Returns the file-format health report captured for this store.
+    pub fn health(&self) -> FileKernelHealth {
+        self.health
+    }
+
     /// Rewrites the backing JSONL log into the current canonical record format.
     pub fn compact(&mut self) -> Result<(), KernelError> {
         let manifests = self.index.list_manifests();
@@ -616,10 +668,12 @@ impl FileKernel {
         }
 
         let compacted_log = read_log_from_path(&temp_path)?;
+        let compacted_health = compacted_log.health;
         let compacted_index = FileKernelIndex::rebuild(compacted_log)?;
         fs::rename(&temp_path, &self.path).map_err(|_error| KernelError::StoreIo)?;
         sync_parent_directory(&self.path)?;
         self.index = compacted_index;
+        self.health = compacted_health;
         Ok(())
     }
 }
@@ -764,22 +818,29 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
                     .validate()
                     .map_err(|_error| corrupt_record(line_number))?;
                 log.has_header = true;
+                log.health.has_header = true;
+                log.health.compaction_recommended =
+                    log.health.legacy_raw_cells > 0 || log.health.checksum_free_records > 0;
                 seen_header = true;
             }
             Ok(FileKernelRecord::Cell { cell, checksum }) => {
                 seen_data = true;
+                record_file_health(&mut log.health, checksum.is_some());
                 validate_file_record_checksum(cell.as_ref(), checksum.as_deref())
                     .map_err(|_error| corrupt_record(line_number))?;
                 log.cells.push(*cell);
             }
             Ok(FileKernelRecord::Commit { manifest, checksum }) => {
                 seen_data = true;
+                record_file_health(&mut log.health, checksum.is_some());
                 validate_file_record_checksum(&manifest, checksum.as_deref())
                     .map_err(|_error| corrupt_record(line_number))?;
                 log.explicit_manifests.push(manifest);
             }
             Err(_record_error) => {
                 seen_data = true;
+                log.health.legacy_raw_cells += 1;
+                log.health.compaction_recommended = true;
                 log.cells.push(
                     serde_json::from_str(&line)
                         .map_err(|_cell_error| corrupt_record(line_number))?,
@@ -789,6 +850,15 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
     }
 
     Ok(log)
+}
+
+fn record_file_health(health: &mut FileKernelHealth, has_checksum: bool) {
+    if has_checksum {
+        health.canonical_records += 1;
+    } else {
+        health.checksum_free_records += 1;
+        health.compaction_recommended = true;
+    }
 }
 
 impl StorageKernel for FileKernel {
@@ -836,6 +906,7 @@ impl StorageKernel for FileKernel {
             return Err(KernelError::DuplicateCommit);
         }
 
+        let appended_canonical_records = stamped.len() + 1;
         let manifest = CommitManifest::new(
             commit_id,
             committed_at,
@@ -871,6 +942,7 @@ impl StorageKernel for FileKernel {
             self.index.insert(cell)?;
         }
         self.index.apply_explicit_manifest(manifest)?;
+        self.health.canonical_records += appended_canonical_records;
         Ok(())
     }
 
@@ -1198,6 +1270,120 @@ mod tests {
         assert_eq!(status.cell_count, 2);
         assert_eq!(status.commit_count, 1);
         assert!(status.file_size_bytes > 0);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_health_reports_new_store_as_canonical() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_kernel_path("continuitydb-file-kernel-health-new");
+        let kernel = FileKernel::open(&path)?;
+
+        let health = kernel.health();
+
+        assert!(health.has_header);
+        assert_eq!(health.legacy_raw_cells, 0);
+        assert_eq!(health.checksum_free_records, 0);
+        assert_eq!(health.canonical_records, 0);
+        assert!(!health.compaction_recommended);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_health_recommends_compaction_for_legacy_raw_cells(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-health-legacy");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:health-legacy", 0.91, 12)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
+        fs::write(&path, format!("{}\n", serde_json::to_string(&cell)?))?;
+
+        let kernel = FileKernel::open(&path)?;
+        let health = kernel.health();
+
+        assert!(!health.has_header);
+        assert_eq!(health.legacy_raw_cells, 1);
+        assert_eq!(health.checksum_free_records, 0);
+        assert_eq!(health.canonical_records, 0);
+        assert!(health.compaction_recommended);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_health_recommends_compaction_for_checksum_free_records(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-health-checksum-free");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:health-checksum-free", 0.91, 12)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
+        let manifest = continuitydb_core::CommitManifest {
+            commit_id,
+            committed_at,
+            cell_ids: vec![cell.id],
+        };
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n{}\n",
+                serde_json::json!({
+                    "type": "header",
+                    "format": "continuitydb.file_kernel",
+                    "version": 1
+                }),
+                serde_json::json!({
+                    "type": "cell",
+                    "cell": cell
+                }),
+                serde_json::json!({
+                    "type": "commit",
+                    "manifest": manifest
+                }),
+            ),
+        )?;
+
+        let kernel = FileKernel::open(&path)?;
+        let health = kernel.health();
+
+        assert!(health.has_header);
+        assert_eq!(health.legacy_raw_cells, 0);
+        assert_eq!(health.checksum_free_records, 2);
+        assert_eq!(health.canonical_records, 0);
+        assert!(health.compaction_recommended);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_compaction_updates_health_to_canonical(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-health-compact");
+        let committed_at = test_commit_time()?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:health-compact", 0.91, 12)?;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        cell.commit_id = commit_id;
+        fs::write(&path, format!("{}\n", serde_json::to_string(&cell)?))?;
+        let mut kernel = FileKernel::open(&path)?;
+
+        kernel.compact()?;
+        let health = kernel.health();
+
+        assert!(health.has_header);
+        assert_eq!(health.legacy_raw_cells, 0);
+        assert_eq!(health.checksum_free_records, 0);
+        assert_eq!(health.canonical_records, 2);
+        assert!(!health.compaction_recommended);
 
         fs::remove_file(path)?;
         Ok(())
