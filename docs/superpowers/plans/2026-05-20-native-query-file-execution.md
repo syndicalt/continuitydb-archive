@@ -215,7 +215,7 @@ git commit -m "feat: execute query files through native api"
 **Files:**
 - Modify: `crates/continuitydb-cli/src/main.rs`
 
-- [ ] **Step 1: Route checkout-query through native helper**
+- [x] **Step 1: Route checkout-query through native helper**
 
 Replace `checkout_query_file` with:
 
@@ -229,7 +229,7 @@ fn checkout_query_file(
 }
 ```
 
-- [ ] **Step 2: Remove CLI query decode imports**
+- [x] **Step 2: Remove CLI query decode imports**
 
 Change:
 
@@ -245,7 +245,7 @@ use continuitydb_query::ContinuityQuery;
 
 Delete the now-unused private `decode_query_file` and `is_query_envelope_shape` functions.
 
-- [ ] **Step 3: Verify CLI compatibility**
+- [x] **Step 3: Verify CLI compatibility**
 
 Run:
 
@@ -255,7 +255,7 @@ cargo test -p continuitydb-cli checkout_query --all-features
 
 Expected: PASS, including raw query JSON and versioned query envelope tests.
 
-- [ ] **Step 4: Commit CLI refactor**
+- [x] **Step 4: Commit CLI refactor**
 
 ```bash
 git add crates/continuitydb-cli/src/main.rs docs/superpowers/plans/2026-05-20-native-query-file-execution.md

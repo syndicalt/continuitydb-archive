@@ -12,7 +12,6 @@ use continuitydb_kernel::{
     CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements, StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
-use continuitydb_query::{decode_query_json, ContinuityQuery};
 use std::path::PathBuf;
 
 /// ContinuityDB command-line interface.
@@ -328,23 +327,7 @@ fn checkout_query_file(
     query_path: &PathBuf,
 ) -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::error::Error>> {
     let db = open_file_database(store_path)?;
-    let encoded = std::fs::read(query_path)?;
-    let query = decode_query_file(&encoded)?;
-    db.checkout_continuity_query(query).map_err(Into::into)
-}
-
-fn decode_query_file(bytes: &[u8]) -> Result<ContinuityQuery, Box<dyn std::error::Error>> {
-    if is_query_envelope_shape(bytes)? {
-        return decode_query_json(bytes).map_err(Into::into);
-    }
-    serde_json::from_slice::<ContinuityQuery>(bytes).map_err(Into::into)
-}
-
-fn is_query_envelope_shape(bytes: &[u8]) -> Result<bool, Box<dyn std::error::Error>> {
-    let value = serde_json::from_slice::<serde_json::Value>(bytes)?;
-    Ok(value.get("format").is_some()
-        && value.get("version").is_some()
-        && value.get("query").is_some())
+    db.checkout_query_file(query_path).map_err(Into::into)
 }
 
 fn demo_checkout() -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::error::Error>> {
