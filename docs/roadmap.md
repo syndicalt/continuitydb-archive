@@ -266,6 +266,7 @@ Storage kernel
 54. Add CLI local-model benchmark stability reporting. Added `benchmark-local-model --stability-trials` so operators can request repeated-run stability reports from the existing benchmark command, with dry-run preflight metadata and real-run JSON output that does not persist stability as a baseline.
 55. Add CLI local-model instability failure gating. Added `benchmark-local-model --fail-on-unstable` so repeated-run stability drift can fail before baseline recording, making low-temperature output instability usable as a CI gate for Steward model candidates.
 56. Add default local-model policy-rejection evaluation. Expanded the fixed Steward benchmark suite with a deterministic policy-rejection avoidance case so local model baselines test whether models request clarification instead of emitting policy-invalid answerability labels.
+57. Add CLI local-model fixed evaluation failure gating. Added `benchmark-local-model --fail-on-failed-cases` so current fixed-suite failures can exit non-zero before baseline recording, making proposal-quality failures usable as a CI gate separately from baseline regression checks.
 
 ## Small Embeddable Model Track
 

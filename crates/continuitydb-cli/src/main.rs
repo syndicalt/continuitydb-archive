@@ -18,12 +18,11 @@ use continuitydb_memory::MemoryKernel;
 use continuitydb_steward::{
     default_steward_evaluation_suite, local_model_prompt_fingerprint_for_suite,
     local_model_prompt_for_input, local_model_response_gbnf_grammar,
-    local_model_response_json_schema, record_local_model_benchmark_baseline_with_regression,
-    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
-    LocalExecutableRunnerConfig, LocalModelBenchmark, LocalModelBenchmarkBaseline,
-    LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression, LocalModelStabilityReport,
-    SmallModelCandidate, StewardAction, StewardEvaluationSuite, StewardIdentity,
-    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    local_model_response_json_schema, small_model_candidates, FileLocalModelBenchmarkBaselineStore,
+    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBenchmark,
+    LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression,
+    LocalModelStabilityReport, SmallModelCandidate, StewardAction, StewardEvaluationSuite,
+    StewardIdentity, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
@@ -75,6 +74,7 @@ struct LocalModelBenchmarkOptions<'a> {
     baseline_path: &'a Path,
     stability_trials: Option<usize>,
     fail_on_unstable: bool,
+    fail_on_failed_cases: bool,
     dry_run: bool,
     compare_baseline: bool,
     fail_on_regression: bool,
@@ -94,6 +94,13 @@ struct LocalModelPromptArtifact {
     prompt_path: PathBuf,
     prompt_fingerprint: String,
     prompt_bytes: usize,
+}
+
+#[cfg(feature = "local-model")]
+struct LocalModelBenchmarkDryRunGates {
+    baseline_preflight: Option<serde_json::Value>,
+    stability_preflight: Option<serde_json::Value>,
+    fail_on_failed_cases: bool,
 }
 
 /// Named kernel requirement profiles understood by the CLI.
@@ -260,6 +267,9 @@ enum Command {
         /// Exit non-zero before baseline recording when repeated stability trials drift.
         #[arg(long = "fail-on-unstable")]
         fail_on_unstable: bool,
+        /// Exit non-zero before baseline recording when fixed evaluation cases fail.
+        #[arg(long = "fail-on-failed-cases")]
+        fail_on_failed_cases: bool,
         /// Print benchmark configuration without executing the model or recording a baseline.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -464,6 +474,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             baseline_path,
             stability_trials,
             fail_on_unstable,
+            fail_on_failed_cases,
             dry_run,
             compare_baseline,
             fail_on_regression,
@@ -481,6 +492,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 baseline_path: &baseline_path,
                 stability_trials,
                 fail_on_unstable,
+                fail_on_failed_cases,
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
@@ -724,10 +736,13 @@ fn benchmark_local_model_json(
             options.baseline_path,
             contract_artifacts.as_ref(),
             &prompt_artifacts,
-            baseline_preflight,
-            options.stability_trials.map(|trials| {
-                local_model_stability_preflight_json(trials, options.fail_on_unstable)
-            }),
+            LocalModelBenchmarkDryRunGates {
+                baseline_preflight,
+                stability_preflight: options.stability_trials.map(|trials| {
+                    local_model_stability_preflight_json(trials, options.fail_on_unstable)
+                }),
+                fail_on_failed_cases: options.fail_on_failed_cases,
+            },
         ));
     }
 
@@ -744,23 +759,41 @@ fn benchmark_local_model_json(
         return Err(std::io::Error::other("local model benchmark stability check failed").into());
     }
 
-    let mut store = FileLocalModelBenchmarkBaselineStore::open(options.baseline_path)?;
-    let report = record_local_model_benchmark_baseline_with_regression(
-        &benchmark,
-        identity,
-        Utc::now(),
-        &mut store,
-    )?;
+    let current_baseline =
+        LocalModelBenchmarkBaseline::from_report(benchmark.run(identity), Utc::now());
+    if options.fail_on_failed_cases && !current_baseline.evaluation_summary().passed() {
+        return Err(
+            std::io::Error::other("local model benchmark fixed evaluation cases failed").into(),
+        );
+    }
 
-    if options.fail_on_regression && report.regressed() {
+    let mut store = FileLocalModelBenchmarkBaselineStore::open(options.baseline_path)?;
+    let previous = if options.compare_baseline {
+        continuitydb_steward::latest_compatible_local_model_benchmark_baseline(
+            &store,
+            &current_baseline,
+        )?
+    } else {
+        None
+    };
+    let regression = previous
+        .as_ref()
+        .map(|previous| LocalModelBenchmarkRegression::compare(previous, &current_baseline));
+
+    if options.fail_on_regression
+        && regression
+            .as_ref()
+            .is_some_and(LocalModelBenchmarkRegression::regressed)
+    {
         return Err(std::io::Error::other("local model benchmark regression detected").into());
     }
+    store.append_baseline(current_baseline.clone())?;
 
     Ok(local_model_benchmark_json(
         options.baseline_path,
         options.compare_baseline,
-        report.current_baseline(),
-        report.regression(),
+        &current_baseline,
+        regression.as_ref(),
         contract_artifacts.as_ref(),
         &prompt_artifacts,
         stability.as_ref(),
@@ -774,8 +807,7 @@ fn local_model_benchmark_dry_run_json(
     baseline_path: &Path,
     contract_artifacts: Option<&LocalModelContractArtifacts>,
     prompt_artifacts: &[LocalModelPromptArtifact],
-    baseline_preflight: Option<serde_json::Value>,
-    stability_preflight: Option<serde_json::Value>,
+    gates: LocalModelBenchmarkDryRunGates,
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
         "dry_run": true,
@@ -788,6 +820,7 @@ fn local_model_benchmark_dry_run_json(
         "schema_fingerprint": local_model_contract_fingerprint(local_model_response_json_schema()),
         "grammar_fingerprint": local_model_contract_fingerprint(local_model_response_gbnf_grammar()),
         "prompt_fingerprint": local_model_prompt_fingerprint_for_suite(&default_steward_evaluation_suite()),
+        "fail_on_failed_cases": gates.fail_on_failed_cases,
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
         "runtime": {
@@ -795,10 +828,10 @@ fn local_model_benchmark_dry_run_json(
             "arguments": config.command_arguments(),
         },
     });
-    if let Some(baseline_preflight) = baseline_preflight {
+    if let Some(baseline_preflight) = gates.baseline_preflight {
         value["baseline_preflight"] = baseline_preflight;
     }
-    if let Some(stability_preflight) = stability_preflight {
+    if let Some(stability_preflight) = gates.stability_preflight {
         value["stability_preflight"] = stability_preflight;
     }
     value
