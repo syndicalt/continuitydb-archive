@@ -2035,7 +2035,7 @@ fn write_workload_bundle_manifest(
 ) -> Result<WorkloadBundleManifest, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(artifact_dir)?;
     let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
-    let report_text = std::fs::read_to_string(report_path)?;
+    let report_text = workload_report_manifest_payload_text(report)?;
     let manifest = serde_json::json!({
         "format": "continuitydb.workload.bundle",
         "format_version": 1,
@@ -2068,6 +2068,14 @@ fn workload_bundle_manifest_json(manifest: &WorkloadBundleManifest) -> serde_jso
         "manifest_fingerprint": manifest.manifest_fingerprint,
         "manifest_bytes": manifest.manifest_bytes,
     })
+}
+
+fn workload_report_manifest_payload_text(
+    report: &serde_json::Value,
+) -> Result<String, serde_json::Error> {
+    let mut payload = report.clone();
+    payload["bundle_manifest"] = serde_json::Value::Null;
+    serde_json::to_string_pretty(&payload)
 }
 
 fn write_workload_artifact_bundle_report(
@@ -2366,6 +2374,19 @@ fn validate_workload_artifact_manifest(
 
     let report_text = std::fs::read_to_string(artifact_dir.join("workload-report.json"))?;
     let report: serde_json::Value = serde_json::from_str(&report_text)?;
+    let manifest_report_payload_text = workload_report_manifest_payload_text(&report)?;
+    let manifest_report_bytes = required_json_u64(&manifest, "workload_report_bytes")?;
+    if manifest_report_bytes != manifest_report_payload_text.len() as u64 {
+        return Err(std::io::Error::other("workload artifact manifest byte count mismatch").into());
+    }
+    let manifest_report_fingerprint =
+        required_json_string(&manifest, "workload_report_fingerprint")?;
+    let current_report_fingerprint = fnv1a64_fingerprint(&manifest_report_payload_text);
+    if manifest_report_fingerprint != current_report_fingerprint {
+        return Err(
+            std::io::Error::other("workload artifact manifest fingerprint mismatch").into(),
+        );
+    }
     validate_workload_manifest_report_content(&manifest, &report)?;
 
     Ok(WorkloadBundleManifest {

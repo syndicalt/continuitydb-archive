@@ -21,6 +21,32 @@ use std::{fs, path::PathBuf};
 #[cfg(all(feature = "local-model", unix))]
 use std::os::unix::fs::PermissionsExt;
 
+fn test_fnv1a64_fingerprint(text: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
+}
+
+fn refresh_workload_manifest_report_metadata(
+    artifact_dir: &std::path::Path,
+    report: &Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut canonical_report = report.clone();
+    canonical_report["bundle_manifest"] = Value::Null;
+    let canonical_report_text = serde_json::to_string_pretty(&canonical_report)?;
+
+    let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["workload_report_bytes"] = Value::from(canonical_report_text.len());
+    manifest["workload_report_fingerprint"] =
+        Value::from(test_fnv1a64_fingerprint(&canonical_report_text));
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    Ok(())
+}
+
 #[test]
 fn cli_reports_version() -> Result<(), Box<dyn std::error::Error>> {
     let mut command = Command::cargo_bin("continuitydb")?;
@@ -727,6 +753,94 @@ fn cli_replay_workload_require_manifest_rejects_fixture_byte_count_mismatch(
 }
 
 #[test]
+fn cli_replay_workload_require_manifest_rejects_report_byte_count_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-manifest-report-bytes-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["workload_report_bytes"] = Value::from(1);
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest byte count mismatch"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[test]
+fn cli_replay_workload_require_manifest_rejects_report_fingerprint_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-manifest-report-fingerprint-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+
+    let manifest_path = artifact_dir.join("continuitydb-workload.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["workload_report_fingerprint"] = Value::from("fnv1a64:0000000000000000");
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--require-manifest")
+        .assert()
+        .failure()
+        .stderr(contains("workload artifact manifest fingerprint mismatch"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[test]
 fn cli_replay_workload_require_manifest_rejects_report_content_mismatch(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let artifact_dir = std::env::temp_dir().join(format!(
@@ -754,6 +868,7 @@ fn cli_replay_workload_require_manifest_rejects_report_content_mismatch(
     let mut report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
     report["workload"]["cell_count"] = Value::from(7);
     fs::write(&report_path, serde_json::to_string_pretty(&report)?)?;
+    refresh_workload_manifest_report_metadata(&artifact_dir, &report)?;
 
     Command::cargo_bin("continuitydb")?
         .arg("replay-workload")
@@ -806,6 +921,7 @@ fn cli_replay_workload_require_manifest_reports_lookup_plan_content_mismatch_key
     let mut report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
     report["lookup_plan"]["candidate_selectivity_basis_points"] = Value::from(1);
     fs::write(&report_path, serde_json::to_string_pretty(&report)?)?;
+    refresh_workload_manifest_report_metadata(&artifact_dir, &report)?;
 
     Command::cargo_bin("continuitydb")?
         .arg("replay-workload")

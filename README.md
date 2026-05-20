@@ -18,6 +18,7 @@ The first milestone builds:
 - File workload lookup-plan baseline regression detection.
 - CLI workload artifact bundle directory.
 - CLI workload report artifact metadata.
+- CLI workload report artifact metadata validation.
 - CLI workload replay fixture artifacts.
 - CLI workload artifact replay.
 - CLI workload replay comparison gate.
