@@ -255,6 +255,7 @@ dependencies = [
 name = "continuitydb-revision"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "continuitydb-core",
  "serde",
 ]

@@ -71,6 +71,7 @@ Storage kernel
 ## Utility Feedback Milestones
 
 1. Add first-class StateCell utility feedback primitives. Implemented as bounded relevance, recency, and decision-impact scores in `continuitydb-core`, with neutral defaults for new and previously serialized cells.
+2. Add append-only utility feedback revision. Implemented in `continuitydb-revision` as a deterministic helper that creates a successor `StateCell` version and records supersession/predecessor links to the prior version.
 
 ## CLI Milestones
 
