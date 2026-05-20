@@ -27,6 +27,8 @@ pub struct CheckoutRequest {
     pub scope: Option<Scope>,
     /// Optional valid-time filter.
     pub valid_at: Option<DateTime<Utc>>,
+    /// Optional system transaction-time filter.
+    pub system_at: Option<DateTime<Utc>>,
     /// Optional exact answerability question filter.
     pub answerability_question: Option<String>,
     /// Optional exact evidence-source filter.
@@ -114,6 +116,7 @@ pub fn checkout<K: StorageKernel>(
         semantic_anchor: None,
         scope: request.scope,
         valid_at: request.valid_at,
+        system_at: request.system_at,
         answerability_question: request.answerability_question,
         evidence_source: request.evidence_source,
         dependency_target: request.dependency_target,
@@ -319,6 +322,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: Some("what is frontier?".to_string()),
                 evidence_source: Some("human".to_string()),
                 dependency_target: None,
@@ -356,6 +360,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: None,
                 evidence_source: None,
                 dependency_target: Some(target),
@@ -376,6 +381,34 @@ mod tests {
     }
 
     #[test]
+    fn checkout_pushes_system_time_to_kernel() -> Result<(), Box<dyn std::error::Error>> {
+        let kernel = RecordingKernel::default();
+        let system_at = test_commit_time()?;
+        checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: None,
+                valid_at: None,
+                system_at: Some(system_at),
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.8)?,
+                token_budget: 10,
+            },
+        )?;
+
+        let lookup = kernel
+            .lookup
+            .borrow()
+            .clone()
+            .ok_or_else(|| std::io::Error::other("lookup was not captured"))?;
+        assert_eq!(lookup.system_at, Some(system_at));
+        Ok(())
+    }
+
+    #[test]
     fn checkout_respects_token_budget_and_confidence() -> Result<(), Box<dyn std::error::Error>> {
         let mut kernel = MemoryKernel::default();
         let high = sample_cell("project:continuitydb:high", 0.95, 10)?;
@@ -388,6 +421,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: None,
                 evidence_source: None,
                 dependency_target: None,
@@ -399,6 +433,53 @@ mod tests {
 
         assert_eq!(slice.cells, vec![high]);
         assert_eq!(slice.total_tokens, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_filters_by_system_time() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let committed_at = test_commit_time()?;
+        let before_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 11, 59, 59)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let cell = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:system-checkout", 0.95, 10)?,
+        )?;
+
+        let historical = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                system_at: Some(before_commit),
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 10,
+            },
+        )?;
+        let current = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                system_at: Some(committed_at),
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 10,
+            },
+        )?;
+
+        assert!(historical.cells.is_empty());
+        assert_eq!(current.cells, vec![cell]);
         Ok(())
     }
 
@@ -430,6 +511,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: None,
                 evidence_source: None,
                 dependency_target: None,
@@ -480,6 +562,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: None,
                 evidence_source: None,
                 dependency_target: Some(target),
@@ -519,6 +602,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: Some("what is frontier?".to_string()),
                 evidence_source: None,
                 dependency_target: None,
@@ -558,6 +642,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: None,
                 evidence_source: Some("human".to_string()),
                 dependency_target: None,
@@ -587,6 +672,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: None,
                 evidence_source: None,
                 dependency_target: None,
@@ -633,6 +719,7 @@ mod tests {
             CheckoutRequest {
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
+                system_at: None,
                 answerability_question: None,
                 evidence_source: None,
                 dependency_target: None,
