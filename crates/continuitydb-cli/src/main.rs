@@ -21,8 +21,8 @@ use continuitydb_steward::{
     local_model_response_json_schema, small_model_candidates, FileLocalModelBenchmarkBaselineStore,
     LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkRegression,
-    LocalModelStabilityReport, SmallModelCandidate, StewardAction, StewardEvaluationSuite,
-    StewardIdentity, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    LocalModelStabilityReport, SmallModelCandidate, StewardAction, StewardEvaluationCaseResponse,
+    StewardEvaluationSuite, StewardIdentity, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 use continuitydb_workload::{
     compare_workload_snapshot_to_baseline, generate_world_model_workload,
@@ -70,6 +70,7 @@ struct LocalModelBenchmarkOptions<'a> {
     grammar_path: Option<&'a Path>,
     contract_dir: Option<&'a Path>,
     prompt_dir: Option<&'a Path>,
+    response_dir: Option<&'a Path>,
     enforce_candidate_requirements: bool,
     baseline_path: &'a Path,
     stability_trials: Option<usize>,
@@ -95,6 +96,22 @@ struct LocalModelPromptArtifact {
     prompt_path: PathBuf,
     prompt_fingerprint: String,
     prompt_bytes: usize,
+}
+
+#[cfg(feature = "local-model")]
+struct LocalModelResponseArtifact {
+    case_name: String,
+    captured: bool,
+    response_path: Option<PathBuf>,
+    response_fingerprint: Option<String>,
+    response_bytes: usize,
+}
+
+#[cfg(feature = "local-model")]
+struct LocalModelBenchmarkArtifacts<'a> {
+    contract: Option<&'a LocalModelContractArtifacts>,
+    prompts: &'a [LocalModelPromptArtifact],
+    responses: &'a [LocalModelResponseArtifact],
 }
 
 #[cfg(feature = "local-model")]
@@ -257,6 +274,9 @@ enum Command {
         /// Directory where benchmark-local Steward evaluation prompts are written.
         #[arg(long = "prompt-dir")]
         prompt_dir: Option<PathBuf>,
+        /// Directory where real benchmark raw model responses are written.
+        #[arg(long = "response-dir")]
+        response_dir: Option<PathBuf>,
         /// Reject benchmark configurations that violate selected candidate requirements.
         #[arg(long = "enforce-candidate-requirements")]
         enforce_candidate_requirements: bool,
@@ -478,6 +498,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             grammar_path,
             contract_dir,
             prompt_dir,
+            response_dir,
             enforce_candidate_requirements,
             baseline_path,
             stability_trials,
@@ -498,6 +519,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 grammar_path: grammar_path.as_deref(),
                 contract_dir: contract_dir.as_deref(),
                 prompt_dir: prompt_dir.as_deref(),
+                response_dir: response_dir.as_deref(),
                 enforce_candidate_requirements,
                 baseline_path: &baseline_path,
                 stability_trials,
@@ -750,6 +772,7 @@ fn benchmark_local_model_json(
             options.baseline_path,
             contract_artifacts.as_ref(),
             &prompt_artifacts,
+            &[],
             LocalModelBenchmarkDryRunGates {
                 baseline_preflight,
                 stability_preflight: options.stability_trials.map(|trials| {
@@ -774,8 +797,17 @@ fn benchmark_local_model_json(
         return Err(std::io::Error::other("local model benchmark stability check failed").into());
     }
 
-    let current_baseline =
-        LocalModelBenchmarkBaseline::from_report(benchmark.run(identity), Utc::now());
+    let (report, responses) = if options.response_dir.is_some() {
+        benchmark.run_with_responses(identity)
+    } else {
+        (benchmark.run(identity), Vec::new())
+    };
+    let response_artifacts = options
+        .response_dir
+        .map(|response_dir| write_local_model_response_artifacts(response_dir, &responses))
+        .transpose()?
+        .unwrap_or_default();
+    let current_baseline = LocalModelBenchmarkBaseline::from_report(report, Utc::now());
     if options.fail_on_failed_cases && !current_baseline.evaluation_summary().passed() {
         if let Some(report_path) = options.failure_report_path {
             let report = local_model_benchmark_json(
@@ -783,8 +815,11 @@ fn benchmark_local_model_json(
                 options.compare_baseline,
                 &current_baseline,
                 None,
-                contract_artifacts.as_ref(),
-                &prompt_artifacts,
+                LocalModelBenchmarkArtifacts {
+                    contract: contract_artifacts.as_ref(),
+                    prompts: &prompt_artifacts,
+                    responses: &response_artifacts,
+                },
                 stability.as_ref(),
             );
             write_pretty_json_file(report_path, &report)?;
@@ -821,8 +856,11 @@ fn benchmark_local_model_json(
         options.compare_baseline,
         &current_baseline,
         regression.as_ref(),
-        contract_artifacts.as_ref(),
-        &prompt_artifacts,
+        LocalModelBenchmarkArtifacts {
+            contract: contract_artifacts.as_ref(),
+            prompts: &prompt_artifacts,
+            responses: &response_artifacts,
+        },
         stability.as_ref(),
     ))
 }
@@ -834,6 +872,7 @@ fn local_model_benchmark_dry_run_json(
     baseline_path: &Path,
     contract_artifacts: Option<&LocalModelContractArtifacts>,
     prompt_artifacts: &[LocalModelPromptArtifact],
+    response_artifacts: &[LocalModelResponseArtifact],
     gates: LocalModelBenchmarkDryRunGates,
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
@@ -854,6 +893,7 @@ fn local_model_benchmark_dry_run_json(
             .map(|path| path.display().to_string()),
         "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
         "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
+        "response_artifacts": local_model_response_artifacts_json(response_artifacts),
         "runtime": {
             "executable": config.executable().display().to_string(),
             "arguments": config.command_arguments(),
@@ -1058,6 +1098,64 @@ fn local_model_prompt_artifacts_json(
 }
 
 #[cfg(feature = "local-model")]
+fn write_local_model_response_artifacts(
+    response_dir: &Path,
+    responses: &[StewardEvaluationCaseResponse],
+) -> Result<Vec<LocalModelResponseArtifact>, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(response_dir)?;
+    responses
+        .iter()
+        .enumerate()
+        .map(|(index, response)| {
+            if let Some(raw_response) = response.response() {
+                let filename = format!(
+                    "{:03}-{}.response.json",
+                    index + 1,
+                    local_model_prompt_filename_slug(response.case_name())
+                );
+                let response_path = response_dir.join(filename);
+                std::fs::write(&response_path, raw_response)?;
+                Ok(LocalModelResponseArtifact {
+                    case_name: response.case_name().to_string(),
+                    captured: true,
+                    response_path: Some(response_path),
+                    response_fingerprint: Some(local_model_contract_fingerprint(raw_response)),
+                    response_bytes: response.response_bytes(),
+                })
+            } else {
+                Ok(LocalModelResponseArtifact {
+                    case_name: response.case_name().to_string(),
+                    captured: false,
+                    response_path: None,
+                    response_fingerprint: None,
+                    response_bytes: 0,
+                })
+            }
+        })
+        .collect()
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_response_artifacts_json(
+    response_artifacts: &[LocalModelResponseArtifact],
+) -> serde_json::Value {
+    serde_json::Value::Array(
+        response_artifacts
+            .iter()
+            .map(|artifact| {
+                serde_json::json!({
+                    "case_name": artifact.case_name,
+                    "captured": artifact.captured,
+                    "response_path": artifact.response_path.as_ref().map(|path| path.display().to_string()),
+                    "response_fingerprint": artifact.response_fingerprint,
+                    "response_bytes": artifact.response_bytes,
+                })
+            })
+            .collect(),
+    )
+}
+
+#[cfg(feature = "local-model")]
 fn local_model_candidate(
     candidate_id: &str,
 ) -> Result<SmallModelCandidate, Box<dyn std::error::Error>> {
@@ -1074,8 +1172,7 @@ fn local_model_benchmark_json(
     compared: bool,
     baseline: &LocalModelBenchmarkBaseline,
     regression: Option<&LocalModelBenchmarkRegression>,
-    contract_artifacts: Option<&LocalModelContractArtifacts>,
-    prompt_artifacts: &[LocalModelPromptArtifact],
+    artifacts: LocalModelBenchmarkArtifacts<'_>,
     stability: Option<&LocalModelStabilityReport>,
 ) -> serde_json::Value {
     let summary = baseline.evaluation_summary();
@@ -1095,8 +1192,9 @@ fn local_model_benchmark_json(
         "schema_fingerprint": baseline.schema_fingerprint(),
         "grammar_fingerprint": baseline.grammar_fingerprint(),
         "prompt_fingerprint": baseline.prompt_fingerprint(),
-        "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
-        "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
+        "contract_artifacts": local_model_contract_artifacts_json(artifacts.contract),
+        "prompt_artifacts": local_model_prompt_artifacts_json(artifacts.prompts),
+        "response_artifacts": local_model_response_artifacts_json(artifacts.responses),
         "runtime": {
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),

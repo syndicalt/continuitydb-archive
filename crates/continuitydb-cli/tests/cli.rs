@@ -616,6 +616,75 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     Ok(())
 }
 
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_benchmark_local_model_response_dir_writes_response_artifacts(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-response-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-response-baseline");
+    let response_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-response-dir-{}",
+        std::process::id()
+    ));
+    if response_dir.exists() {
+        fs::remove_dir_all(&response_dir)?;
+    }
+    let script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]},{"action":{"type":"link_revision","source":"00000000-0000-0000-0000-000000000004","kind":"supersedes","target":"00000000-0000-0000-0000-000000000005"},"rationale":"The newer evidence supersedes the older status without contradicting it.","citations":["continuitydb://evaluation/supersession-evidence"]},{"action":{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]},{"action":{"type":"adjust_confidence","cell_id":"00000000-0000-0000-0000-000000000006","proposed_confidence":0.42},"rationale":"The cited evidence lowers confidence in the stale deployment status.","citations":["continuitydb://evaluation/confidence-evidence"]},{"action":{"type":"request_verification","cell_id":"00000000-0000-0000-0000-000000000007","request":"Refresh the stale high-impact frontier signal."},"rationale":"The stale high-impact frontier signal needs a refresh from current evidence.","citations":["continuitydb://evaluation/targeted-verification-evidence"]},{"action":{"type":"create_cell_draft","anchors":["project:continuitydb:benchmark-result"],"payload_text":"ContinuityDB local Steward benchmark produced a new result requiring review."},"rationale":"The new benchmark evidence supports drafting a StateCell for review.","citations":["continuitydb://evaluation/new-benchmark-evidence"]},{"action":{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]},{"action":{"type":"request_verification","cell_id":null,"request":"Ask for a concrete answerability question before labeling the cell."},"rationale":"The answerability label input is invalid because it has no concrete question.","citations":["continuitydb://evaluation/invalid-answerability-label"]}]}'
+"#;
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--response-dir")
+        .arg(&response_dir)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let artifacts = json["response_artifacts"]
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("missing response artifacts"))?;
+
+    assert_eq!(artifacts.len(), 9);
+    assert_eq!(
+        artifacts[0]["case_name"].as_str(),
+        Some("insufficient evidence uncertainty")
+    );
+    assert_eq!(artifacts[0]["captured"].as_bool(), Some(true));
+    assert!(artifacts[0]["response_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(artifacts[0]["response_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    let first_response_path = artifacts[0]["response_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing response path"))?;
+    let first_response = fs::read_to_string(first_response_path)?;
+    assert!(first_response.contains("Gather additional source evidence."));
+    assert!(first_response.contains("continuitydb://evaluation/thin-evidence"));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(response_dir)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_benchmark_local_model_failure_report_path_dry_run_reports_gate(

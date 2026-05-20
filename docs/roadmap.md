@@ -273,6 +273,7 @@ Storage kernel
 61. Add default local-model targeted-verification evaluation. Expanded the fixed Steward benchmark suite with a deterministic targeted `RequestVerification` case so local model baselines test whether refresh requests preserve the specific stale high-impact StateCell identity.
 62. Add default local-model create-cell-draft evaluation. Expanded the fixed Steward benchmark suite with a deterministic `CreateCellDraft` case so local model baselines test whether new evidence becomes a draft proposal rather than an un-audited truth mutation.
 63. Add CLI local-model benchmark report artifacts. Added `benchmark-local-model --report-path` so successful real runs and dry-run preflights can write the same structured JSON printed to stdout into a durable artifact for CI and reproducible local model trials.
+64. Add CLI local-model benchmark response artifacts. Added `benchmark-local-model --response-dir` so real benchmark runs can persist raw per-case model stdout and report captured response artifact metadata for debugging local Steward model failures.
 
 ## Small Embeddable Model Track
 

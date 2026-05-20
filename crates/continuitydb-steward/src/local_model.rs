@@ -502,9 +502,22 @@ where
         input: LocalModelStewardInput,
     ) -> Result<Vec<StewardProposal>, StewardError> {
         let created_at = input.created_at;
-        let request = LocalModelRequest::from_input(&input);
-        let response = self.backend.infer(request)?;
+        let response = self.raw_response(input)?;
         decode_response(&response, self.identity.clone(), created_at)
+    }
+
+    /// Runs local model inference and returns the raw backend response.
+    pub fn raw_response(&self, input: LocalModelStewardInput) -> Result<String, StewardError> {
+        let request = LocalModelRequest::from_input(&input);
+        self.backend.infer(request)
+    }
+
+    fn decode_raw_response(
+        &self,
+        input: &LocalModelStewardInput,
+        response: &str,
+    ) -> Result<Vec<StewardProposal>, StewardError> {
+        decode_response(response, self.identity.clone(), input.created_at)
     }
 }
 
@@ -709,6 +722,69 @@ impl StewardEvaluationSuite {
             .collect();
 
         StewardEvaluationReport { case_reports }
+    }
+
+    /// Evaluates all cases while preserving raw local model responses.
+    pub fn evaluate_with_responses<B>(
+        &self,
+        steward: &LocalModelSteward<B>,
+    ) -> (StewardEvaluationReport, Vec<StewardEvaluationCaseResponse>)
+    where
+        B: LocalModelBackend,
+    {
+        let evaluated: Vec<(StewardEvaluationCaseReport, StewardEvaluationCaseResponse)> = self
+            .cases
+            .iter()
+            .map(|case| evaluate_case_with_response(case, steward))
+            .collect();
+        let case_reports = evaluated
+            .iter()
+            .map(|(report, _response)| report.clone())
+            .collect();
+        let responses = evaluated
+            .into_iter()
+            .map(|(_report, response)| response)
+            .collect();
+
+        (StewardEvaluationReport { case_reports }, responses)
+    }
+}
+
+/// Raw response captured while evaluating one local Steward model case.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StewardEvaluationCaseResponse {
+    case_name: String,
+    response: Option<String>,
+}
+
+impl StewardEvaluationCaseResponse {
+    fn captured(case_name: String, response: String) -> Self {
+        Self {
+            case_name,
+            response: Some(response),
+        }
+    }
+
+    fn missing(case_name: String) -> Self {
+        Self {
+            case_name,
+            response: None,
+        }
+    }
+
+    /// Returns the evaluated case name.
+    pub fn case_name(&self) -> &str {
+        &self.case_name
+    }
+
+    /// Returns the raw model response when inference produced one.
+    pub fn response(&self) -> Option<&str> {
+        self.response.as_deref()
+    }
+
+    /// Returns the raw response byte length, or zero when no response was captured.
+    pub fn response_bytes(&self) -> usize {
+        self.response.as_ref().map_or(0, String::len)
     }
 }
 
@@ -1187,6 +1263,31 @@ impl LocalModelBenchmark {
             runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
             evaluation: self.suite.evaluate(&steward),
         }
+    }
+
+    /// Runs the benchmark suite and returns raw per-case model responses.
+    pub fn run_with_responses(
+        &self,
+        identity: StewardIdentity,
+    ) -> (
+        LocalModelBenchmarkReport,
+        Vec<StewardEvaluationCaseResponse>,
+    ) {
+        let steward = LocalModelSteward::new(identity, self.runner.clone());
+        let (evaluation, responses) = self.suite.evaluate_with_responses(&steward);
+        (
+            LocalModelBenchmarkReport {
+                candidate: self.candidate,
+                response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+                evaluation_suite_fingerprint: self.suite.fingerprint(),
+                schema_fingerprint: fingerprint_text(local_model_response_json_schema()),
+                grammar_fingerprint: fingerprint_text(local_model_response_gbnf_grammar()),
+                prompt_fingerprint: prompt_fingerprint_for_suite(&self.suite),
+                runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
+                evaluation,
+            },
+            responses,
+        )
     }
 
     /// Re-runs each benchmark case and reports whether decoded proposal output is stable.
@@ -1986,16 +2087,51 @@ fn evaluate_case<B>(
 where
     B: LocalModelBackend,
 {
-    let mut failures = Vec::new();
-    let proposals = match steward.propose(case.input.clone()) {
-        Ok(proposals) => proposals,
+    evaluate_case_with_response(case, steward).0
+}
+
+fn evaluate_case_with_response<B>(
+    case: &StewardEvaluationCase,
+    steward: &LocalModelSteward<B>,
+) -> (StewardEvaluationCaseReport, StewardEvaluationCaseResponse)
+where
+    B: LocalModelBackend,
+{
+    let response = match steward.raw_response(case.input.clone()) {
+        Ok(response) => response,
         Err(_error) => {
-            return StewardEvaluationCaseReport {
-                name: case.name.clone(),
-                failures: vec![StewardEvaluationFailure::ModelError],
-            };
+            return (
+                StewardEvaluationCaseReport {
+                    name: case.name.clone(),
+                    failures: vec![StewardEvaluationFailure::ModelError],
+                },
+                StewardEvaluationCaseResponse::missing(case.name.clone()),
+            );
         }
     };
+    let proposals = match steward.decode_raw_response(&case.input, &response) {
+        Ok(proposals) => proposals,
+        Err(_error) => {
+            return (
+                StewardEvaluationCaseReport {
+                    name: case.name.clone(),
+                    failures: vec![StewardEvaluationFailure::ModelError],
+                },
+                StewardEvaluationCaseResponse::captured(case.name.clone(), response),
+            );
+        }
+    };
+    (
+        evaluate_case_proposals(case, &proposals),
+        StewardEvaluationCaseResponse::captured(case.name.clone(), response),
+    )
+}
+
+fn evaluate_case_proposals(
+    case: &StewardEvaluationCase,
+    proposals: &[StewardProposal],
+) -> StewardEvaluationCaseReport {
+    let mut failures = Vec::new();
 
     for expected in &case.expected_actions {
         if proposals
@@ -2021,7 +2157,7 @@ where
     }
 
     let policy = ProposalPolicy::strict();
-    for proposal in &proposals {
+    for proposal in proposals {
         let decision = policy.evaluate(proposal, proposal.created_at());
         if decision.outcome() == ProposalOutcome::Rejected {
             failures.push(StewardEvaluationFailure::PolicyRejected {

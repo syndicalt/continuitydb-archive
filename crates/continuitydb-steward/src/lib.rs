@@ -35,8 +35,9 @@ pub use local_model::{
     LocalModelRuntimeManifest, LocalModelStabilityCaseReport, LocalModelStabilityReport,
     LocalModelSteward, LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore,
     MistralRsRuntimeProfile, SmallModelCandidate, StewardEvaluationCase,
-    StewardEvaluationCaseReport, StewardEvaluationFailure, StewardEvaluationReport,
-    StewardEvaluationSuite, StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    StewardEvaluationCaseReport, StewardEvaluationCaseResponse, StewardEvaluationFailure,
+    StewardEvaluationReport, StewardEvaluationSuite, StewardEvaluationSummary,
+    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -1439,6 +1440,52 @@ mod tests {
         assert_eq!(base.fingerprint(), same.fingerprint());
         assert_ne!(base.fingerprint(), changed.fingerprint());
         assert!(base.fingerprint().starts_with("fnv1a64:"));
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_suite_captures_raw_case_responses(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "request_verification",
+                    "cell_id": cell_id,
+                    "request": "Gather additional source evidence."
+                },
+                "rationale": "The evidence is uncertain and needs another source.",
+                "citations": ["test://thin-evidence"]
+            }]
+        })
+        .to_string();
+        let steward =
+            LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response.clone()));
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "capture raw response",
+            created_at(),
+            "explain uncertainty",
+        )
+        .with_evidence(
+            "test://thin-evidence",
+            "One weak source mentions the claim.",
+        )
+        .expect_action(StewardAction::RequestVerification {
+            cell_id: Some(cell_id),
+            request: "Gather additional source evidence.".to_string(),
+        })
+        .require_citation("test://thin-evidence")
+        .require_rationale_term("uncertain")]);
+
+        let (report, responses) = suite.evaluate_with_responses(&steward);
+
+        assert!(report.passed());
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].case_name(), "capture raw response");
+        assert_eq!(responses[0].response(), Some(response.as_str()));
+        assert_eq!(responses[0].response_bytes(), response.len());
+        assert_eq!(steward.backend().requests.borrow().len(), 1);
+        Ok(())
     }
 
     #[cfg(feature = "local-model")]

@@ -108,6 +108,7 @@ The first milestone builds:
 - CLI local model contract fingerprints.
 - Durable local model contract fingerprints.
 - Durable local model prompt fingerprints.
+- CLI local model benchmark response artifact directory.
 - Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.
