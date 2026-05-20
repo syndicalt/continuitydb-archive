@@ -411,6 +411,67 @@ fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn cli_import_commits_dry_run_validates_without_mutation() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source_path = temp_store_path("continuitydb-cli-dry-run-source");
+    let target_path = temp_store_path("continuitydb-cli-dry-run-target");
+    let backup_path = temp_store_path("continuitydb-cli-dry-run-backup");
+    write_committed_store(&source_path, "project:continuitydb:cli-dry-run")?;
+    Command::cargo_bin("continuitydb")?
+        .arg("export-commits")
+        .arg(&source_path)
+        .arg(&backup_path)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("import-commits")
+        .arg(&target_path)
+        .arg(&backup_path)
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let target_batch = ContinuityDb::new(FileKernel::open(&target_path)?)
+        .export_commits(CommitManifestLookup::default())?;
+
+    assert_eq!(json["path"].as_str(), target_path.to_str());
+    assert_eq!(json["input"].as_str(), backup_path.to_str());
+    assert_eq!(json["dry_run"].as_bool(), Some(true));
+    assert_eq!(json["valid_commits"].as_u64(), Some(1));
+    assert!(json["imported_commits"].is_null());
+    assert_eq!(target_batch.slices.len(), 0);
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(target_path)?;
+    fs::remove_file(backup_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_import_commits_dry_run_fails_for_invalid_envelope() -> Result<(), Box<dyn std::error::Error>>
+{
+    let target_path = temp_store_path("continuitydb-cli-dry-run-invalid-target");
+    let backup_path = temp_store_path("continuitydb-cli-dry-run-invalid-backup");
+    fs::write(&backup_path, "{not valid json}\n")?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("import-commits")
+        .arg(&target_path)
+        .arg(&backup_path)
+        .arg("--dry-run")
+        .assert()
+        .failure();
+
+    let _ = fs::remove_file(target_path);
+    fs::remove_file(backup_path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_import_commits_fails_for_invalid_envelope() -> Result<(), Box<dyn std::error::Error>> {
     let target_path = temp_store_path("continuitydb-cli-import-invalid-target");
     let backup_path = temp_store_path("continuitydb-cli-import-invalid-backup");

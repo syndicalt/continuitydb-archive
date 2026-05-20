@@ -76,6 +76,9 @@ enum Command {
         store_path: PathBuf,
         /// Path to read the versioned JSON commit export envelope from.
         input_path: PathBuf,
+        /// Validate the import without mutating the target store.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
 }
 
@@ -164,14 +167,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::ImportCommits {
             store_path,
             input_path,
+            dry_run,
         }) => {
             let mut db = open_file_database(&store_path)?;
-            let imported_commits = db.import_commits_json_file(&input_path)?;
-            let output = serde_json::json!({
-                "path": store_path.display().to_string(),
-                "input": input_path.display().to_string(),
-                "imported_commits": imported_commits,
-            });
+            let output = if dry_run {
+                let validation = db.validate_commits_json_file(&input_path)?;
+                serde_json::json!({
+                    "path": store_path.display().to_string(),
+                    "input": input_path.display().to_string(),
+                    "dry_run": true,
+                    "valid_commits": validation.valid_commits,
+                })
+            } else {
+                let imported_commits = db.import_commits_json_file(&input_path)?;
+                serde_json::json!({
+                    "path": store_path.display().to_string(),
+                    "input": input_path.display().to_string(),
+                    "imported_commits": imported_commits,
+                })
+            };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         None => {}
