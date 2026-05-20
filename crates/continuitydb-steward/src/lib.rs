@@ -1171,6 +1171,22 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn small_model_candidates_expose_runtime_metadata() {
+        let candidates = small_model_candidates();
+
+        assert!(candidates.iter().all(|candidate| {
+            !candidate.recommended_runtime().is_empty()
+                && !candidate.artifact_format().is_empty()
+                && candidate.requires_grammar()
+                && !candidate.notes().is_empty()
+        }));
+        assert_eq!(candidates[0].recommended_runtime(), "llama.cpp");
+        assert_eq!(candidates[0].artifact_format(), "GGUF");
+        assert_eq!(candidates[0].recommended_temperature(), 0.0);
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn local_model_response_json_schema_describes_steward_proposals(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let schema: serde_json::Value = serde_json::from_str(local_model_response_json_schema())?;

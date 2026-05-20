@@ -841,6 +841,11 @@ pub enum StewardEvaluationFailure {
 pub struct SmallModelCandidate {
     model_id: &'static str,
     role: &'static str,
+    recommended_runtime: &'static str,
+    artifact_format: &'static str,
+    recommended_temperature_millis: u16,
+    requires_grammar: bool,
+    notes: &'static str,
 }
 
 impl SmallModelCandidate {
@@ -853,6 +858,31 @@ impl SmallModelCandidate {
     pub fn role(&self) -> &'static str {
         self.role
     }
+
+    /// Returns the recommended local inference runtime for this candidate.
+    pub fn recommended_runtime(&self) -> &'static str {
+        self.recommended_runtime
+    }
+
+    /// Returns the expected local model artifact format.
+    pub fn artifact_format(&self) -> &'static str {
+        self.artifact_format
+    }
+
+    /// Returns the recommended benchmark temperature for stable proposal output.
+    pub fn recommended_temperature(&self) -> f32 {
+        f32::from(self.recommended_temperature_millis) / 1000.0
+    }
+
+    /// Returns whether this candidate should be run with the Steward grammar.
+    pub fn requires_grammar(&self) -> bool {
+        self.requires_grammar
+    }
+
+    /// Returns operational notes for evaluating this candidate.
+    pub fn notes(&self) -> &'static str {
+        self.notes
+    }
 }
 
 /// Returns the fixed small model candidates for Steward evaluation.
@@ -861,18 +891,38 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
         SmallModelCandidate {
             model_id: "Qwen/Qwen2.5-0.5B-Instruct",
             role: "default-feasibility",
+            recommended_runtime: "llama.cpp",
+            artifact_format: "GGUF",
+            recommended_temperature_millis: 0,
+            requires_grammar: true,
+            notes: "Smallest default feasibility candidate; evaluate first with grammar-constrained JSON output.",
         },
         SmallModelCandidate {
             model_id: "Qwen/Qwen3-0.6B",
             role: "current-reasoning",
+            recommended_runtime: "llama.cpp",
+            artifact_format: "GGUF",
+            recommended_temperature_millis: 0,
+            requires_grammar: true,
+            notes: "Reasoning comparison candidate; run with thinking disabled or constrained for deterministic benchmarks.",
         },
         SmallModelCandidate {
             model_id: "HuggingFaceTB/SmolLM2-360M-Instruct",
             role: "ultra-small-experimental",
+            recommended_runtime: "llama.cpp",
+            artifact_format: "GGUF",
+            recommended_temperature_millis: 0,
+            requires_grammar: true,
+            notes: "Lower-bound experimental candidate; use to measure minimum viable constrained proposal quality.",
         },
         SmallModelCandidate {
             model_id: "HuggingFaceTB/SmolLM2-135M-Instruct",
             role: "smoke-test-only",
+            recommended_runtime: "llama.cpp",
+            artifact_format: "GGUF",
+            recommended_temperature_millis: 0,
+            requires_grammar: true,
+            notes: "Smoke-test candidate only; do not treat passing toy output as production stewardship quality.",
         },
     ]
 }

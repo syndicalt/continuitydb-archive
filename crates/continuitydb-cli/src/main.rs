@@ -462,6 +462,11 @@ fn local_model_candidates_json() -> serde_json::Value {
                 serde_json::json!({
                     "model_id": candidate.model_id(),
                     "role": candidate.role(),
+                    "recommended_runtime": candidate.recommended_runtime(),
+                    "artifact_format": candidate.artifact_format(),
+                    "recommended_temperature": candidate.recommended_temperature(),
+                    "requires_grammar": candidate.requires_grammar(),
+                    "notes": candidate.notes(),
                 })
             })
             .collect::<Vec<_>>(),

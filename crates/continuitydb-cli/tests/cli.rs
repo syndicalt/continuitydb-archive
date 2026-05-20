@@ -472,6 +472,25 @@ fn cli_local_model_candidates_outputs_fixed_registry() -> Result<(), Box<dyn std
         json["candidates"][0]["role"].as_str(),
         Some("default-feasibility")
     );
+    assert_eq!(
+        json["candidates"][0]["recommended_runtime"].as_str(),
+        Some("llama.cpp")
+    );
+    assert_eq!(
+        json["candidates"][0]["artifact_format"].as_str(),
+        Some("GGUF")
+    );
+    assert_eq!(
+        json["candidates"][0]["recommended_temperature"].as_f64(),
+        Some(0.0)
+    );
+    assert_eq!(
+        json["candidates"][0]["requires_grammar"].as_bool(),
+        Some(true)
+    );
+    assert!(json["candidates"][0]["notes"]
+        .as_str()
+        .is_some_and(|notes| !notes.is_empty()));
     assert!(json["candidates"].as_array().is_some_and(|candidates| {
         candidates.iter().any(|candidate| {
             candidate["model_id"].as_str() == Some("HuggingFaceTB/SmolLM2-360M-Instruct")
