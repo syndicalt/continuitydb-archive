@@ -413,6 +413,13 @@ enum Command {
         #[arg(long = "fail-on-regression")]
         fail_on_regression: bool,
     },
+    /// Validate a local Steward model benchmark artifact bundle.
+    #[cfg(feature = "local-model")]
+    ValidateLocalModelBundle {
+        /// Directory containing benchmark-report.json and local-model-benchmark.manifest.json.
+        #[arg(long = "artifact-dir")]
+        artifact_dir: PathBuf,
+    },
     /// Write local Steward model JSON Schema and GBNF grammar artifacts.
     #[cfg(feature = "local-model")]
     LocalModelContract {
@@ -689,6 +696,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(report_path) = explicit_report_path {
                 write_pretty_json_file(&report_path, &output)?;
             }
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        #[cfg(feature = "local-model")]
+        Some(Command::ValidateLocalModelBundle { artifact_dir }) => {
+            let (manifest, benchmark_report) = validate_local_model_bundle_manifest(&artifact_dir)?;
+            let output = serde_json::json!({
+                "artifact_dir": artifact_dir.display().to_string(),
+                "manifest": local_model_bundle_manifest_json(Some(&manifest)),
+                "benchmark_report": benchmark_report,
+            });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         #[cfg(feature = "local-model")]
@@ -1540,7 +1557,7 @@ fn write_local_model_bundle_manifest(
 ) -> Result<LocalModelBundleManifest, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(artifact_dir)?;
     let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
-    let report_text = std::fs::read_to_string(report_path)?;
+    let report_text = local_model_benchmark_report_manifest_payload_text(report)?;
     let manifest = serde_json::json!({
         "format": "continuitydb.local_model.benchmark_bundle",
         "format_version": 1,
@@ -1562,6 +1579,75 @@ fn write_local_model_bundle_manifest(
         manifest_fingerprint: local_model_contract_fingerprint(&manifest_text),
         manifest_bytes: manifest_text.len(),
     })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_benchmark_report_manifest_payload_text(
+    report: &serde_json::Value,
+) -> Result<String, serde_json::Error> {
+    let mut payload = report.clone();
+    payload["bundle_manifest"] = serde_json::Value::Null;
+    serde_json::to_string_pretty(&payload)
+}
+
+#[cfg(feature = "local-model")]
+fn validate_local_model_bundle_manifest(
+    artifact_dir: &Path,
+) -> Result<(LocalModelBundleManifest, serde_json::Value), Box<dyn std::error::Error>> {
+    let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path).map_err(|error| {
+        std::io::Error::other(format!(
+            "local model benchmark manifest is required: {error}"
+        ))
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_text)?;
+
+    if manifest["format"].as_str() != Some("continuitydb.local_model.benchmark_bundle")
+        || manifest["format_version"].as_u64() != Some(1)
+    {
+        return Err(std::io::Error::other("unsupported local model benchmark manifest").into());
+    }
+
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let expected_report_path = report_path.display().to_string();
+    let manifest_report_path = required_json_string(&manifest, "benchmark_report_path")?;
+    if manifest_report_path != expected_report_path {
+        return Err(
+            std::io::Error::other("local model benchmark manifest report path mismatch").into(),
+        );
+    }
+
+    let report_text = std::fs::read_to_string(&report_path)?;
+    let report: serde_json::Value = serde_json::from_str(&report_text)?;
+    let manifest_report_payload_text = local_model_benchmark_report_manifest_payload_text(&report)?;
+    let manifest_report_bytes = required_json_u64(&manifest, "benchmark_report_bytes")?;
+    if manifest_report_bytes != manifest_report_payload_text.len() as u64 {
+        return Err(
+            std::io::Error::other("local model benchmark manifest byte count mismatch").into(),
+        );
+    }
+    let manifest_report_fingerprint =
+        required_json_string(&manifest, "benchmark_report_fingerprint")?;
+    let current_report_fingerprint =
+        local_model_contract_fingerprint(&manifest_report_payload_text);
+    if manifest_report_fingerprint != current_report_fingerprint {
+        return Err(
+            std::io::Error::other("local model benchmark manifest fingerprint mismatch").into(),
+        );
+    }
+
+    Ok((
+        LocalModelBundleManifest {
+            manifest_path,
+            manifest_fingerprint: local_model_contract_fingerprint(&manifest_text),
+            manifest_bytes: manifest_text.len(),
+        },
+        serde_json::json!({
+            "report_path": report_path.display().to_string(),
+            "report_fingerprint": current_report_fingerprint,
+            "report_bytes": manifest_report_payload_text.len(),
+        }),
+    ))
 }
 
 #[cfg(feature = "local-model")]

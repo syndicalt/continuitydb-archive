@@ -47,6 +47,29 @@ fn refresh_workload_manifest_report_metadata(
     Ok(())
 }
 
+#[cfg(feature = "local-model")]
+fn write_dry_run_local_model_bundle(
+    artifact_dir: &std::path::Path,
+    baseline_path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--artifact-dir")
+        .arg(artifact_dir)
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(baseline_path)
+        .assert()
+        .success();
+    Ok(())
+}
+
 #[test]
 fn cli_reports_version() -> Result<(), Box<dyn std::error::Error>> {
     let mut command = Command::cargo_bin("continuitydb")?;
@@ -2220,6 +2243,132 @@ fn cli_benchmark_local_model_artifact_dir_writes_dry_run_bundle(
     assert!(stdout_json["response_artifact_manifest"].is_null());
     assert!(!artifact_dir.join("responses").exists());
     assert!(!baseline_path.exists());
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_validate_local_model_bundle_accepts_report_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-validate-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+
+    assert_eq!(
+        json["artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        json["manifest"]["manifest_path"].as_str(),
+        Some(manifest_path.display().to_string().as_str())
+    );
+    assert!(json["manifest"]["manifest_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["manifest"]["manifest_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    assert_eq!(
+        json["benchmark_report"]["report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert!(json["benchmark_report"]["report_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["benchmark_report"]["report_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_validate_local_model_bundle_rejects_report_byte_count_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-validate-bytes-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-bytes-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["benchmark_report_bytes"] = Value::from(1);
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model benchmark manifest byte count mismatch",
+        ));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_validate_local_model_bundle_rejects_report_fingerprint_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-fingerprint-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-fingerprint-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["benchmark_report_fingerprint"] = Value::from("fnv1a64:0000000000000000");
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model benchmark manifest fingerprint mismatch",
+        ));
 
     fs::remove_dir_all(artifact_dir)?;
     Ok(())

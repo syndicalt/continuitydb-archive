@@ -346,6 +346,7 @@ Storage kernel
 89. Add CLI local-model changed-case report artifact metadata. Added `changed_case_report` path, fingerprint, and byte-count metadata to benchmark JSON and bundle manifests so CI can verify archived changed-case reports without reparsing the full benchmark output.
 90. Add CLI local-model changed-case comparison requirement. Rejected explicit `benchmark-local-model --changed-case-report-path` runs unless `--compare-baseline` or `--fail-on-regression` enables a real baseline comparison, preventing misleading zero-change artifacts.
 91. Add CLI local-model benchmark report artifact metadata. Extended local model benchmark bundle manifests with `benchmark_report_fingerprint` and `benchmark_report_bytes` so archived Steward benchmark bundles identify the exact root benchmark report artifact they describe.
+92. Add CLI local-model benchmark report artifact metadata validation. Added `validate-local-model-bundle --artifact-dir` so archived Steward benchmark bundles can validate `benchmark_report_fingerprint` and `benchmark_report_bytes` against the canonical benchmark report payload with `bundle_manifest` normalized out, preserving report integrity without cyclic manifest/report fingerprints.
 
 ## Small Embeddable Model Track
 
