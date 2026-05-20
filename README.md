@@ -20,6 +20,7 @@ The first milestone builds:
 - An in-memory kernel for correctness tests.
 - Basic revision links.
 - Core native revision-link records.
+- Storage-kernel-native revision-link records.
 - Deterministic checkout.
 - Semantic-anchor scoped checkout and strict text query constraints.
 - Activation-aware checkout and strict text query constraints.

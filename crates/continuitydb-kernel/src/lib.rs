@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
-    ActivationState, CellDependencyKind, CommitId, CommitManifest, Confidence, Scope, StateCell,
-    StateCellId, SystemTimeRange,
+    ActivationState, CellDependencyKind, CommitId, CommitManifest, Confidence, RevisionLinkKind,
+    RevisionLinkRecord, Scope, StateCell, StateCellId, SystemTimeRange,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -75,6 +75,17 @@ pub struct CommitManifestLookup {
     pub after: Option<CommitId>,
     /// Maximum manifests to return.
     pub limit: Option<usize>,
+}
+
+/// Query constraints for revision-link record listing.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RevisionLinkLookup {
+    /// Optional source StateCell version filter.
+    pub source: Option<StateCellId>,
+    /// Optional target StateCell version filter.
+    pub target: Option<StateCellId>,
+    /// Optional revision relationship kind filter.
+    pub kind: Option<RevisionLinkKind>,
 }
 
 /// Broad durability class reported by a storage kernel.
@@ -300,6 +311,18 @@ pub trait StorageKernel {
         &self,
         lookup: CommitManifestLookup,
     ) -> Result<Vec<CommitManifest>, KernelError>;
+
+    /// Appends an immutable revision-link record.
+    fn append_revision_link(
+        &mut self,
+        revision_link: RevisionLinkRecord,
+    ) -> Result<(), KernelError>;
+
+    /// Lists revision-link records matching deterministic constraints.
+    fn list_revision_links(
+        &self,
+        lookup: RevisionLinkLookup,
+    ) -> Result<Vec<RevisionLinkRecord>, KernelError>;
 }
 
 const FILE_KERNEL_FORMAT: &str = "continuitydb.file_kernel";
@@ -346,12 +369,17 @@ enum FileKernelRecord {
         manifest: CommitManifest,
         checksum: Option<String>,
     },
+    RevisionLink {
+        revision_link: RevisionLinkRecord,
+        checksum: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct FileKernelLog {
     cells: Vec<StateCell>,
     explicit_manifests: Vec<CommitManifest>,
+    revision_links: Vec<RevisionLinkRecord>,
     has_header: bool,
     health: FileKernelHealth,
 }
@@ -369,6 +397,7 @@ struct FileKernelIndex {
     commits: HashMap<CommitId, Vec<usize>>,
     manifests: HashMap<CommitId, CommitManifest>,
     manifest_order: Vec<CommitId>,
+    revision_links: Vec<RevisionLinkRecord>,
 }
 
 impl FileKernelIndex {
@@ -393,6 +422,7 @@ impl FileKernelIndex {
         {
             return Err(KernelError::StoreCorrupt);
         }
+        index.revision_links = log.revision_links;
         Ok(index)
     }
 
@@ -533,6 +563,24 @@ impl FileKernelIndex {
             .filter_map(|commit_id| self.manifests.get(commit_id).cloned())
             .collect())
     }
+
+    fn list_revision_links(&self, lookup: RevisionLinkLookup) -> Vec<RevisionLinkRecord> {
+        self.revision_links
+            .iter()
+            .filter(|revision_link| {
+                lookup
+                    .source
+                    .map_or(true, |source| revision_link.source == source)
+            })
+            .filter(|revision_link| {
+                lookup
+                    .target
+                    .map_or(true, |target| revision_link.target == target)
+            })
+            .filter(|revision_link| lookup.kind.map_or(true, |kind| revision_link.kind == kind))
+            .cloned()
+            .collect()
+    }
 }
 
 /// Append-only JSONL file-backed storage kernel.
@@ -656,7 +704,11 @@ impl FileKernel {
     /// Rewrites the backing JSONL log into the current canonical record format.
     pub fn compact(&mut self) -> Result<(), KernelError> {
         let manifests = self.index.list_manifests();
-        let encoded = encode_canonical_log(self.index.cells.iter(), manifests.iter())?;
+        let encoded = encode_canonical_log(
+            self.index.cells.iter(),
+            manifests.iter(),
+            self.index.revision_links.iter(),
+        )?;
         let temp_path = compact_temp_path(&self.path);
         {
             let mut temp_file = OpenOptions::new()
@@ -758,6 +810,7 @@ fn corrupt_record(line: usize) -> KernelError {
 fn encode_canonical_log<'a>(
     cells: impl IntoIterator<Item = &'a StateCell>,
     manifests: impl IntoIterator<Item = &'a CommitManifest>,
+    revision_links: impl IntoIterator<Item = &'a RevisionLinkRecord>,
 ) -> Result<String, KernelError> {
     let header = FileKernelHeader::current();
     let mut encoded = String::new();
@@ -786,6 +839,17 @@ fn encode_canonical_log<'a>(
             &serde_json::to_string(&FileKernelRecord::Commit {
                 manifest: manifest.clone(),
                 checksum: Some(file_record_checksum(manifest)?),
+            })
+            .map_err(|_error| KernelError::StoreCorrupt)?,
+        );
+        encoded.push('\n');
+    }
+
+    for revision_link in revision_links {
+        encoded.push_str(
+            &serde_json::to_string(&FileKernelRecord::RevisionLink {
+                revision_link: revision_link.clone(),
+                checksum: Some(file_record_checksum(revision_link)?),
             })
             .map_err(|_error| KernelError::StoreCorrupt)?,
         );
@@ -836,6 +900,16 @@ fn read_log_from_path(path: &Path) -> Result<FileKernelLog, KernelError> {
                 validate_file_record_checksum(&manifest, checksum.as_deref())
                     .map_err(|_error| corrupt_record(line_number))?;
                 log.explicit_manifests.push(manifest);
+            }
+            Ok(FileKernelRecord::RevisionLink {
+                revision_link,
+                checksum,
+            }) => {
+                seen_data = true;
+                record_file_health(&mut log.health, checksum.is_some());
+                validate_file_record_checksum(&revision_link, checksum.as_deref())
+                    .map_err(|_error| corrupt_record(line_number))?;
+                log.revision_links.push(revision_link);
             }
             Err(_record_error) => {
                 seen_data = true;
@@ -1131,19 +1205,48 @@ impl StorageKernel for FileKernel {
     ) -> Result<Vec<CommitManifest>, KernelError> {
         self.index.list_manifests_matching(lookup)
     }
+
+    fn append_revision_link(
+        &mut self,
+        revision_link: RevisionLinkRecord,
+    ) -> Result<(), KernelError> {
+        let encoded = serde_json::to_string(&FileKernelRecord::RevisionLink {
+            revision_link: revision_link.clone(),
+            checksum: Some(file_record_checksum(&revision_link)?),
+        })
+        .map_err(|_error| KernelError::StoreCorrupt)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|_error| KernelError::StoreIo)?;
+        write_all_durable(&mut file, format!("{encoded}\n").as_bytes())?;
+
+        self.index.revision_links.push(revision_link);
+        self.health.canonical_records += 1;
+        Ok(())
+    }
+
+    fn list_revision_links(
+        &self,
+        lookup: RevisionLinkLookup,
+    ) -> Result<Vec<RevisionLinkRecord>, KernelError> {
+        Ok(self.index.list_revision_links(lookup))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         sync_parent_directory, write_all_durable, CellLookup, CommitManifestLookup, FileKernel,
-        KernelCapabilities, KernelDurability, KernelError, KernelRequirements, StorageKernel,
+        KernelCapabilities, KernelDurability, KernelError, KernelRequirements, RevisionLinkLookup,
+        StorageKernel,
     };
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-        Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
-        StateCellId, TrustSignal, ValidTimeRange,
+        Citation, CommitId, Confidence, Evidence, RevisionLinkKind, RevisionLinkRecord, Scope,
+        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
     };
     use std::{fs, path::PathBuf};
 
@@ -1561,6 +1664,88 @@ mod tests {
         assert_eq!(manifest.commit_id, commit_id);
         assert_eq!(manifest.committed_at, committed_at);
         assert_eq!(manifest.cell_ids, expected_ids);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_storage_file_kernel_persists_links_across_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-revision-links-reopen");
+        let record = RevisionLinkRecord::new(
+            StateCellId::from_u128(1),
+            RevisionLinkKind::Supersedes,
+            StateCellId::from_u128(2),
+            test_commit_time()?,
+        );
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            kernel.append_revision_link(record.clone())?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+
+        assert_eq!(
+            reopened.list_revision_links(RevisionLinkLookup::default())?,
+            vec![record]
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_storage_file_kernel_filters_by_source_target_and_kind(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-revision-links-filter");
+        let recorded_at = test_commit_time()?;
+        let source = StateCellId::from_u128(10);
+        let target = StateCellId::from_u128(20);
+        let matching =
+            RevisionLinkRecord::new(source, RevisionLinkKind::Supersedes, target, recorded_at);
+        let different_kind =
+            RevisionLinkRecord::new(source, RevisionLinkKind::ConflictsWith, target, recorded_at);
+        let different_target = RevisionLinkRecord::new(
+            source,
+            RevisionLinkKind::Supersedes,
+            StateCellId::from_u128(30),
+            recorded_at,
+        );
+        let mut kernel = FileKernel::open(&path)?;
+        kernel.append_revision_link(different_kind)?;
+        kernel.append_revision_link(matching.clone())?;
+        kernel.append_revision_link(different_target)?;
+
+        let results = kernel.list_revision_links(RevisionLinkLookup {
+            source: Some(source),
+            target: Some(target),
+            kind: Some(RevisionLinkKind::Supersedes),
+        })?;
+
+        assert_eq!(results, vec![matching]);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_storage_file_kernel_compaction_preserves_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-revision-links-compact");
+        let record = RevisionLinkRecord::new(
+            StateCellId::from_u128(100),
+            RevisionLinkKind::DerivesFrom,
+            StateCellId::from_u128(200),
+            test_commit_time()?,
+        );
+        let mut kernel = FileKernel::open(&path)?;
+        kernel.append_revision_link(record.clone())?;
+
+        kernel.compact()?;
+        let reopened = FileKernel::open(&path)?;
+
+        assert_eq!(
+            reopened.list_revision_links(RevisionLinkLookup::default())?,
+            vec![record]
+        );
         fs::remove_file(path)?;
         Ok(())
     }

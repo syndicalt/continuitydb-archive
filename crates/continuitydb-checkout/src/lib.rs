@@ -381,6 +381,20 @@ mod tests {
         ) -> Result<Vec<continuitydb_core::CommitManifest>, KernelError> {
             Ok(Vec::new())
         }
+
+        fn append_revision_link(
+            &mut self,
+            _revision_link: continuitydb_core::RevisionLinkRecord,
+        ) -> Result<(), KernelError> {
+            Ok(())
+        }
+
+        fn list_revision_links(
+            &self,
+            _lookup: continuitydb_kernel::RevisionLinkLookup,
+        ) -> Result<Vec<continuitydb_core::RevisionLinkRecord>, KernelError> {
+            Ok(Vec::new())
+        }
     }
 
     fn test_commit_time() -> Result<DateTime<Utc>, Box<dyn std::error::Error>> {

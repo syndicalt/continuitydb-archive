@@ -1,8 +1,10 @@
 //! In-memory StorageKernel implementation for correctness tests.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{CommitId, CommitManifest, StateCell, SystemTimeRange};
-use continuitydb_kernel::{CellLookup, CommitManifestLookup, KernelError, StorageKernel};
+use continuitydb_core::{CommitId, CommitManifest, RevisionLinkRecord, StateCell, SystemTimeRange};
+use continuitydb_kernel::{
+    CellLookup, CommitManifestLookup, KernelError, RevisionLinkLookup, StorageKernel,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Append-only in-memory storage kernel.
@@ -11,6 +13,7 @@ pub struct MemoryKernel {
     cells: Vec<StateCell>,
     manifests: HashMap<CommitId, CommitManifest>,
     manifest_order: Vec<CommitId>,
+    revision_links: Vec<RevisionLinkRecord>,
 }
 
 impl StorageKernel for MemoryKernel {
@@ -178,6 +181,36 @@ impl StorageKernel for MemoryKernel {
             .filter_map(|commit_id| self.manifests.get(commit_id).cloned())
             .collect())
     }
+
+    fn append_revision_link(
+        &mut self,
+        revision_link: RevisionLinkRecord,
+    ) -> Result<(), KernelError> {
+        self.revision_links.push(revision_link);
+        Ok(())
+    }
+
+    fn list_revision_links(
+        &self,
+        lookup: RevisionLinkLookup,
+    ) -> Result<Vec<RevisionLinkRecord>, KernelError> {
+        Ok(self
+            .revision_links
+            .iter()
+            .filter(|revision_link| {
+                lookup
+                    .source
+                    .map_or(true, |source| revision_link.source == source)
+            })
+            .filter(|revision_link| {
+                lookup
+                    .target
+                    .map_or(true, |target| revision_link.target == target)
+            })
+            .filter(|revision_link| lookup.kind.map_or(true, |kind| revision_link.kind == kind))
+            .cloned()
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -185,11 +218,12 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
         ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-        Citation, CommitId, Confidence, Evidence, Scope, SemanticAnchor, SourceId, StateCell,
-        StateCellId, TrustSignal, ValidTimeRange,
+        Citation, CommitId, Confidence, Evidence, RevisionLinkKind, RevisionLinkRecord, Scope,
+        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
     };
     use continuitydb_kernel::{
-        CellLookup, CommitManifestLookup, KernelDurability, KernelError, StorageKernel,
+        CellLookup, CommitManifestLookup, KernelDurability, KernelError, RevisionLinkLookup,
+        StorageKernel,
     };
 
     use super::MemoryKernel;
@@ -360,6 +394,41 @@ mod tests {
         assert_eq!(manifest.commit_id, commit_id);
         assert_eq!(manifest.committed_at, committed_at);
         assert_eq!(manifest.cell_ids, expected_ids);
+        Ok(())
+    }
+
+    #[test]
+    fn revision_link_storage_memory_kernel_appends_and_filters_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let first = RevisionLinkRecord::new(
+            StateCellId::from_u128(1),
+            RevisionLinkKind::Supersedes,
+            StateCellId::from_u128(2),
+            test_commit_time()?,
+        );
+        let second = RevisionLinkRecord::new(
+            StateCellId::from_u128(1),
+            RevisionLinkKind::ConflictsWith,
+            StateCellId::from_u128(3),
+            test_commit_time()?,
+        );
+
+        kernel.append_revision_link(first.clone())?;
+        kernel.append_revision_link(second.clone())?;
+
+        assert_eq!(
+            kernel.list_revision_links(RevisionLinkLookup::default())?,
+            vec![first.clone(), second]
+        );
+        assert_eq!(
+            kernel.list_revision_links(RevisionLinkLookup {
+                source: Some(first.source),
+                target: Some(first.target),
+                kind: Some(RevisionLinkKind::Supersedes),
+            })?,
+            vec![first]
+        );
         Ok(())
     }
 
