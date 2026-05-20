@@ -25,7 +25,7 @@
 **Files:**
 - Modify: `crates/continuitydb-core/src/lib.rs`
 
-- [ ] **Step 1: Add StateCellId text round-trip tests**
+- [x] **Step 1: Add StateCellId text round-trip tests**
 
 Add these tests near the existing commit ID text tests:
 
@@ -49,7 +49,7 @@ fn state_cell_id_rejects_invalid_uuid_text() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -64,7 +64,7 @@ Expected: FAIL because `StateCellId` does not implement `Display` or `FromStr`.
 **Files:**
 - Modify: `crates/continuitydb-core/src/cell.rs`
 
-- [ ] **Step 1: Add StateCellId display and parsing**
+- [x] **Step 1: Add StateCellId display and parsing**
 
 Add these implementations after `impl Default for StateCellId`:
 
@@ -84,7 +84,7 @@ impl FromStr for StateCellId {
 }
 ```
 
-- [ ] **Step 2: Verify GREEN**
+- [x] **Step 2: Verify GREEN**
 
 Run:
 

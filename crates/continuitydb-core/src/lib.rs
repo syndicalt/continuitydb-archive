@@ -245,6 +245,24 @@ mod tests {
     }
 
     #[test]
+    fn state_cell_id_displays_and_parses_uuid_text() -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let text = cell_id.to_string();
+
+        let parsed: StateCellId = text.parse()?;
+
+        assert_eq!(parsed, cell_id);
+        Ok(())
+    }
+
+    #[test]
+    fn state_cell_id_rejects_invalid_uuid_text() {
+        let result = "not-a-uuid".parse::<StateCellId>();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn state_cell_deserializes_missing_commit_id_as_nil() -> Result<(), Box<dyn std::error::Error>>
     {
         let cell = sample_state_cell("project:continuitydb:legacy-commit-id")?;
