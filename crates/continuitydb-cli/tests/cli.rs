@@ -380,6 +380,52 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_dry_run_uses_candidate_defaults(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-defaults-baseline");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--candidate-defaults")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--threads")
+        .arg("--arg")
+        .arg("2")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["runtime"]["arguments"][0].as_str(), Some("--model"));
+    assert_eq!(
+        json["runtime"]["arguments"][1].as_str(),
+        Some("/models/qwen.gguf")
+    );
+    assert_eq!(json["runtime"]["arguments"][2].as_str(), Some("--ctx-size"));
+    assert_eq!(json["runtime"]["arguments"][3].as_str(), Some("4096"));
+    assert_eq!(json["runtime"]["arguments"][4].as_str(), Some("--temp"));
+    assert_eq!(json["runtime"]["arguments"][5].as_str(), Some("0"));
+    assert_eq!(json["runtime"]["arguments"][6].as_str(), Some("--prompt"));
+    assert_eq!(json["runtime"]["arguments"][7].as_str(), Some("-"));
+    assert_eq!(json["runtime"]["arguments"][8].as_str(), Some("--threads"));
+    assert_eq!(json["runtime"]["arguments"][9].as_str(), Some("2"));
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_evaluation_suite_outputs_case_contracts(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::cargo_bin("continuitydb")?

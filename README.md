@@ -85,6 +85,7 @@ The first milestone builds:
 - CLI small local Steward model candidate registry output.
 - Small local Steward model runtime metadata.
 - Small local Steward model benchmark argument templates.
+- CLI local model benchmark candidate defaults.
 - CLI local model benchmark dry-run preflight output.
 - CLI local model contract fingerprints.
 - Durable local model contract fingerprints.

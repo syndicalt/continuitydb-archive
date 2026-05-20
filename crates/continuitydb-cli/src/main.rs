@@ -65,6 +65,7 @@ struct LocalModelBenchmarkOptions<'a> {
     executable: &'a Path,
     model_path: &'a Path,
     arguments: &'a [String],
+    candidate_defaults: bool,
     baseline_path: &'a Path,
     dry_run: bool,
     compare_baseline: bool,
@@ -211,6 +212,9 @@ enum Command {
         /// Extra executable argument, repeatable and ordered.
         #[arg(long = "arg", allow_hyphen_values = true)]
         arguments: Vec<String>,
+        /// Use the selected candidate's recommended benchmark arguments before extra --arg values.
+        #[arg(long = "candidate-defaults")]
+        candidate_defaults: bool,
         /// JSONL path to append a benchmark baseline record.
         #[arg(long = "baseline-path")]
         baseline_path: PathBuf,
@@ -410,6 +414,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             executable,
             model_path,
             arguments,
+            candidate_defaults,
             baseline_path,
             dry_run,
             compare_baseline,
@@ -420,6 +425,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 executable: &executable,
                 model_path: &model_path,
                 arguments: &arguments,
+                candidate_defaults,
                 baseline_path: &baseline_path,
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
@@ -600,8 +606,15 @@ fn benchmark_local_model_json(
     options: LocalModelBenchmarkOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let candidate = local_model_candidate(options.candidate_id)?;
-    let mut config = LocalExecutableRunnerConfig::new(options.executable.to_path_buf())
-        .with_model_path(options.model_path.to_path_buf());
+    let mut config = if options.candidate_defaults {
+        candidate.recommended_runner_config(
+            options.executable.to_path_buf(),
+            options.model_path.to_path_buf(),
+        )
+    } else {
+        LocalExecutableRunnerConfig::new(options.executable.to_path_buf())
+            .with_model_path(options.model_path.to_path_buf())
+    };
     for argument in options.arguments {
         config = config.with_argument(argument);
     }

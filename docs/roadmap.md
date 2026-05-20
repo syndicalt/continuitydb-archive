@@ -253,6 +253,7 @@ Storage kernel
 41. Add durable local-model contract fingerprints. Persisted schema and grammar fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
 42. Add small-model candidate runtime metadata. Extended the local Steward candidate registry with recommended runtime, artifact format, temperature, grammar requirement, and operational notes, and exposed the metadata through CLI candidate JSON.
 43. Add small-model benchmark argument templates. Added candidate-recommended runner configuration helpers and exposed deterministic benchmark argument vectors through CLI candidate JSON.
+44. Add CLI local-model benchmark candidate defaults. Added `benchmark-local-model --candidate-defaults` so benchmark runs and dry-runs can materialize candidate-recommended runner arguments before operator-supplied extra arguments.
 
 ## Small Embeddable Model Track
 
