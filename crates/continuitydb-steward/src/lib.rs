@@ -16,8 +16,8 @@ pub use frontier::{
     MemoryFrontierSubscriptionStore,
 };
 pub use ledger::{
-    FileProposalStore, MemoryProposalStore, ProposalAuditRecord, ProposalLedger,
-    ProposalLedgerStore, StoredProposalLedger,
+    FileProposalStore, KernelProposalStore, MemoryProposalStore, ProposalAuditRecord,
+    ProposalLedger, ProposalLedgerStore, StoredProposalLedger,
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
@@ -48,10 +48,10 @@ mod tests {
         FrontierWatchEvent, FrontierWatchSignal, MemoryFrontierSubscriptionStore,
     };
     use super::{
-        FileProposalStore, MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule,
-        ProposalDecision, ProposalId, ProposalLedger, ProposalLedgerStore, ProposalOutcome,
-        ProposalPolicy, StewardAction, StewardError, StewardIdentity, StewardProposal,
-        StoredProposalLedger,
+        FileProposalStore, KernelProposalStore, MemoryProposalStore, MockSteward, MockStewardInput,
+        MockStewardRule, ProposalDecision, ProposalId, ProposalLedger, ProposalLedgerStore,
+        ProposalOutcome, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
+        StewardProposal, StoredProposalLedger,
     };
     #[cfg(feature = "local-model")]
     use super::{
@@ -1494,6 +1494,77 @@ mod tests {
 
         assert!(matches!(result, Err(StewardError::MismatchedDecision)));
         assert!(ledger.records()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn kernel_proposal_store_records_in_kernel_order() -> Result<(), Box<dyn std::error::Error>> {
+        let first = valid_link_revision()?;
+        let second = StewardProposal::new(
+            ProposalId::new(),
+            steward()?,
+            StewardAction::RequestVerification {
+                cell_id: Some(StateCellId::new()),
+                request: "Refresh stale evidence.".to_string(),
+            },
+            "The watched cell needs evidence refresh.",
+            vec!["test://stale".to_string()],
+            created_at(),
+        )?;
+        let policy = ProposalPolicy::strict();
+        let store = KernelProposalStore::new(continuitydb_memory::MemoryKernel::default());
+        let mut ledger = StoredProposalLedger::new(store);
+
+        ledger.record(first.clone(), policy.evaluate(&first, created_at()))?;
+        ledger.record(second.clone(), policy.evaluate(&second, created_at()))?;
+
+        let records = ledger.records()?;
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].proposal().id(), first.id());
+        assert_eq!(records[1].proposal().id(), second.id());
+        Ok(())
+    }
+
+    #[test]
+    fn kernel_proposal_store_gets_record_by_id() -> Result<(), Box<dyn std::error::Error>> {
+        let first = valid_link_revision()?;
+        let second = StewardProposal::new(
+            ProposalId::new(),
+            steward()?,
+            StewardAction::MarkFrontier {
+                cell_id: StateCellId::new(),
+            },
+            "The watched cell needs frontier monitoring.",
+            vec!["test://frontier".to_string()],
+            created_at(),
+        )?;
+        let policy = ProposalPolicy::strict();
+        let store = KernelProposalStore::new(continuitydb_memory::MemoryKernel::default());
+        let mut ledger = StoredProposalLedger::new(store);
+
+        ledger.record(first.clone(), policy.evaluate(&first, created_at()))?;
+        ledger.record(second.clone(), policy.evaluate(&second, created_at()))?;
+
+        let record = ledger.record_by_id(second.id())?;
+        assert_eq!(
+            record.map(|record| record.proposal().id()),
+            Some(second.id())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn kernel_proposal_store_preserves_backing_kernel() -> Result<(), Box<dyn std::error::Error>> {
+        let proposal = valid_link_revision()?;
+        let policy = ProposalPolicy::strict();
+        let store = KernelProposalStore::new(continuitydb_memory::MemoryKernel::default());
+        let mut ledger = StoredProposalLedger::new(store);
+
+        ledger.record(proposal.clone(), policy.evaluate(&proposal, created_at()))?;
+
+        let store = ledger.into_store();
+        let reopened = StoredProposalLedger::new(KernelProposalStore::new(store.into_kernel()));
+        assert_eq!(reopened.records()?.len(), 1);
         Ok(())
     }
 

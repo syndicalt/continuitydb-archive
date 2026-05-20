@@ -6,9 +6,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use continuitydb_core::{
+    Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope, SemanticAnchor,
+    SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+};
+use continuitydb_kernel::{CellLookup, StorageKernel};
 use serde::{Deserialize, Serialize};
 
 use crate::{ProposalDecision, ProposalId, StewardError, StewardProposal};
+
+const PROPOSAL_AUDIT_ANCHOR: &str = "continuitydb:steward:proposal-audit";
 
 /// Audit record preserving a proposal and its deterministic policy decision.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -186,6 +193,125 @@ impl ProposalLedgerStore for FileProposalStore {
             .into_iter()
             .find(|record| record.proposal().id() == proposal_id))
     }
+}
+
+/// Proposal ledger store adapter backed by a ContinuityDB storage kernel.
+pub struct KernelProposalStore<K> {
+    kernel: K,
+}
+
+impl<K> KernelProposalStore<K> {
+    /// Creates a proposal store backed by a storage kernel.
+    pub fn new(kernel: K) -> Self {
+        Self { kernel }
+    }
+
+    /// Returns the backing storage kernel.
+    pub fn kernel(&self) -> &K {
+        &self.kernel
+    }
+
+    /// Returns the mutable backing storage kernel.
+    pub fn kernel_mut(&mut self) -> &mut K {
+        &mut self.kernel
+    }
+
+    /// Returns the backing storage kernel.
+    pub fn into_kernel(self) -> K {
+        self.kernel
+    }
+}
+
+impl<K> ProposalLedgerStore for KernelProposalStore<K>
+where
+    K: StorageKernel,
+{
+    fn append_record(&mut self, record: ProposalAuditRecord) -> Result<(), StewardError> {
+        self.kernel
+            .append_cell(record_to_cell(&record)?)
+            .map_err(|_error| StewardError::ProposalStoreIo)
+    }
+
+    fn list_records(&self) -> Result<Vec<ProposalAuditRecord>, StewardError> {
+        self.kernel
+            .lookup_cells(CellLookup {
+                semantic_anchor: Some(PROPOSAL_AUDIT_ANCHOR.to_string()),
+                ..CellLookup::default()
+            })
+            .map_err(|_error| StewardError::ProposalStoreIo)?
+            .into_iter()
+            .map(record_from_cell)
+            .collect()
+    }
+
+    fn get_record(
+        &self,
+        proposal_id: ProposalId,
+    ) -> Result<Option<ProposalAuditRecord>, StewardError> {
+        self.kernel
+            .lookup_cells(CellLookup {
+                semantic_anchor: Some(proposal_anchor(proposal_id)?),
+                ..CellLookup::default()
+            })
+            .map_err(|_error| StewardError::ProposalStoreIo)?
+            .into_iter()
+            .next()
+            .map(record_from_cell)
+            .transpose()
+    }
+}
+
+fn record_to_cell(record: &ProposalAuditRecord) -> Result<StateCell, StewardError> {
+    let payload =
+        serde_json::to_value(record).map_err(|_error| StewardError::ProposalStoreCorrupt)?;
+    let created_at = record.proposal().created_at();
+    let citation = record
+        .proposal()
+        .citations()
+        .first()
+        .cloned()
+        .ok_or(StewardError::MissingCitations)?;
+
+    StateCell::new(
+        StateCellId::new(),
+        vec![
+            SemanticAnchor::new(PROPOSAL_AUDIT_ANCHOR),
+            SemanticAnchor::new(proposal_anchor(record.proposal().id())?),
+        ],
+        ValidTimeRange::new(created_at, None)
+            .map_err(|_error| StewardError::ProposalStoreCorrupt)?,
+        Scope::Project("continuitydb-steward".to_string()),
+        Answerability::new(vec!["what did the Steward propose?".to_string()])
+            .map_err(|_error| StewardError::ProposalStoreCorrupt)?,
+        vec![Evidence {
+            source: SourceId::new("continuitydb-steward"),
+            citation: Citation { locator: citation },
+            confidence: Confidence::new(1.0)
+                .map_err(|_error| StewardError::ProposalStoreCorrupt)?,
+            trust: vec![TrustSignal::Derived],
+        }],
+        CellPayload::Json(payload),
+        CellCost::new(0, 0).map_err(|_error| StewardError::ProposalStoreCorrupt)?,
+    )
+    .map_err(|_error| StewardError::ProposalStoreCorrupt)
+}
+
+fn record_from_cell(cell: StateCell) -> Result<ProposalAuditRecord, StewardError> {
+    match cell.payload {
+        CellPayload::Json(payload) => {
+            serde_json::from_value(payload).map_err(|_error| StewardError::ProposalStoreCorrupt)
+        }
+        CellPayload::Text(_) | CellPayload::BlobRef(_) => Err(StewardError::ProposalStoreCorrupt),
+    }
+}
+
+fn proposal_anchor(proposal_id: ProposalId) -> Result<String, StewardError> {
+    let encoded =
+        serde_json::to_string(&proposal_id).map_err(|_error| StewardError::ProposalStoreCorrupt)?;
+    Ok(format!(
+        "continuitydb:steward:proposal-audit:{}",
+        encoded.trim_matches('"')
+    ))
 }
 
 /// Proposal ledger backed by a pluggable storage implementation.

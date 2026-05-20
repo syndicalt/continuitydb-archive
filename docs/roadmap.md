@@ -56,7 +56,7 @@ Storage kernel
 
 1. Define `StewardProposal` types without invoking any model. Implemented in `continuitydb-steward`.
 2. Add policy validation for accepting and rejecting proposals. Implemented in `continuitydb-steward`.
-3. Persist accepted and rejected proposals for audit. Implemented as an in-memory append-only ledger, a pluggable `ProposalLedgerStore` contract, and a JSONL `FileProposalStore` in `continuitydb-steward`; embedded storage-engine adapters remain future work.
+3. Persist accepted and rejected proposals for audit. Implemented as an in-memory append-only ledger, a pluggable `ProposalLedgerStore` contract, a JSONL `FileProposalStore`, and a generic `StorageKernel`-backed proposal audit adapter in `continuitydb-steward`; specialized production-engine adapters remain future work.
 4. Build a deterministic mock steward for test-first development. Implemented in `continuitydb-steward`.
 5. Add local model inference behind a feature flag. Implemented as a `local-model` backend boundary and local executable runner in `continuitydb-steward`; model-specific llama.cpp/mistral.rs benchmarking remains future work.
 6. Evaluate small open-source steward models against fixed proposal-quality tests. Implemented as a `local-model` evaluation harness with candidate metadata, deterministic pass/fail reasons, an executable runner benchmark fixture, and durable JSONL benchmark baseline records; collecting real model result baselines remains future work.

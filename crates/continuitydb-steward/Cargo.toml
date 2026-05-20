@@ -9,11 +9,15 @@ rust-version.workspace = true
 [dependencies]
 chrono.workspace = true
 continuitydb-core = { path = "../continuitydb-core" }
+continuitydb-kernel = { path = "../continuitydb-kernel" }
 continuitydb-revision = { path = "../continuitydb-revision" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+continuitydb-memory = { path = "../continuitydb-memory" }
 
 [features]
 default = []

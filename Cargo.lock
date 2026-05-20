@@ -261,6 +261,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "continuitydb-core",
+ "continuitydb-kernel",
+ "continuitydb-memory",
  "continuitydb-revision",
  "serde",
  "serde_json",
