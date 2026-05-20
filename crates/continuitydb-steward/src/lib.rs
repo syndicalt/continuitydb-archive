@@ -18,9 +18,10 @@ pub use ledger::{
 #[cfg(feature = "local-model")]
 pub use local_model::{
     small_model_candidates, LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend,
-    LocalModelRequest, LocalModelSteward, LocalModelStewardInput, SmallModelCandidate,
-    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
-    StewardEvaluationReport, StewardEvaluationSuite,
+    LocalModelBenchmark, LocalModelBenchmarkReport, LocalModelRequest, LocalModelSteward,
+    LocalModelStewardInput, SmallModelCandidate, StewardEvaluationCase,
+    StewardEvaluationCaseReport, StewardEvaluationFailure, StewardEvaluationReport,
+    StewardEvaluationSuite,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -29,10 +30,9 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "local-model")]
-    #[cfg(feature = "local-model")]
     use super::{
-        small_model_candidates, StewardEvaluationCase, StewardEvaluationFailure,
-        StewardEvaluationSuite,
+        small_model_candidates, LocalModelBenchmark, StewardEvaluationCase,
+        StewardEvaluationFailure, StewardEvaluationSuite,
     };
     use super::{
         FileProposalStore, MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule,
@@ -833,6 +833,97 @@ mod tests {
             result,
             Err(StewardError::LocalModelExecutionFailed)
         ));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_runs_executable_runner_suite() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let script = write_local_model_script(
+            "continuitydb-local-model-benchmark-ok",
+            &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+
+        let report = benchmark.run(steward()?);
+
+        assert!(report.passed());
+        assert_eq!(report.candidate().model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
+        assert_eq!(report.evaluation().case_reports().len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_preserves_failure_report() -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "This was verified in production.",
+                "citations": ["test://other"]
+            }]
+        })
+        .to_string();
+        let script = write_local_model_script(
+            "continuitydb-local-model-benchmark-fail",
+            &format!("cat >/dev/null\nprintf '%s\\n' '{response}'\n"),
+        )?;
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("sh").with_argument(script),
+        );
+        let suite = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier failure",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier { cell_id })
+        .require_citation("test://frontier")
+        .forbid_rationale_term("verified in production")]);
+        let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
+
+        let report = benchmark.run(steward()?);
+
+        assert!(!report.passed());
+        assert_eq!(
+            report.evaluation().case_reports()[0].failures(),
+            &[
+                StewardEvaluationFailure::MissingCitation {
+                    locator: "test://frontier".to_string(),
+                },
+                StewardEvaluationFailure::UnsupportedRationaleTerm {
+                    term: "verified in production".to_string(),
+                },
+            ]
+        );
         Ok(())
     }
 

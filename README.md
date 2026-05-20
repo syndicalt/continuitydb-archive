@@ -21,6 +21,7 @@ The first milestone builds:
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.
 - Fixed Steward proposal-quality evaluation harness.
+- Executable local model benchmark fixture.
 - Deterministic frontier/watch Steward proposal integration.
 - A thin CLI over library APIs.
 

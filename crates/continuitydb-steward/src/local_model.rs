@@ -420,6 +420,72 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
     ]
 }
 
+/// Executable local model benchmark fixture for a fixed Steward evaluation suite.
+#[derive(Clone, Debug)]
+pub struct LocalModelBenchmark {
+    candidate: SmallModelCandidate,
+    runner: LocalExecutableRunner,
+    suite: StewardEvaluationSuite,
+}
+
+impl LocalModelBenchmark {
+    /// Creates a benchmark fixture from candidate metadata, runner, and suite.
+    pub fn new(
+        candidate: SmallModelCandidate,
+        runner: LocalExecutableRunner,
+        suite: StewardEvaluationSuite,
+    ) -> Self {
+        Self {
+            candidate,
+            runner,
+            suite,
+        }
+    }
+
+    /// Returns the benchmark candidate metadata.
+    pub fn candidate(&self) -> SmallModelCandidate {
+        self.candidate
+    }
+
+    /// Returns the executable runner used by this benchmark.
+    pub fn runner(&self) -> &LocalExecutableRunner {
+        &self.runner
+    }
+
+    /// Runs the benchmark suite with the supplied Steward identity.
+    pub fn run(&self, identity: StewardIdentity) -> LocalModelBenchmarkReport {
+        let steward = LocalModelSteward::new(identity, self.runner.clone());
+        LocalModelBenchmarkReport {
+            candidate: self.candidate,
+            evaluation: self.suite.evaluate(&steward),
+        }
+    }
+}
+
+/// Report emitted by an executable local model benchmark run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocalModelBenchmarkReport {
+    candidate: SmallModelCandidate,
+    evaluation: StewardEvaluationReport,
+}
+
+impl LocalModelBenchmarkReport {
+    /// Returns the evaluated model candidate metadata.
+    pub fn candidate(&self) -> SmallModelCandidate {
+        self.candidate
+    }
+
+    /// Returns the proposal-quality evaluation report.
+    pub fn evaluation(&self) -> &StewardEvaluationReport {
+        &self.evaluation
+    }
+
+    /// Returns whether every benchmark case passed.
+    pub fn passed(&self) -> bool {
+        self.evaluation.passed()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ModelResponse {
     proposals: Vec<ModelProposal>,
