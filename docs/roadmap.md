@@ -99,6 +99,7 @@ Storage kernel
 5. Add local model inference behind a feature flag. Implemented as a `local-model` backend boundary, local executable runner, and deterministic llama.cpp/mistral.rs runner profiles in `continuitydb-steward`; real runtime execution remains future work.
 6. Evaluate small open-source steward models against fixed proposal-quality tests. Implemented as a `local-model` evaluation harness with candidate metadata, deterministic pass/fail reasons, an executable runner benchmark fixture, durable JSONL benchmark baseline records, a recorder API for configured real-runtime baseline collection, latest-baseline lookup for candidate regression gates, deterministic baseline regression comparison, and a record-and-compare gate report; environment-specific real model baseline artifacts remain future work.
 7. Add frontier/watch integration so the Steward can propose refresh and verification work. Implemented as deterministic frontier watch events that emit `RequestVerification` and `MarkFrontier` proposals, durable frontier subscription records with in-memory and JSONL file-backed stores, and a subscription runner that filters incoming watch events through stored subscriptions in `continuitydb-steward`.
+8. Add conflict-resolution proposal integration. Implemented `ConflictResolutionSteward` to convert deterministic revision conflict recommendations into auditable `LinkRevision` or `RequestVerification` proposals without mutating committed truth.
 
 ## Small Embeddable Model Track
 

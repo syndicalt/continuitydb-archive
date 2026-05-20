@@ -1,5 +1,6 @@
 //! Deterministic Steward proposal substrate.
 
+mod conflict;
 mod error;
 mod frontier;
 mod ledger;
@@ -9,6 +10,7 @@ mod mock;
 mod policy;
 mod proposal;
 
+pub use conflict::ConflictResolutionSteward;
 pub use error::StewardError;
 pub use frontier::{
     FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription, FrontierSubscriptionId,
