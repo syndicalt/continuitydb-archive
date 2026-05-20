@@ -26,6 +26,12 @@ fn cli_demo_checkout_outputs_metadata_json() -> Result<(), Box<dyn std::error::E
 
     assert_eq!(json["cells"].as_array().map(Vec::len), Some(1));
     assert_eq!(json["audit_traces"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        json["audit_traces"][0]["dependencies"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
     assert_eq!(json["uncertainty"].as_array().map(Vec::len), Some(1));
     assert_eq!(
         json["frontier_recommendations"].as_array().map(Vec::len),

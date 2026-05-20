@@ -105,6 +105,19 @@ pub struct AuditTrace {
     pub cell_id: StateCellId,
     /// Citation locators supporting the cell.
     pub citations: Vec<String>,
+    /// Dependency and causality links referenced by the cell.
+    pub dependencies: Vec<AuditDependency>,
+}
+
+/// Dependency metadata included in an audit trace.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AuditDependency {
+    /// Target StateCell identifier.
+    pub target: StateCellId,
+    /// Dependency edge meaning.
+    pub kind: CellDependencyKind,
+    /// Human-readable rationale for the dependency.
+    pub rationale: String,
 }
 
 /// Materializes a deterministic continuity slice.
@@ -190,6 +203,15 @@ pub fn audit(cell: &StateCell) -> AuditTrace {
     AuditTrace {
         cell_id: cell.id,
         citations: citations(cell),
+        dependencies: cell
+            .dependencies
+            .iter()
+            .map(|dependency| AuditDependency {
+                target: dependency.target,
+                kind: dependency.kind,
+                rationale: dependency.rationale.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -753,6 +775,70 @@ mod tests {
         assert_eq!(
             trace.citations,
             vec!["test://project:continuitydb:audit".to_string()]
+        );
+        assert!(trace.dependencies.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn audit_includes_dependency_links() -> Result<(), Box<dyn std::error::Error>> {
+        let target = StateCellId::new();
+        let mut cell = sample_cell("project:continuitydb:audit-dependency", 0.95, 10)?;
+        cell.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DerivedFrom,
+            "derived from source evidence",
+        ));
+
+        let trace = audit(&cell);
+
+        assert_eq!(trace.dependencies.len(), 1);
+        assert_eq!(trace.dependencies[0].target, target);
+        assert_eq!(trace.dependencies[0].kind, CellDependencyKind::DerivedFrom);
+        assert_eq!(
+            trace.dependencies[0].rationale,
+            "derived from source evidence"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_audit_traces_include_dependency_links() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let target = StateCellId::new();
+        let mut dependent = sample_cell("project:continuitydb:audit-dependent", 0.95, 10)?;
+        dependent.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "depends on target state",
+        ));
+        append_committed(&mut kernel, dependent)?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                scope: Some(Scope::Project("continuitydb".to_string())),
+                valid_at: None,
+                system_at: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 10,
+            },
+        )?;
+
+        assert_eq!(slice.audit_traces.len(), 1);
+        assert_eq!(slice.audit_traces[0].dependencies.len(), 1);
+        assert_eq!(slice.audit_traces[0].dependencies[0].target, target);
+        assert_eq!(
+            slice.audit_traces[0].dependencies[0].kind,
+            CellDependencyKind::DependsOn
+        );
+        assert_eq!(
+            slice.audit_traces[0].dependencies[0].rationale,
+            "depends on target state"
         );
         Ok(())
     }

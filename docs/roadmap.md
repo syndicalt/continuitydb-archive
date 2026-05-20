@@ -71,6 +71,7 @@ Storage kernel
 4. Rank checkout candidates by deterministic utility-aware score. Implemented by combining max evidence confidence with `StateCell` utility feedback before token-budget packing in `continuitydb-checkout`.
 5. Add dependency-aware checkout constraints. Implemented dependency target and kind filters in `CheckoutRequest` with pushdown into `CellLookup`.
 6. Add system-time checkout constraints. Implemented `CheckoutRequest.system_at` with pushdown into `CellLookup.system_at`, allowing continuity slices to be materialized as of a database transaction time.
+7. Add dependency-aware audit traces. Implemented `AuditDependency` metadata in checkout audit traces so selected cells explain dependency and causality links alongside citations.
 
 ## Utility Feedback Milestones
 
