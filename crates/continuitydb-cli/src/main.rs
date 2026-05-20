@@ -13,7 +13,8 @@ use continuitydb_kernel::{
 };
 use continuitydb_memory::MemoryKernel;
 use continuitydb_workload::{
-    generate_world_model_workload, measure_ingest_and_checkout, WorkloadConfig, WorkloadMeasurement,
+    generate_world_model_workload, measure_ingest_and_checkout, FileWorkloadBaselineStore,
+    WorkloadBaselineRecord, WorkloadConfig, WorkloadMeasurement, WorkloadMeasurementSnapshot,
 };
 use std::path::PathBuf;
 
@@ -27,6 +28,17 @@ use std::path::PathBuf;
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+struct WorkloadMeasureOptions<'a> {
+    kernel: WorkloadKernelProfile,
+    store_path: Option<&'a PathBuf>,
+    cells: usize,
+    token_budget: i64,
+    frontier_every: usize,
+    dependency_stride: usize,
+    baseline_path: Option<&'a PathBuf>,
+    label: &'a str,
 }
 
 /// Named kernel requirement profiles understood by the CLI.
@@ -83,6 +95,12 @@ enum Command {
         /// Dependency stride for generated cells.
         #[arg(long = "dependency-stride", default_value_t = 2)]
         dependency_stride: usize,
+        /// Optional JSONL path to append a workload measurement baseline record.
+        #[arg(long = "baseline-path")]
+        baseline_path: Option<PathBuf>,
+        /// Baseline scenario label when recording a measurement.
+        #[arg(long = "label", default_value = "default")]
+        label: String,
     },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
@@ -173,15 +191,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             token_budget,
             frontier_every,
             dependency_stride,
+            baseline_path,
+            label,
         }) => {
-            let output = measure_workload_json(
+            let output = measure_workload_json(WorkloadMeasureOptions {
                 kernel,
-                store_path.as_ref(),
+                store_path: store_path.as_ref(),
                 cells,
                 token_budget,
                 frontier_every,
                 dependency_stride,
-            )?;
+                baseline_path: baseline_path.as_ref(),
+                label: &label,
+            })?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
@@ -376,41 +398,60 @@ fn workload_commit_time() -> Result<chrono::DateTime<Utc>, Box<dyn std::error::E
 }
 
 fn measure_workload_json(
-    kernel: WorkloadKernelProfile,
-    store_path: Option<&PathBuf>,
-    cells: usize,
-    token_budget: i64,
-    frontier_every: usize,
-    dependency_stride: usize,
+    options: WorkloadMeasureOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let workload =
-        generate_world_model_workload(workload_config(cells, frontier_every, dependency_stride)?)?;
+    let workload = generate_world_model_workload(workload_config(
+        options.cells,
+        options.frontier_every,
+        options.dependency_stride,
+    )?)?;
     let committed_at = workload_commit_time()?;
-    let request = workload_checkout_request(token_budget)?;
+    let request = workload_checkout_request(options.token_budget)?;
 
-    let measurement = match kernel {
+    let measurement = match options.kernel {
         WorkloadKernelProfile::Memory => {
             let mut memory = MemoryKernel::default();
             measure_ingest_and_checkout(&mut memory, &workload, committed_at, request)?
         }
         WorkloadKernelProfile::File => {
-            let path = store_path.ok_or_else(|| std::io::Error::other("store path is required"))?;
+            let path = options
+                .store_path
+                .ok_or_else(|| std::io::Error::other("store path is required"))?;
             let mut file = continuitydb_kernel::FileKernel::open(path)?;
             measure_ingest_and_checkout(&mut file, &workload, committed_at, request)?
         }
     };
 
-    Ok(workload_measurement_json(kernel, store_path, measurement))
+    if let Some(path) = options.baseline_path {
+        record_workload_baseline(
+            path,
+            options.label,
+            workload_kernel_name(options.kernel),
+            &measurement,
+        )?;
+    }
+
+    Ok(workload_measurement_json(
+        options.kernel,
+        options.store_path,
+        options.baseline_path,
+        options.label,
+        measurement,
+    ))
 }
 
 fn workload_measurement_json(
     kernel: WorkloadKernelProfile,
     store_path: Option<&PathBuf>,
+    baseline_path: Option<&PathBuf>,
+    label: &str,
     measurement: WorkloadMeasurement,
 ) -> serde_json::Value {
     serde_json::json!({
         "kernel": workload_kernel_name(kernel),
         "store_path": store_path.map(|path| path.display().to_string()),
+        "baseline_path": baseline_path.map(|path| path.display().to_string()),
+        "baseline_label": baseline_path.map(|_| label),
         "workload": {
             "cell_count": measurement.workload_summary.cell_count,
             "frontier_count": measurement.workload_summary.frontier_count,
@@ -433,6 +474,23 @@ fn workload_measurement_json(
             "selected_token_count": measurement.checkout.selected_token_count,
         },
     })
+}
+
+fn record_workload_baseline(
+    path: &PathBuf,
+    label: &str,
+    kernel: &str,
+    measurement: &WorkloadMeasurement,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let recorded_at = Utc::now();
+    let record = WorkloadBaselineRecord::new(
+        recorded_at,
+        label,
+        kernel,
+        WorkloadMeasurementSnapshot::from_measurement(measurement),
+    );
+    FileWorkloadBaselineStore::new(path).append(&record)?;
+    Ok(())
 }
 
 fn capabilities_json(capabilities: KernelCapabilities) -> serde_json::Value {

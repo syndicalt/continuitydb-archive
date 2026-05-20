@@ -141,6 +141,97 @@ fn cli_measure_workload_requires_file_store_path() -> Result<(), Box<dyn std::er
 }
 
 #[test]
+fn cli_measure_workload_records_baseline_for_memory_kernel(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-measure-workload-memory-baseline");
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("memory-small")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    let records: Vec<Value> = baseline_text
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+
+    assert_eq!(
+        json["baseline_path"].as_str(),
+        Some(baseline_path.display().to_string().as_str())
+    );
+    assert_eq!(json["baseline_label"].as_str(), Some("memory-small"));
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["label"].as_str(), Some("memory-small"));
+    assert_eq!(records[0]["kernel"].as_str(), Some("memory"));
+    assert_eq!(
+        records[0]["snapshot"]["workload"]["cell_count"].as_u64(),
+        Some(8)
+    );
+    assert_eq!(
+        records[0]["snapshot"]["checkout"]["matched_count"].as_u64(),
+        Some(8)
+    );
+
+    fs::remove_file(baseline_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_measure_workload_records_baseline_for_file_kernel() -> Result<(), Box<dyn std::error::Error>>
+{
+    let store_path = temp_store_path("continuitydb-cli-measure-workload-file-baseline-store");
+    let baseline_path = temp_store_path("continuitydb-cli-measure-workload-file-baseline");
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("file")
+        .arg("--store-path")
+        .arg(&store_path)
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .arg("--label")
+        .arg("file-small")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let baseline_text = fs::read_to_string(&baseline_path)?;
+    let records: Vec<Value> = baseline_text
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+
+    assert_eq!(json["kernel"].as_str(), Some("file"));
+    assert_eq!(json["baseline_label"].as_str(), Some("file-small"));
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["label"].as_str(), Some("file-small"));
+    assert_eq!(records[0]["kernel"].as_str(), Some("file"));
+    assert_eq!(
+        records[0]["snapshot"]["ingest"]["operation_count"].as_u64(),
+        Some(8)
+    );
+
+    fs::remove_file(store_path)?;
+    fs::remove_file(baseline_path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_checkout_query_executes_serialized_typed_query() -> Result<(), Box<dyn std::error::Error>> {
     let store_path = temp_store_path("continuitydb-cli-checkout-query-store");
     let query_path = temp_store_path("continuitydb-cli-checkout-query-query");

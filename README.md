@@ -13,6 +13,7 @@ The first milestone builds:
 - Storage-kernel-generic deterministic workload measurement for ingest and checkout.
 - CLI workload measurement for memory and file-backed kernels.
 - JSONL workload measurement baseline recording.
+- CLI workload measurement baseline recording.
 - A pluggable storage kernel trait.
 - An in-memory kernel for correctness tests.
 - Basic revision links.
