@@ -67,6 +67,7 @@ The first milestone builds:
 - CLI kernel capability inspection and requirement checks.
 - CLI file-backed commands routed through native open helpers.
 - CLI commit backup and restore commands over versioned export envelopes.
+- CLI incremental commit export for cursor-based backup and sync workflows.
 - A thin CLI over library APIs.
 
 ## Roadmap

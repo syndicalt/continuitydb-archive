@@ -123,6 +123,7 @@ Storage kernel
 8. Add canonical file-store inspection gate. Implemented `continuitydb inspect-kernel --require-canonical` so CI and operators can fail early when a readable file store needs compaction.
 9. Add conditional file-store compaction. Implemented `continuitydb compact-file --if-needed` so operators can compact only when health recommends it.
 10. Add commit import dry-run validation. Implemented `continuitydb import-commits --dry-run` so operators can validate backup files against a target store before mutation.
+11. Add incremental commit export. Implemented `continuitydb export-commits --after --limit` so operators can page commit backups through the same cursor semantics exposed by the native API.
 
 ## Native API Milestones
 
