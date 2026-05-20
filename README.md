@@ -53,6 +53,7 @@ The first milestone builds:
 - Dependency-aware constraints in strict text `CHECKOUT` queries.
 - Standalone dependency-kind storage lookups with file-kernel planner diagnostics.
 - File-kernel lookup plans with exact post-filter match counts.
+- File-kernel lookup plans with filtered-candidate diagnostics.
 - Portable typed query serialization for bindings and future query files.
 - Versioned JSON envelopes for portable typed query files.
 - Read-only typed query AST introspection for embedders and bindings.

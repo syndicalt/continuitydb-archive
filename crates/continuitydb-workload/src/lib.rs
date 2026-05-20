@@ -187,6 +187,8 @@ pub struct WorkloadLookupPlanSnapshot {
     pub candidate_count: usize,
     /// Number of selected candidates that satisfy the exact lookup predicate.
     pub exact_match_count: usize,
+    /// Number of selected candidates rejected by exact predicate filtering.
+    pub filtered_candidate_count: usize,
     /// Whether lookup must inspect all visible StateCells.
     pub full_scan: bool,
 }
@@ -210,6 +212,7 @@ impl From<FileKernelLookupPlan> for WorkloadLookupPlanSnapshot {
                 .collect(),
             candidate_count: plan.candidate_count,
             exact_match_count: plan.exact_match_count,
+            filtered_candidate_count: plan.filtered_candidate_count,
             full_scan: plan.full_scan,
         }
     }
@@ -441,6 +444,13 @@ pub enum WorkloadBaselineRegression {
         /// Baseline exact match count.
         previous: usize,
         /// Current exact match count.
+        current: usize,
+    },
+    /// Filtered candidate count changed.
+    LookupPlanFilteredCandidateCountChanged {
+        /// Baseline filtered candidate count.
+        previous: usize,
+        /// Current filtered candidate count.
         current: usize,
     },
     /// Lookup-plan full-scan fallback changed.
@@ -793,6 +803,17 @@ fn push_lookup_plan_regressions(
                 |previous, current| WorkloadBaselineRegression::LookupPlanExactMatchCountChanged {
                     previous,
                     current,
+                },
+            );
+            push_if_changed(
+                regressions,
+                previous.filtered_candidate_count,
+                current.filtered_candidate_count,
+                |previous, current| {
+                    WorkloadBaselineRegression::LookupPlanFilteredCandidateCountChanged {
+                        previous,
+                        current,
+                    }
                 },
             );
             push_if_changed(
@@ -1251,6 +1272,7 @@ mod tests {
                 ],
                 candidate_count: 8,
                 exact_match_count: 8,
+                filtered_candidate_count: 0,
                 full_scan: false,
             }),
         );
@@ -1286,12 +1308,43 @@ mod tests {
                 ],
                 candidate_count: 8,
                 exact_match_count: 5,
+                filtered_candidate_count: 3,
                 full_scan: false,
             }),
         );
         let json = serde_json::to_value(snapshot)?;
 
         assert_eq!(json["lookup_plan"]["exact_match_count"].as_u64(), Some(5));
+        Ok(())
+    }
+
+    #[test]
+    fn workload_snapshot_preserves_lookup_plan_filtered_candidate_count(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let measurement = sample_measurement()?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement_with_lookup_plan(
+            &measurement,
+            Some(continuitydb_kernel::FileKernelLookupPlan {
+                indexed_constraint_count: 1,
+                indexed_constraints: vec!["valid_at"],
+                indexed_constraint_plans: vec![
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "valid_at",
+                        candidate_count: 8,
+                    },
+                ],
+                candidate_count: 8,
+                exact_match_count: 5,
+                filtered_candidate_count: 3,
+                full_scan: false,
+            }),
+        );
+        let json = serde_json::to_value(snapshot)?;
+
+        assert_eq!(
+            json["lookup_plan"]["filtered_candidate_count"].as_u64(),
+            Some(3)
+        );
         Ok(())
     }
 
@@ -1589,6 +1642,54 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn workload_baseline_regression_detects_lookup_plan_filtered_candidate_count_change(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut previous = baseline_record("current", "file", 100, 100)?;
+        previous.snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["valid_at".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "valid_at".to_string(),
+                candidate_count: 8,
+            }],
+            candidate_count: 8,
+            exact_match_count: 5,
+            filtered_candidate_count: 3,
+            full_scan: false,
+        });
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["valid_at".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "valid_at".to_string(),
+                candidate_count: 8,
+            }],
+            candidate_count: 8,
+            exact_match_count: 5,
+            filtered_candidate_count: 4,
+            full_scan: false,
+        });
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert_eq!(
+            comparison.regressions,
+            vec![
+                WorkloadBaselineRegression::LookupPlanFilteredCandidateCountChanged {
+                    previous: 3,
+                    current: 4,
+                }
+            ]
+        );
+        Ok(())
+    }
+
     fn sample_measurement() -> Result<WorkloadMeasurement, Box<dyn std::error::Error>> {
         let workload = generate_world_model_workload(sample_config()?)?;
         let mut kernel = MemoryKernel::default();
@@ -1682,6 +1783,7 @@ mod tests {
                 .collect(),
             candidate_count,
             exact_match_count: candidate_count,
+            filtered_candidate_count: 0,
             full_scan,
         }
     }
