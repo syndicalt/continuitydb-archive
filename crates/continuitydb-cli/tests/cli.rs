@@ -613,6 +613,132 @@ fn cli_benchmark_local_model_stability_rejects_zero_trials_without_baseline(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_fail_on_unstable_requires_stability_trials(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-fail-on-unstable-missing-trials-baseline");
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--fail-on-unstable")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("--fail-on-unstable requires --stability-trials"));
+
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_benchmark_local_model_fail_on_unstable_dry_run_reports_gate(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-fail-on-unstable-dry-run");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--stability-trials")
+        .arg("2")
+        .arg("--fail-on-unstable")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["stability_preflight"]["trials"].as_u64(), Some(2));
+    assert_eq!(
+        json["stability_preflight"]["fail_on_unstable"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        json["stability_preflight"]["will_execute"].as_bool(),
+        Some(false)
+    );
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_benchmark_local_model_fail_on_unstable_rejects_drift_without_baseline(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-unstable-runner");
+    let counter_path = temp_store_path("continuitydb-cli-local-model-unstable-counter");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-unstable-baseline");
+    let script = format!(
+        r#"#!/usr/bin/env sh
+cat >/dev/null
+counter_path='{counter_path}'
+count=0
+if test -f "$counter_path"; then
+    count=$(cat "$counter_path")
+fi
+count=$((count + 1))
+printf '%s' "$count" >"$counter_path"
+if test "$count" -le 4; then
+    thin_rationale='The evidence is thin, so uncertainty remains.'
+else
+    thin_rationale='The evidence is thin, so uncertainty still remains.'
+fi
+printf '%s\n' '{{"proposals":[{{"action":{{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."}},"rationale":"'"$thin_rationale"'","citations":["continuitydb://evaluation/thin-evidence"]}},{{"action":{{"type":"link_revision","source":"00000000-0000-0000-0000-000000000001","kind":"conflicts_with","target":"00000000-0000-0000-0000-000000000002"}},"rationale":"The cited evidence directly contradicts the target claim.","citations":["continuitydb://evaluation/conflict-evidence"]}},{{"action":{{"type":"request_verification","cell_id":null,"request":"Verify deployment status before treating the release as shipped."}},"rationale":"The evidence does not support deployment, so the shipped claim remains unsupported.","citations":["continuitydb://evaluation/unsupported-release-claim"]}},{{"action":{{"type":"mark_frontier","cell_id":"00000000-0000-0000-0000-000000000003"}},"rationale":"The release status changed between the build and incident sources, so this state should stay on the frontier.","citations":["continuitydb://evaluation/release-build-source","continuitydb://evaluation/release-incident-source"]}}]}}'
+"#,
+        counter_path = counter_path.display()
+    );
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--stability-trials")
+        .arg("2")
+        .arg("--fail-on-unstable")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--arg")
+        .arg("--temp")
+        .arg("--arg")
+        .arg("0")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("local model benchmark stability check failed"));
+
+    assert!(!baseline_path.exists());
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(counter_path)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_benchmark_local_model_dry_run_compare_reports_missing_baseline_without_creating_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let baseline_path = temp_store_path("continuitydb-cli-local-model-dry-run-missing-baseline");

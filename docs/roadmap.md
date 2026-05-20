@@ -264,6 +264,7 @@ Storage kernel
 52. Add default local-model citation preservation evaluation. Expanded the fixed Steward benchmark suite with a deterministic multi-source citation preservation case so local model baselines test whether models preserve all required evidence locators for frontier decisions.
 53. Add local-model benchmark stability reporting. Added a public repeated-run stability report API for local Steward benchmarks so embedders can detect output drift across low-temperature trials even when each individual run still passes deterministic evaluation.
 54. Add CLI local-model benchmark stability reporting. Added `benchmark-local-model --stability-trials` so operators can request repeated-run stability reports from the existing benchmark command, with dry-run preflight metadata and real-run JSON output that does not persist stability as a baseline.
+55. Add CLI local-model instability failure gating. Added `benchmark-local-model --fail-on-unstable` so repeated-run stability drift can fail before baseline recording, making low-temperature output instability usable as a CI gate for Steward model candidates.
 
 ## Small Embeddable Model Track
 

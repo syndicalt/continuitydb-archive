@@ -74,6 +74,7 @@ struct LocalModelBenchmarkOptions<'a> {
     enforce_candidate_requirements: bool,
     baseline_path: &'a Path,
     stability_trials: Option<usize>,
+    fail_on_unstable: bool,
     dry_run: bool,
     compare_baseline: bool,
     fail_on_regression: bool,
@@ -256,6 +257,9 @@ enum Command {
         /// Re-run each evaluation case N times and report output stability.
         #[arg(long = "stability-trials")]
         stability_trials: Option<usize>,
+        /// Exit non-zero before baseline recording when repeated stability trials drift.
+        #[arg(long = "fail-on-unstable")]
+        fail_on_unstable: bool,
         /// Print benchmark configuration without executing the model or recording a baseline.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -459,6 +463,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             enforce_candidate_requirements,
             baseline_path,
             stability_trials,
+            fail_on_unstable,
             dry_run,
             compare_baseline,
             fail_on_regression,
@@ -475,6 +480,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 enforce_candidate_requirements,
                 baseline_path: &baseline_path,
                 stability_trials,
+                fail_on_unstable,
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
@@ -681,6 +687,9 @@ fn benchmark_local_model_json(
     if options.stability_trials == Some(0) {
         return Err(std::io::Error::other("--stability-trials must be greater than zero").into());
     }
+    if options.fail_on_unstable && options.stability_trials.is_none() {
+        return Err(std::io::Error::other("--fail-on-unstable requires --stability-trials").into());
+    }
     let mut config = if options.candidate_defaults {
         candidate.recommended_runner_config(
             options.executable.to_path_buf(),
@@ -716,18 +725,26 @@ fn benchmark_local_model_json(
             contract_artifacts.as_ref(),
             &prompt_artifacts,
             baseline_preflight,
-            options
-                .stability_trials
-                .map(local_model_stability_preflight_json),
+            options.stability_trials.map(|trials| {
+                local_model_stability_preflight_json(trials, options.fail_on_unstable)
+            }),
         ));
     }
 
     let benchmark = LocalModelBenchmark::new(candidate, LocalExecutableRunner::new(config), suite);
-    let mut store = FileLocalModelBenchmarkBaselineStore::open(options.baseline_path)?;
     let identity = StewardIdentity::new("continuitydb-cli-local-model", "0.1.0", "strict")?;
     let stability = options
         .stability_trials
         .map(|trials| benchmark.run_stability(identity.clone(), trials));
+    if options.fail_on_unstable
+        && stability
+            .as_ref()
+            .is_some_and(|stability| !stability.stable())
+    {
+        return Err(std::io::Error::other("local model benchmark stability check failed").into());
+    }
+
+    let mut store = FileLocalModelBenchmarkBaselineStore::open(options.baseline_path)?;
     let report = record_local_model_benchmark_baseline_with_regression(
         &benchmark,
         identity,
@@ -788,10 +805,14 @@ fn local_model_benchmark_dry_run_json(
 }
 
 #[cfg(feature = "local-model")]
-fn local_model_stability_preflight_json(trials: usize) -> serde_json::Value {
+fn local_model_stability_preflight_json(
+    trials: usize,
+    fail_on_unstable: bool,
+) -> serde_json::Value {
     serde_json::json!({
         "trials": trials,
         "will_execute": false,
+        "fail_on_unstable": fail_on_unstable,
     })
 }
 
