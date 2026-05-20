@@ -5,6 +5,7 @@ use continuitydb_core::{
     ActivationState, CellDependencyKind, Confidence, Scope, StateCell, StateCellId,
 };
 use std::{
+    collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -57,11 +58,57 @@ pub trait StorageKernel {
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError>;
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct FileKernelIndex {
+    cells: Vec<StateCell>,
+    ids: HashSet<StateCellId>,
+    anchors: HashMap<String, Vec<usize>>,
+}
+
+impl FileKernelIndex {
+    fn rebuild(cells: Vec<StateCell>) -> Result<Self, KernelError> {
+        let mut index = Self::default();
+        for cell in cells {
+            index.insert(cell)?;
+        }
+        Ok(index)
+    }
+
+    fn insert(&mut self, cell: StateCell) -> Result<(), KernelError> {
+        if !self.ids.insert(cell.id) {
+            return Err(KernelError::DuplicateCell);
+        }
+
+        let position = self.cells.len();
+        for anchor in &cell.anchors {
+            self.anchors
+                .entry(anchor.as_str().to_string())
+                .or_default()
+                .push(position);
+        }
+        self.cells.push(cell);
+        Ok(())
+    }
+
+    fn contains_id(&self, id: StateCellId) -> bool {
+        self.ids.contains(&id)
+    }
+}
+
 /// Append-only JSONL file-backed storage kernel.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct FileKernel {
     path: PathBuf,
+    index: FileKernelIndex,
 }
+
+impl PartialEq for FileKernel {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Eq for FileKernel {}
 
 impl FileKernel {
     /// Opens an append-only JSONL kernel at the supplied path.
@@ -80,35 +127,38 @@ impl FileKernel {
             .open(&path)
             .map_err(|_error| KernelError::StoreIo)?;
 
-        Ok(Self { path })
+        let cells = read_cells_from_path(&path)?;
+        let index = FileKernelIndex::rebuild(cells)?;
+
+        Ok(Self { path, index })
     }
 
     /// Returns the backing file path.
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
 
-    fn read_cells(&self) -> Result<Vec<StateCell>, KernelError> {
-        let file = File::open(&self.path).map_err(|_error| KernelError::StoreIo)?;
-        let reader = BufReader::new(file);
-        let mut cells = Vec::new();
+fn read_cells_from_path(path: &Path) -> Result<Vec<StateCell>, KernelError> {
+    let file = File::open(path).map_err(|_error| KernelError::StoreIo)?;
+    let reader = BufReader::new(file);
+    let mut cells = Vec::new();
 
-        for line in reader.lines() {
-            let line = line.map_err(|_error| KernelError::StoreIo)?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            cells.push(serde_json::from_str(&line).map_err(|_error| KernelError::StoreCorrupt)?);
+    for line in reader.lines() {
+        let line = line.map_err(|_error| KernelError::StoreIo)?;
+        if line.trim().is_empty() {
+            continue;
         }
 
-        Ok(cells)
+        cells.push(serde_json::from_str(&line).map_err(|_error| KernelError::StoreCorrupt)?);
     }
+
+    Ok(cells)
 }
 
 impl StorageKernel for FileKernel {
     fn append_cell(&mut self, cell: StateCell) -> Result<(), KernelError> {
-        if self.read_cells()?.iter().any(|stored| stored.id == cell.id) {
+        if self.index.contains_id(cell.id) {
             return Err(KernelError::DuplicateCell);
         }
 
@@ -120,12 +170,28 @@ impl StorageKernel for FileKernel {
             .map_err(|_error| KernelError::StoreIo)?;
         file.write_all(encoded.as_bytes())
             .and_then(|()| file.write_all(b"\n"))
-            .map_err(|_error| KernelError::StoreIo)
+            .map_err(|_error| KernelError::StoreIo)?;
+
+        self.index.insert(cell)
     }
 
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError> {
-        let cells = self
-            .read_cells()?
+        let candidates: Vec<&StateCell> = if let Some(anchor) = lookup.semantic_anchor.as_ref() {
+            self.index
+                .anchors
+                .get(anchor)
+                .map(|positions| {
+                    positions
+                        .iter()
+                        .map(|position| &self.index.cells[*position])
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            self.index.cells.iter().collect()
+        };
+
+        let cells = candidates
             .into_iter()
             .filter(|cell| {
                 lookup.semantic_anchor.as_ref().map_or(true, |anchor| {
@@ -187,6 +253,7 @@ impl StorageKernel for FileKernel {
                     })
                 })
             })
+            .cloned()
             .collect();
 
         Ok(cells)
@@ -284,12 +351,25 @@ mod tests {
     }
 
     #[test]
+    fn file_kernel_open_rejects_duplicate_ids_in_log() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-duplicate-log");
+        let cell = sample_cell("project:continuitydb:duplicate-log", 0.91, 12)?;
+        let encoded = serde_json::to_string(&cell)?;
+        fs::write(&path, format!("{encoded}\n{encoded}\n"))?;
+
+        let result = FileKernel::open(&path);
+
+        assert!(matches!(result, Err(KernelError::DuplicateCell)));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
     fn file_kernel_rejects_corrupt_jsonl() -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_kernel_path("continuitydb-file-kernel-corrupt");
         fs::write(&path, "{not valid json}\n")?;
-        let kernel = FileKernel::open(&path)?;
 
-        let result = kernel.lookup_cells(CellLookup::default());
+        let result = FileKernel::open(&path);
 
         assert!(matches!(result, Err(KernelError::StoreCorrupt)));
         fs::remove_file(path)?;
