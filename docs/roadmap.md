@@ -130,6 +130,7 @@ Storage kernel
 10. Add versioned JSON commit export envelopes. Implemented `CommitExportEnvelope` plus JSON encode/decode helpers so native commit export batches can be written to files or sync channels with explicit format/version validation.
 11. Add native commit backup and restore file helpers. Implemented `ContinuityDb<FileKernel>::export_commits_json_file` and `import_commits_json_file` so embedders can write and read versioned commit export envelope files without duplicating CLI file I/O orchestration.
 12. Add native kernel requirement enforcement. Implemented `ContinuityDb::kernel_satisfies` and `ensure_kernel_requirements` with a typed `KernelRequirementsNotMet` error so embedders can fail early when a backing kernel lacks required production guarantees.
+13. Add file-backed open helpers with requirement enforcement. Implemented `ContinuityDb<FileKernel>::open_file` and `open_file_with_requirements` so embedders can enforce storage profiles before receiving a usable file-backed database handle.
 
 ## Steward Milestones
 
