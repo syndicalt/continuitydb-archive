@@ -109,6 +109,15 @@ pub struct CommitImportValidation {
     pub valid_commits: usize,
 }
 
+/// Summary of a successful commit import.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommitImportSummary {
+    /// Number of commit slices imported.
+    pub imported_commits: usize,
+    /// Cursor from the imported export batch.
+    pub next_after: Option<CommitId>,
+}
+
 /// Summary of a conditional file-store compaction attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileCompactionSummary {
@@ -349,8 +358,18 @@ impl<K: StorageKernel> ContinuityDb<K> {
         &mut self,
         batch: CommitExportBatch,
     ) -> Result<usize, ContinuityError> {
+        let summary = self.import_commit_batch_with_summary(batch)?;
+        Ok(summary.imported_commits)
+    }
+
+    /// Imports a validated commit export batch into the backing kernel and returns cursor metadata.
+    pub fn import_commit_batch_with_summary(
+        &mut self,
+        batch: CommitExportBatch,
+    ) -> Result<CommitImportSummary, ContinuityError> {
         self.validate_commit_import(&batch)?;
         let imported = batch.slices.len();
+        let next_after = batch.next_after;
         for slice in batch.slices {
             self.kernel.append_cells_at_with_commit_id(
                 slice.cells,
@@ -358,7 +377,10 @@ impl<K: StorageKernel> ContinuityDb<K> {
                 slice.manifest.commit_id,
             )?;
         }
-        Ok(imported)
+        Ok(CommitImportSummary {
+            imported_commits: imported,
+            next_after,
+        })
     }
 
     /// Validates a commit export batch without mutating the backing kernel.
@@ -601,9 +623,18 @@ impl ContinuityDb<FileKernel> {
         &mut self,
         input_path: P,
     ) -> Result<usize, ContinuityError> {
+        let summary = self.import_commits_json_file_with_summary(input_path)?;
+        Ok(summary.imported_commits)
+    }
+
+    /// Imports a versioned JSON commit export envelope from a file and returns cursor metadata.
+    pub fn import_commits_json_file_with_summary<P: AsRef<Path>>(
+        &mut self,
+        input_path: P,
+    ) -> Result<CommitImportSummary, ContinuityError> {
         let encoded = fs::read(input_path).map_err(|_error| ContinuityError::CommitExportFileIo)?;
         let batch = Self::decode_commit_export_json(&encoded)?;
-        self.import_commit_batch(batch)
+        self.import_commit_batch_with_summary(batch)
     }
 
     /// Validates a versioned JSON commit export envelope from a file without mutating the store.
@@ -634,7 +665,8 @@ mod tests {
     use std::{fs, path::Path};
 
     use super::{
-        CommitExportBatch, CommitExportFileSummary, CommitSlice, ContinuityDb, ContinuityError,
+        CommitExportBatch, CommitExportFileSummary, CommitImportSummary, CommitSlice, ContinuityDb,
+        ContinuityError,
     };
 
     fn sample_cell(
@@ -1526,6 +1558,46 @@ mod tests {
     }
 
     #[test]
+    fn api_import_commit_backup_json_file_summary_reports_cursor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_path = temp_file_kernel_path("continuitydb-api-import-summary-source");
+        let target_path = temp_file_kernel_path("continuitydb-api-import-summary-target");
+        let backup_path = temp_file_kernel_path("continuitydb-api-import-summary-backup");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(FileKernel::open(&source_path)?);
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:file-import-summary",
+                0.91,
+                12,
+            )?],
+            committed_at,
+            commit_id,
+        )?;
+        source.export_commits_json_file(CommitManifestLookup::default(), &backup_path)?;
+        let mut target = ContinuityDb::new(FileKernel::open(&target_path)?);
+
+        let summary = target.import_commits_json_file_with_summary(&backup_path)?;
+
+        assert_eq!(
+            summary,
+            CommitImportSummary {
+                imported_commits: 1,
+                next_after: Some(commit_id),
+            }
+        );
+
+        fs::remove_file(source_path)?;
+        fs::remove_file(target_path)?;
+        fs::remove_file(backup_path)?;
+        Ok(())
+    }
+
+    #[test]
     fn api_import_commit_backup_json_file_rejects_invalid_json(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let target_path = temp_file_kernel_path("continuitydb-api-import-backup-invalid-target");
@@ -1611,6 +1683,79 @@ mod tests {
             target.export_commits(CommitManifestLookup::default())?,
             batch
         );
+        Ok(())
+    }
+
+    #[test]
+    fn api_import_commit_batch_summary_reports_count_and_cursor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let first_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:summary-first", 0.91, 12)?],
+            first_time,
+            first_commit,
+        )?;
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:summary-second",
+                0.83,
+                15,
+            )?],
+            second_time,
+            second_commit,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup {
+            after: None,
+            limit: Some(1),
+        })?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let summary = target.import_commit_batch_with_summary(batch.clone())?;
+
+        assert_eq!(
+            summary,
+            CommitImportSummary {
+                imported_commits: 1,
+                next_after: Some(first_commit),
+            }
+        );
+        assert_eq!(
+            target.export_commits(CommitManifestLookup::default())?,
+            batch
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_import_commit_batch_count_delegates_to_summary() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:summary-count", 0.91, 12)?],
+            committed_at,
+            commit_id,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup::default())?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let imported = target.import_commit_batch(batch)?;
+
+        assert_eq!(imported, 1);
         Ok(())
     }
 
