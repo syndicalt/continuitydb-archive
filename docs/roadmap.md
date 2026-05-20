@@ -90,6 +90,7 @@ Storage kernel
 34. Add file-kernel secondary indexes for valid-time lookups. Implemented a derived valid-start-time index rebuilt from the JSONL log and maintained after append so real-world as-of checkout can start from indexed candidates while preserving exact final range filtering.
 35. Add file-kernel indexed candidate-set selection. Replaced fixed lookup-priority candidate selection with a smallest-indexed-candidate chooser so combined checkout constraints can start from the narrowest available derived index while preserving exact final filtering.
 36. Add file-kernel indexed candidate-set intersection. Extended candidate selection to intersect all available indexed lookup constraints, preserving exact final filtering while reducing over-selection when the narrowest single index still contains cells excluded by other indexed constraints.
+37. Add file-kernel lookup-plan introspection. Implemented `FileKernel::lookup_plan` and `FileKernelLookupPlan` so embedders can inspect indexed constraint counts, pre-filter candidate counts, and full-scan fallback behavior before executing a lookup.
 
 ## Checkout Milestones
 

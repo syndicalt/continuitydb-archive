@@ -531,7 +531,7 @@ impl FileKernelIndex {
             .collect()
     }
 
-    fn candidate_positions(&self, lookup: &CellLookup) -> Vec<usize> {
+    fn candidate_position_sets(&self, lookup: &CellLookup) -> Vec<Vec<usize>> {
         let mut candidates = Vec::new();
 
         if let Some(cell_id) = lookup.cell_id {
@@ -598,6 +598,11 @@ impl FileKernelIndex {
             candidates.push(self.positions_at_valid_time(valid_at));
         }
 
+        candidates
+    }
+
+    fn candidate_positions(&self, lookup: &CellLookup) -> Vec<usize> {
+        let mut candidates = self.candidate_position_sets(lookup);
         let Some((smallest_index, _positions)) = candidates
             .iter()
             .enumerate()
@@ -616,6 +621,16 @@ impl FileKernelIndex {
                 .all(|positions| positions.contains(position))
         });
         selected
+    }
+
+    fn lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
+        let indexed_constraint_count = self.candidate_position_sets(lookup).len();
+        let candidate_count = self.candidate_positions(lookup).len();
+        FileKernelLookupPlan {
+            indexed_constraint_count,
+            candidate_count,
+            full_scan: indexed_constraint_count == 0,
+        }
     }
 
     fn apply_explicit_manifest(&mut self, manifest: CommitManifest) -> Result<(), KernelError> {
@@ -861,6 +876,17 @@ pub struct FileKernelStatus {
     pub file_size_bytes: u64,
 }
 
+/// Deterministic summary of how the file kernel will seed a cell lookup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileKernelLookupPlan {
+    /// Number of indexed lookup constraints present in the request.
+    pub indexed_constraint_count: usize,
+    /// Number of StateCell candidates selected before exact predicate filtering.
+    pub candidate_count: usize,
+    /// Whether lookup must inspect all visible StateCells.
+    pub full_scan: bool,
+}
+
 /// Operational health report for a file-backed storage kernel.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileKernelHealth {
@@ -959,6 +985,11 @@ impl FileKernel {
     /// Returns the file-format health report captured for this store.
     pub fn health(&self) -> FileKernelHealth {
         self.health
+    }
+
+    /// Returns a deterministic lookup candidate plan for the supplied constraints.
+    pub fn lookup_plan(&self, lookup: &CellLookup) -> FileKernelLookupPlan {
+        self.index.lookup_plan(lookup)
     }
 
     /// Rewrites the backing JSONL log into the current canonical record format.
@@ -3844,6 +3875,62 @@ mod tests {
         assert_eq!(candidate_positions, vec![matching_position]);
         assert_eq!(lookup_results.len(), 1);
         assert_eq!(lookup_results[0].id, matching_id);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_lookup_plan_reports_full_scan_without_indexed_constraints(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-lookup-plan-full-scan");
+        let first = sample_cell("project:continuitydb:lookup-plan-full-scan-first", 0.91, 12)?;
+        let second = sample_cell(
+            "project:continuitydb:lookup-plan-full-scan-second",
+            0.83,
+            15,
+        )?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, first)?;
+        append_committed(&mut kernel, second)?;
+
+        let plan = kernel.lookup_plan(&CellLookup::default());
+
+        assert_eq!(plan.indexed_constraint_count, 0);
+        assert_eq!(plan.candidate_count, 2);
+        assert!(plan.full_scan);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_lookup_plan_reports_intersected_indexed_candidates(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-lookup-plan-indexed");
+        let mut matching = sample_cell("project:continuitydb:lookup-plan-indexed-match", 0.91, 12)?;
+        matching.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let broad = sample_cell("project:continuitydb:lookup-plan-indexed-broad", 0.83, 15)?;
+        let mut wrong_scope = sample_cell(
+            "project:continuitydb:lookup-plan-indexed-wrong-scope",
+            0.89,
+            11,
+        )?;
+        wrong_scope.scope = Scope::Team("platform".to_string());
+        wrong_scope.answerability = Answerability::new(vec!["what changed?".to_string()])?;
+        let mut kernel = FileKernel::open(&path)?;
+        append_committed(&mut kernel, broad)?;
+        append_committed(&mut kernel, matching)?;
+        append_committed(&mut kernel, wrong_scope)?;
+        let lookup = CellLookup {
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            answerability_question: Some("what changed?".to_string()),
+            ..CellLookup::default()
+        };
+
+        let plan = kernel.lookup_plan(&lookup);
+
+        assert_eq!(plan.indexed_constraint_count, 2);
+        assert_eq!(plan.candidate_count, 1);
+        assert!(!plan.full_scan);
         fs::remove_file(path)?;
         Ok(())
     }
