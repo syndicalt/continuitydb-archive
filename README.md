@@ -18,6 +18,7 @@ The first milestone builds:
 - Versioned JSON envelopes for portable typed query files.
 - Native typed query execution through the embeddable API.
 - CLI execution for serialized typed query files.
+- CLI execution for versioned typed query envelopes.
 - Commit-scoped checkout.
 - Audit traces.
 - Commit-aware audit traces.
