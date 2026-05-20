@@ -2421,10 +2421,13 @@ fn write_workload_replay_bundle_manifest(
 ) -> Result<WorkloadBundleManifest, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(replay_artifact_dir)?;
     let manifest_path = replay_artifact_dir.join("continuitydb-workload-replay.manifest.json");
+    let report_text = std::fs::read_to_string(report_path)?;
     let manifest = serde_json::json!({
         "format": "continuitydb.workload.replay_bundle",
         "format_version": 1,
         "replay_report_path": report_path.display().to_string(),
+        "replay_report_fingerprint": fnv1a64_fingerprint(&report_text),
+        "replay_report_bytes": report_text.len(),
         "input_artifact_dir": input_artifact_dir.display().to_string(),
         "kernel": report["kernel"].clone(),
         "store_path": report["store_path"].clone(),

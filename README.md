@@ -22,6 +22,7 @@ The first milestone builds:
 - CLI workload replay comparison gate.
 - CLI workload replay report artifacts.
 - CLI workload replay artifact bundles.
+- CLI workload replay report artifact metadata.
 - CLI workload replay artifact bundle separation.
 - CLI workload replay input manifest validation.
 - CLI workload replay validated input manifest metadata.

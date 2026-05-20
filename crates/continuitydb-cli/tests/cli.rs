@@ -1273,6 +1273,12 @@ fn cli_replay_workload_artifact_dir_writes_mismatch_bundle(
         replay_manifest["replay_report_path"].as_str(),
         Some(replay_report_path.display().to_string().as_str())
     );
+    assert!(replay_manifest["replay_report_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(replay_manifest["replay_report_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
     assert_eq!(
         replay_manifest["input_artifact_dir"].as_str(),
         Some(artifact_dir.display().to_string().as_str())
