@@ -371,6 +371,40 @@ fn cli_local_model_evaluation_suite_outputs_case_contracts(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_local_model_candidates_outputs_fixed_registry() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("local-model-candidates")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        json["default_candidate"].as_str(),
+        Some("Qwen/Qwen2.5-0.5B-Instruct")
+    );
+    assert_eq!(json["total_candidates"].as_u64(), Some(4));
+    assert_eq!(
+        json["candidates"][0]["model_id"].as_str(),
+        Some("Qwen/Qwen2.5-0.5B-Instruct")
+    );
+    assert_eq!(
+        json["candidates"][0]["role"].as_str(),
+        Some("default-feasibility")
+    );
+    assert!(json["candidates"].as_array().is_some_and(|candidates| {
+        candidates.iter().any(|candidate| {
+            candidate["model_id"].as_str() == Some("HuggingFaceTB/SmolLM2-360M-Instruct")
+                && candidate["role"].as_str() == Some("ultra-small-experimental")
+        })
+    }));
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_contract_writes_schema_and_grammar() -> Result<(), Box<dyn std::error::Error>> {
     let schema_path = temp_store_path("continuitydb-cli-local-model-schema");
     let grammar_path = temp_store_path("continuitydb-cli-local-model-grammar");

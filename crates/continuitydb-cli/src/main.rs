@@ -222,6 +222,9 @@ enum Command {
     /// Print the default local Steward model evaluation suite contract as JSON.
     #[cfg(feature = "local-model")]
     LocalModelEvaluationSuite,
+    /// Print the fixed local Steward model candidate registry as JSON.
+    #[cfg(feature = "local-model")]
+    LocalModelCandidates,
 }
 
 fn main() {
@@ -420,9 +423,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let output = local_model_evaluation_suite_json();
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
+        #[cfg(feature = "local-model")]
+        Some(Command::LocalModelCandidates) => {
+            let output = local_model_candidates_json();
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
         None => {}
     }
     Ok(())
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_candidates_json() -> serde_json::Value {
+    let candidates = small_model_candidates();
+    serde_json::json!({
+        "default_candidate": candidates.first().map(SmallModelCandidate::model_id),
+        "total_candidates": candidates.len(),
+        "candidates": candidates
+            .iter()
+            .map(|candidate| {
+                serde_json::json!({
+                    "model_id": candidate.model_id(),
+                    "role": candidate.role(),
+                })
+            })
+            .collect::<Vec<_>>(),
+    })
 }
 
 #[cfg(feature = "local-model")]
