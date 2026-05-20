@@ -198,6 +198,7 @@ The first milestone builds:
 - File-kernel explainable lookup-plan constraint labels.
 - File-kernel per-constraint lookup-plan cardinalities.
 - File-kernel residual lookup-plan diagnostics.
+- Workload residual lookup-plan regression detection.
 - File-kernel secondary indexes for revision-link lookups.
 - Typed storage-kernel capability introspection for embedders.
 - Typed storage-kernel requirement checks for production readiness gates.

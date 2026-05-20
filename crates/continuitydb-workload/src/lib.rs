@@ -472,6 +472,13 @@ pub enum WorkloadBaselineRegression {
         /// Current ordered exact constraint names.
         current: Vec<String>,
     },
+    /// Ordered residual exact lookup constraints changed.
+    LookupPlanResidualExactConstraintsChanged {
+        /// Baseline ordered residual exact constraint names.
+        previous: Vec<String>,
+        /// Current ordered residual exact constraint names.
+        current: Vec<String>,
+    },
     /// Ordered lossy indexed lookup constraints changed.
     LookupPlanLossyIndexedConstraintsChanged {
         /// Baseline ordered lossy indexed constraint names.
@@ -856,6 +863,17 @@ fn push_lookup_plan_regressions(
                 current.lossy_indexed_constraints.as_slice(),
                 |previous, current| {
                     WorkloadBaselineRegression::LookupPlanLossyIndexedConstraintsChanged {
+                        previous: previous.to_vec(),
+                        current: current.to_vec(),
+                    }
+                },
+            );
+            push_if_changed(
+                regressions,
+                previous.residual_exact_constraints.as_slice(),
+                current.residual_exact_constraints.as_slice(),
+                |previous, current| {
+                    WorkloadBaselineRegression::LookupPlanResidualExactConstraintsChanged {
                         previous: previous.to_vec(),
                         current: current.to_vec(),
                     }
@@ -2046,6 +2064,10 @@ mod tests {
                 WorkloadBaselineRegression::LookupPlanLossyIndexedConstraintsChanged {
                     previous: Vec::new(),
                     current: vec!["valid_at".to_string()],
+                },
+                WorkloadBaselineRegression::LookupPlanResidualExactConstraintsChanged {
+                    previous: Vec::new(),
+                    current: vec!["valid_at".to_string()],
                 }
             ]
         );
@@ -2110,6 +2132,71 @@ mod tests {
 
         assert!(comparison.regressions.contains(
             &WorkloadBaselineRegression::LookupPlanLossyIndexedConstraintsChanged {
+                previous: Vec::new(),
+                current: vec!["valid_at".to_string()],
+            }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn workload_baseline_regression_detects_lookup_plan_residual_constraint_change(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut previous = baseline_record("current", "file", 100, 100)?;
+        previous.snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 1,
+            indexed_constraints: vec!["scope".to_string()],
+            indexed_constraint_plans: vec![WorkloadIndexedConstraintPlanSnapshot {
+                name: "scope".to_string(),
+                candidate_count: 8,
+            }],
+            exact_constraint_count: 1,
+            exact_constraints: vec!["scope".to_string()],
+            residual_exact_constraint_count: 0,
+            residual_exact_constraints: Vec::new(),
+            lossy_indexed_constraint_count: 0,
+            lossy_indexed_constraints: Vec::new(),
+            candidate_count: 8,
+            exact_match_count: 8,
+            filtered_candidate_count: 0,
+            candidate_selectivity_basis_points: 10000,
+            full_scan: false,
+        });
+        let mut current_snapshot = deterministic_snapshot();
+        current_snapshot.lookup_plan = Some(WorkloadLookupPlanSnapshot {
+            indexed_constraint_count: 2,
+            indexed_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            indexed_constraint_plans: vec![
+                WorkloadIndexedConstraintPlanSnapshot {
+                    name: "scope".to_string(),
+                    candidate_count: 8,
+                },
+                WorkloadIndexedConstraintPlanSnapshot {
+                    name: "valid_at".to_string(),
+                    candidate_count: 8,
+                },
+            ],
+            exact_constraint_count: 2,
+            exact_constraints: vec!["scope".to_string(), "valid_at".to_string()],
+            residual_exact_constraint_count: 1,
+            residual_exact_constraints: vec!["valid_at".to_string()],
+            lossy_indexed_constraint_count: 1,
+            lossy_indexed_constraints: vec!["valid_at".to_string()],
+            candidate_count: 8,
+            exact_match_count: 8,
+            filtered_candidate_count: 0,
+            candidate_selectivity_basis_points: 10000,
+            full_scan: false,
+        });
+
+        let comparison = compare_workload_snapshot_to_baseline(
+            &previous,
+            &current_snapshot,
+            WorkloadRegressionThresholds::default(),
+        );
+
+        assert!(comparison.regressions.contains(
+            &WorkloadBaselineRegression::LookupPlanResidualExactConstraintsChanged {
                 previous: Vec::new(),
                 current: vec!["valid_at".to_string()],
             }
