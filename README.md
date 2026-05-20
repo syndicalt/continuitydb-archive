@@ -31,6 +31,7 @@ The first milestone builds:
 - Native typed operation API for ingest, checkout, and audit.
 - Native typed utility feedback revision API.
 - Native read-only conflict analysis API.
+- Native read-only batch conflict analysis API.
 - A thin CLI over library APIs.
 
 ## Roadmap

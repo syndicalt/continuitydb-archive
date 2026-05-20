@@ -7,8 +7,9 @@ use continuitydb_checkout::{
 use continuitydb_core::{StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
 use continuitydb_revision::{
-    detect_cell_conflict, recommend_conflict_resolution, revise_utility_feedback, CellConflict,
-    ConflictResolutionRecommendation,
+    detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
+    revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
+    ConflictResolutionRecommendation, ConflictResolutionScan,
 };
 use thiserror::Error;
 
@@ -126,9 +127,40 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(recommend_conflict_resolution(&left, &right))
     }
 
+    /// Detects deterministic conflicts across a stored StateCell set.
+    pub fn detect_conflicts<I>(&self, cell_ids: I) -> Result<CellConflictScan, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCellId>,
+    {
+        let cells = self.lookup_cells_in_order(cell_ids)?;
+        Ok(scan_cell_conflicts(&cells))
+    }
+
+    /// Recommends deterministic non-mutating resolutions across a stored StateCell set.
+    pub fn recommend_conflict_resolutions<I>(
+        &self,
+        cell_ids: I,
+    ) -> Result<ConflictResolutionScan, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCellId>,
+    {
+        let cells = self.lookup_cells_in_order(cell_ids)?;
+        Ok(recommend_conflict_resolutions(&cells))
+    }
+
     /// Produces an audit trace for a stored StateCell.
     pub fn audit_cell(&self, cell_id: StateCellId) -> Result<AuditTrace, ContinuityError> {
         self.lookup_one_cell(cell_id).map(|cell| audit(&cell))
+    }
+
+    fn lookup_cells_in_order<I>(&self, cell_ids: I) -> Result<Vec<StateCell>, ContinuityError>
+    where
+        I: IntoIterator<Item = StateCellId>,
+    {
+        cell_ids
+            .into_iter()
+            .map(|cell_id| self.lookup_one_cell(cell_id))
+            .collect()
     }
 
     fn lookup_one_cell(&self, cell_id: StateCellId) -> Result<StateCell, ContinuityError> {
@@ -472,6 +504,152 @@ mod tests {
         ));
         assert!(matches!(
             recommendation,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn api_detects_batch_conflicts_for_stored_cell_set() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let left = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:batch-conflict",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let right = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:batch-conflict",
+            "release is blocked",
+            20,
+            0.60,
+            12,
+        )?;
+        let unrelated = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:unrelated",
+            "unrelated state",
+            20,
+            0.90,
+            12,
+        )?;
+        let left_id = db.ingest_cell_at(left, committed_at)?;
+        let right_id = db.ingest_cell_at(right, committed_at)?;
+        let unrelated_id = db.ingest_cell_at(unrelated, committed_at)?;
+
+        let scan = db.detect_conflicts([left_id, right_id, unrelated_id])?;
+
+        assert_eq!(scan.conflicts.len(), 1);
+        assert_eq!(scan.conflicts[0].left, left_id);
+        assert_eq!(scan.conflicts[0].right, right_id);
+        Ok(())
+    }
+
+    #[test]
+    fn api_recommends_batch_conflict_resolutions_for_stored_cell_set(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let left = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:batch-recommendation",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let right = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:batch-recommendation",
+            "release is blocked",
+            20,
+            0.60,
+            12,
+        )?;
+        let unrelated = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:unrelated",
+            "unrelated state",
+            20,
+            0.90,
+            12,
+        )?;
+        let left_id = db.ingest_cell_at(left, committed_at)?;
+        let right_id = db.ingest_cell_at(right, committed_at)?;
+        let unrelated_id = db.ingest_cell_at(unrelated, committed_at)?;
+
+        let scan = db.recommend_conflict_resolutions([left_id, right_id, unrelated_id])?;
+
+        assert_eq!(scan.recommendations.len(), 1);
+        assert_eq!(
+            scan.recommendations[0].kind,
+            continuitydb_revision::ConflictResolutionKind::CandidateSupersession
+        );
+        assert_eq!(scan.recommendations[0].winner, Some(left_id));
+        assert_eq!(scan.recommendations[0].loser, Some(right_id));
+        Ok(())
+    }
+
+    #[test]
+    fn api_batch_conflict_analysis_allows_empty_and_singleton_inputs(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:singleton",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let cell_id = db.ingest_cell_at(cell, committed_at)?;
+
+        assert!(db.detect_conflicts([])?.conflicts.is_empty());
+        assert!(db
+            .recommend_conflict_resolutions([])?
+            .recommendations
+            .is_empty());
+        assert!(db.detect_conflicts([cell_id])?.conflicts.is_empty());
+        assert!(db
+            .recommend_conflict_resolutions([cell_id])?
+            .recommendations
+            .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn api_batch_conflict_analysis_reports_missing_id() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell_with_payload_day_and_confidence(
+            "project:continuitydb:stored",
+            "release is ready",
+            20,
+            0.95,
+            12,
+        )?;
+        let stored_id = db.ingest_cell_at(cell, committed_at)?;
+        let missing_id = StateCellId::new();
+
+        let conflicts = db.detect_conflicts([stored_id, missing_id]);
+        let recommendations = db.recommend_conflict_resolutions([stored_id, missing_id]);
+
+        assert!(matches!(
+            conflicts,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        assert!(matches!(
+            recommendations,
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
         Ok(())
