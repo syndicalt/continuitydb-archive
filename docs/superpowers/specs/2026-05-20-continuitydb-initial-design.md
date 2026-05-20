@@ -169,6 +169,7 @@ No hacks, demo-only bypasses, unchecked panics in library code, or behavior hidd
 - How should token/economic cost be estimated before materialization?
 - What storage kernel capabilities are required versus optional?
 - How much of checkout should be deterministic before ML-based utility prediction is introduced?
+- How should an embedded database Steward model propose revisions, conflicts, answerability, and frontier work while keeping deterministic policy in control of committed truth?
 
 ## Research Sources To Study First
 
@@ -178,6 +179,10 @@ No hacks, demo-only bypasses, unchecked panics in library code, or behavior hidd
 - Letta/MemGPT: agent-managed memory hierarchy. See <https://docs.letta.com/guides/core-concepts/stateful-agents>.
 - Cognee: graph/vector/provenance AI memory pipelines. See <https://docs.cognee.ai/getting-started/introduction>.
 - Mem0: production memory platform surface area. See <https://docs.mem0.ai/platform/overview>.
+
+## Roadmap Addendum
+
+The frontier roadmap lives in `docs/roadmap.md`. It adds an embedded database Steward model track and current small-model candidates for local, proposal-only stewardship.
 
 ## Approval Gate
 

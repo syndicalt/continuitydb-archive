@@ -16,6 +16,10 @@ The first milestone builds:
 - Audit traces.
 - A thin CLI over library APIs.
 
+## Roadmap
+
+The frontier roadmap is tracked in [`docs/roadmap.md`](docs/roadmap.md). The next major research item is an embedded database Steward model: a local, proposal-only model layer that helps maintain StateCells, conflicts, answerability, frontier priorities, and audit explanations without directly mutating committed truth.
+
 ## Engineering Standard
 
 Development is test-first. No demo-only behavior, unchecked library panics, or shortcuts are accepted.
