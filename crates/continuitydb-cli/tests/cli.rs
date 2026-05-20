@@ -3130,6 +3130,83 @@ fn cli_validate_local_model_bundle_failure_report_records_response_manifest_meta
     Ok(())
 }
 
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_validate_local_model_bundle_failure_report_records_response_artifact_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-failure-runner");
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-failure-baseline");
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-artifact-failure-report")
+            .with_extension("json");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-artifact-failure-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if failure_report_path.exists() {
+        fs::remove_file(&failure_report_path)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let response_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&response_manifest_path)?)?;
+    let response_path = response_manifest["artifacts"][0]["response_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing response path"))?;
+    let original_response = fs::read_to_string(response_path)?;
+    fs::write(response_path, "x".repeat(original_response.len()))?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model response artifact fingerprint mismatch",
+        ));
+
+    let failure_report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    assert_eq!(
+        failure_report["response_artifacts"][0]["case_name"].as_str(),
+        response_manifest["artifacts"][0]["case_name"].as_str()
+    );
+    assert_eq!(
+        failure_report["response_artifacts"][0]["captured"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        failure_report["response_artifacts"][0]["response_path"].as_str(),
+        Some(response_path)
+    );
+    assert!(
+        failure_report["response_artifacts"][0]["response_fingerprint"]
+            .as_str()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:"))
+    );
+    assert_eq!(
+        failure_report["response_artifacts"][0]["response_bytes"].as_u64(),
+        Some(original_response.len() as u64)
+    );
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
 #[cfg(feature = "local-model")]
 #[test]
 fn cli_validate_local_model_bundle_rejects_report_byte_count_mismatch(

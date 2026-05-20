@@ -366,6 +366,7 @@ Storage kernel
 102. Add CLI local-model bundle validation report failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort benchmark report path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify the inspected report bytes.
 103. Add CLI local-model bundle validation changed-case failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort changed-case report path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify archived changed-case drift evidence.
 104. Add CLI local-model bundle validation response manifest failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort response artifact manifest path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify archived raw-response manifest evidence.
+105. Add CLI local-model bundle validation response artifact failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort raw response artifact path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify current response bytes involved in archive validation failures.
 
 ## Small Embeddable Model Track
 

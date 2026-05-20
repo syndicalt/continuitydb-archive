@@ -1670,6 +1670,7 @@ fn write_local_model_bundle_validation_failure_report(
     let changed_case_report = local_model_validation_failure_changed_case_report_json(artifact_dir);
     let response_artifact_manifest =
         local_model_validation_failure_response_artifact_manifest_json(artifact_dir);
+    let response_artifacts = local_model_validation_failure_response_artifacts_json(artifact_dir);
     let output = serde_json::json!({
         "artifact_dir": artifact_dir.display().to_string(),
         "report_path": report_path.map(|path| path.display().to_string()),
@@ -1678,6 +1679,7 @@ fn write_local_model_bundle_validation_failure_report(
         "benchmark_report": benchmark_report,
         "changed_case_report": changed_case_report,
         "response_artifact_manifest": response_artifact_manifest,
+        "response_artifacts": response_artifacts,
         "failure": {
             "stage": "local_model_bundle_validation",
             "message": message,
@@ -1751,6 +1753,51 @@ fn local_model_validation_failure_response_artifact_manifest_json(
         "manifest_fingerprint": local_model_contract_fingerprint(&manifest_text),
         "manifest_bytes": manifest_text.len(),
     })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_validation_failure_response_artifacts_json(
+    artifact_dir: &Path,
+) -> serde_json::Value {
+    let response_dir = artifact_dir.join("responses");
+    let manifest_path = response_dir.join("local-model-responses.manifest.json");
+    let Ok(manifest_text) = std::fs::read_to_string(&manifest_path) else {
+        return serde_json::Value::Null;
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_text) else {
+        return serde_json::Value::Null;
+    };
+    let Some(artifacts) = manifest["artifacts"].as_array() else {
+        return serde_json::Value::Null;
+    };
+
+    serde_json::Value::Array(
+        artifacts
+            .iter()
+            .map(|artifact| {
+                let captured = artifact["captured"].as_bool().unwrap_or(false);
+                let response_path = artifact["response_path"].as_str();
+                let response_text = if captured {
+                    response_path
+                        .map(Path::new)
+                        .filter(|path| path.strip_prefix(&response_dir).is_ok())
+                        .and_then(|path| std::fs::read_to_string(path).ok())
+                } else {
+                    None
+                };
+
+                serde_json::json!({
+                    "case_name": artifact["case_name"].clone(),
+                    "captured": captured,
+                    "response_path": response_path,
+                    "response_fingerprint": response_text
+                        .as_ref()
+                        .map(|text| local_model_contract_fingerprint(text)),
+                    "response_bytes": response_text.as_ref().map(String::len),
+                })
+            })
+            .collect(),
+    )
 }
 
 #[cfg(feature = "local-model")]
