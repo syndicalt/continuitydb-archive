@@ -70,6 +70,7 @@ The first milestone builds:
 - CLI file-backed commands routed through native open helpers.
 - CLI commit backup and restore commands over versioned export envelopes.
 - CLI incremental commit export for cursor-based backup and sync workflows.
+- CLI direct commit copy for local file-backed sync.
 - A thin CLI over library APIs.
 
 ## Roadmap

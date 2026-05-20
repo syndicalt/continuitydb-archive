@@ -125,6 +125,7 @@ Storage kernel
 10. Add commit import dry-run validation. Implemented `continuitydb import-commits --dry-run` so operators can validate backup files against a target store before mutation.
 11. Add incremental commit export. Implemented `continuitydb export-commits --after --limit` so operators can page commit backups through the same cursor semantics exposed by the native API.
 12. Report commit import cursors. Extended `continuitydb import-commits` output with `next_after` so operators can checkpoint imported backup pages.
+13. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
 
 ## Native API Milestones
 

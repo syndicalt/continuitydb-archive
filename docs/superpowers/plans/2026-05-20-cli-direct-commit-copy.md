@@ -23,7 +23,7 @@
 - Modify: `crates/continuitydb-cli/src/main.rs`
 - Modify: `crates/continuitydb-cli/tests/cli.rs`
 
-- [ ] **Step 1: Write failing CLI tests**
+- [x] **Step 1: Write failing CLI tests**
 
 Add these tests near existing commit backup/copy tests in `crates/continuitydb-cli/tests/cli.rs`:
 
@@ -177,7 +177,7 @@ fn cli_copy_commits_rejects_invalid_after_cursor() -> Result<(), Box<dyn std::er
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -187,7 +187,7 @@ cargo test -p continuitydb-cli copy_commits --all-features
 
 Expected: FAIL because `copy-commits` is not recognized.
 
-- [ ] **Step 3: Implement CLI command**
+- [x] **Step 3: Implement CLI command**
 
 Add a `CopyCommits` command variant in `crates/continuitydb-cli/src/main.rs` after `ExportCommits`:
 
@@ -229,7 +229,7 @@ Some(Command::CopyCommits {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run:
 
@@ -239,7 +239,7 @@ cargo test -p continuitydb-cli copy_commits --all-features
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/continuitydb-cli/src/main.rs crates/continuitydb-cli/tests/cli.rs
@@ -252,7 +252,7 @@ git commit -m "feat: add cli direct commit copy"
 - Modify: `README.md`
 - Modify: `docs/roadmap.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Add this README current-scope bullet near CLI backup/sync bullets:
 
@@ -266,7 +266,7 @@ Add this CLI milestone after import cursor reporting:
 13. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
 ```
 
-- [ ] **Step 2: Run full verification gate**
+- [x] **Step 2: Run full verification gate**
 
 Run:
 
@@ -280,7 +280,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Commit docs**
+- [x] **Step 3: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md
