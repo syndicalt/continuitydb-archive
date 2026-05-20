@@ -5,7 +5,10 @@ use continuitydb_revision::{
     ConflictResolutionRecommendation, ConflictResolutionScan, RevisionLinkKind,
 };
 
-use crate::{ProposalId, StewardAction, StewardError, StewardIdentity, StewardProposal};
+use crate::{
+    ProposalId, ProposalLedgerStore, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
+    StewardProposal, StoredProposalLedger,
+};
 
 /// Deterministic Steward for revision conflict-resolution recommendations.
 #[derive(Clone, Debug)]
@@ -29,6 +32,25 @@ impl ConflictResolutionSteward {
             .into_iter()
             .map(|recommendation| self.proposal_for_recommendation(recommendation, created_at))
             .collect()
+    }
+
+    /// Converts recommendations into proposals, evaluates policy, and records audit entries.
+    pub fn propose_and_record<S>(
+        &self,
+        scan: ConflictResolutionScan,
+        created_at: DateTime<Utc>,
+        policy: &ProposalPolicy,
+        ledger: &mut StoredProposalLedger<S>,
+    ) -> Result<Vec<StewardProposal>, StewardError>
+    where
+        S: ProposalLedgerStore,
+    {
+        let proposals = self.propose(scan, created_at)?;
+        for proposal in proposals.iter().cloned() {
+            let decision = policy.evaluate(&proposal, created_at);
+            ledger.record(proposal, decision)?;
+        }
+        Ok(proposals)
     }
 
     fn proposal_for_recommendation(
@@ -74,8 +96,8 @@ mod tests {
     use continuitydb_revision::{recommend_conflict_resolutions, RevisionLinkKind};
 
     use crate::{
-        ConflictResolutionSteward, ProposalOutcome, ProposalPolicy, StewardAction, StewardError,
-        StewardIdentity,
+        ConflictResolutionSteward, MemoryProposalStore, ProposalOutcome, ProposalPolicy,
+        StewardAction, StewardError, StewardIdentity, StoredProposalLedger,
     };
 
     fn created_at() -> chrono::DateTime<Utc> {
@@ -149,6 +171,31 @@ mod tests {
         );
         let decision = ProposalPolicy::strict().evaluate(&proposals[0], created_at());
         assert_eq!(decision.outcome(), ProposalOutcome::Accepted);
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_resolution_steward_records_policy_decisions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let low_confidence = sample_cell("Release is blocked.", 20, 0.55)?;
+        let high_confidence = sample_cell("Release is green.", 21, 0.9)?;
+        let scan =
+            recommend_conflict_resolutions(&[low_confidence.clone(), high_confidence.clone()]);
+        let steward = ConflictResolutionSteward::new(steward()?);
+        let mut ledger = StoredProposalLedger::new(MemoryProposalStore::default());
+
+        let proposals = steward.propose_and_record(
+            scan,
+            created_at(),
+            &ProposalPolicy::strict(),
+            &mut ledger,
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        let records = ledger.records()?;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].proposal().id(), proposals[0].id());
+        assert_eq!(records[0].decision().outcome(), ProposalOutcome::Accepted);
         Ok(())
     }
 }
