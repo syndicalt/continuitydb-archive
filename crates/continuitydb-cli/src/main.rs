@@ -116,6 +116,13 @@ struct LocalModelResponseArtifactManifest {
 }
 
 #[cfg(feature = "local-model")]
+struct LocalModelBundleManifest {
+    manifest_path: PathBuf,
+    manifest_fingerprint: String,
+    manifest_bytes: usize,
+}
+
+#[cfg(feature = "local-model")]
 struct LocalModelBenchmarkArtifacts<'a> {
     contract: Option<&'a LocalModelContractArtifacts>,
     prompts: &'a [LocalModelPromptArtifact],
@@ -518,12 +525,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             fail_on_unstable,
             fail_on_failed_cases,
             failure_report_path,
-            report_path,
+            report_path: explicit_report_path,
             dry_run,
             compare_baseline,
             fail_on_regression,
         }) => {
-            let output = benchmark_local_model_json(LocalModelBenchmarkOptions {
+            let mut output = benchmark_local_model_json(LocalModelBenchmarkOptions {
                 candidate_id: &candidate,
                 executable: &executable,
                 model_path: &model_path,
@@ -545,9 +552,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 fail_on_regression,
             })?;
             if let Some(artifact_dir) = artifact_dir.as_ref() {
-                write_pretty_json_file(&artifact_dir.join("benchmark-report.json"), &output)?;
+                let report_path = artifact_dir.join("benchmark-report.json");
+                write_pretty_json_file(&report_path, &output)?;
+                let bundle_manifest =
+                    write_local_model_bundle_manifest(artifact_dir, &report_path, &output)?;
+                output["bundle_manifest"] =
+                    local_model_bundle_manifest_json(Some(&bundle_manifest));
+                write_pretty_json_file(&report_path, &output)?;
             }
-            if let Some(report_path) = report_path {
+            if let Some(report_path) = explicit_report_path {
                 write_pretty_json_file(&report_path, &output)?;
             }
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -930,6 +943,7 @@ fn local_model_benchmark_dry_run_json(
         "response_fingerprints": [],
         "response_artifacts": local_model_response_artifacts_json(artifacts.responses),
         "response_artifact_manifest": local_model_response_artifact_manifest_json(artifacts.response_manifest),
+        "bundle_manifest": null,
         "runtime": {
             "executable": config.executable().display().to_string(),
             "arguments": config.command_arguments(),
@@ -1228,6 +1242,48 @@ fn local_model_response_artifact_manifest_json(
 }
 
 #[cfg(feature = "local-model")]
+fn write_local_model_bundle_manifest(
+    artifact_dir: &Path,
+    report_path: &Path,
+    report: &serde_json::Value,
+) -> Result<LocalModelBundleManifest, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(artifact_dir)?;
+    let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let manifest = serde_json::json!({
+        "format": "continuitydb.local_model.benchmark_bundle",
+        "format_version": 1,
+        "benchmark_report_path": report_path.display().to_string(),
+        "contract_artifacts": report["contract_artifacts"].clone(),
+        "prompt_artifacts": report["prompt_artifacts"].clone(),
+        "response_artifacts": report["response_artifacts"].clone(),
+        "response_artifact_manifest": report["response_artifact_manifest"].clone(),
+    });
+    let manifest_text = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, &manifest_text)?;
+
+    Ok(LocalModelBundleManifest {
+        manifest_path,
+        manifest_fingerprint: local_model_contract_fingerprint(&manifest_text),
+        manifest_bytes: manifest_text.len(),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_bundle_manifest_json(
+    bundle_manifest: Option<&LocalModelBundleManifest>,
+) -> serde_json::Value {
+    bundle_manifest
+        .map(|manifest| {
+            serde_json::json!({
+                "manifest_path": manifest.manifest_path.display().to_string(),
+                "manifest_fingerprint": manifest.manifest_fingerprint,
+                "manifest_bytes": manifest.manifest_bytes,
+            })
+        })
+        .unwrap_or(serde_json::Value::Null)
+}
+
+#[cfg(feature = "local-model")]
 fn local_model_candidate(
     candidate_id: &str,
 ) -> Result<SmallModelCandidate, Box<dyn std::error::Error>> {
@@ -1269,6 +1325,7 @@ fn local_model_benchmark_json(
         "prompt_artifacts": local_model_prompt_artifacts_json(artifacts.prompts),
         "response_artifacts": local_model_response_artifacts_json(artifacts.responses),
         "response_artifact_manifest": local_model_response_artifact_manifest_json(artifacts.response_manifest),
+        "bundle_manifest": null,
         "runtime": {
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),

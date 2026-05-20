@@ -779,9 +779,49 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     let stdout_json: Value = serde_json::from_slice(&output)?;
     let report_path = artifact_dir.join("benchmark-report.json");
     let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let bundle_manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
 
     assert_eq!(stdout_json, report_json);
     assert_eq!(stdout_json["passed"].as_bool(), Some(true));
+    assert!(bundle_manifest_path.exists());
+    assert_eq!(
+        stdout_json["bundle_manifest"]["manifest_path"].as_str(),
+        Some(bundle_manifest_path.display().to_string().as_str())
+    );
+    assert!(stdout_json["bundle_manifest"]["manifest_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(stdout_json["bundle_manifest"]["manifest_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    let bundle_manifest_json: Value =
+        serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+    assert_eq!(
+        bundle_manifest_json["format"].as_str(),
+        Some("continuitydb.local_model.benchmark_bundle")
+    );
+    assert_eq!(bundle_manifest_json["format_version"].as_u64(), Some(1));
+    assert_eq!(
+        bundle_manifest_json["benchmark_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest_json["prompt_artifacts"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+    assert_eq!(
+        bundle_manifest_json["response_artifacts"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+    assert!(
+        bundle_manifest_json["response_artifact_manifest"]["manifest_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("responses/local-model-responses.manifest.json"))
+    );
     assert_eq!(
         stdout_json["contract_artifacts"]["schema_path"].as_str(),
         Some(
@@ -847,9 +887,41 @@ fn cli_benchmark_local_model_artifact_dir_writes_dry_run_bundle(
     let stdout_json: Value = serde_json::from_slice(&output)?;
     let report_path = artifact_dir.join("benchmark-report.json");
     let report_json: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let bundle_manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
 
     assert_eq!(stdout_json, report_json);
     assert_eq!(stdout_json["dry_run"].as_bool(), Some(true));
+    assert!(bundle_manifest_path.exists());
+    assert_eq!(
+        stdout_json["bundle_manifest"]["manifest_path"].as_str(),
+        Some(bundle_manifest_path.display().to_string().as_str())
+    );
+    assert!(stdout_json["bundle_manifest"]["manifest_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    let bundle_manifest_json: Value =
+        serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+    assert_eq!(
+        bundle_manifest_json["format"].as_str(),
+        Some("continuitydb.local_model.benchmark_bundle")
+    );
+    assert_eq!(
+        bundle_manifest_json["benchmark_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest_json["prompt_artifacts"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+    assert_eq!(
+        bundle_manifest_json["response_artifacts"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert!(bundle_manifest_json["response_artifact_manifest"].is_null());
     assert!(artifact_dir
         .join("contracts/local-model-response.schema.json")
         .exists());
