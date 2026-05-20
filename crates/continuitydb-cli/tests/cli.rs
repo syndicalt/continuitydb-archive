@@ -580,6 +580,109 @@ fn cli_replay_workload_failure_report_path_records_mismatch(
     Ok(())
 }
 
+#[test]
+fn cli_replay_workload_artifact_dir_writes_mismatch_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-bundle-input-dir-{}",
+        std::process::id()
+    ));
+    let replay_artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-bundle-output-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if replay_artifact_dir.exists() {
+        fs::remove_dir_all(&replay_artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+    let archived_report_path = artifact_dir.join("workload-report.json");
+    let mut archived_report: Value =
+        serde_json::from_str(&fs::read_to_string(&archived_report_path)?)?;
+    archived_report["checkout"]["selected_count"] = Value::from(2);
+    fs::write(
+        &archived_report_path,
+        serde_json::to_string_pretty(&archived_report)?,
+    )?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--fail-on-mismatch")
+        .arg("--replay-artifact-dir")
+        .arg(&replay_artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains("workload replay mismatch detected"));
+
+    let replay_report_path = replay_artifact_dir.join("replay-report.json");
+    let replay_manifest_path =
+        replay_artifact_dir.join("continuitydb-workload-replay.manifest.json");
+    let replay_report: Value = serde_json::from_str(&fs::read_to_string(&replay_report_path)?)?;
+    let replay_manifest: Value = serde_json::from_str(&fs::read_to_string(&replay_manifest_path)?)?;
+
+    assert_eq!(
+        replay_report["replay_artifact_dir"].as_str(),
+        Some(replay_artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        replay_report["replay_bundle_manifest"]["manifest_path"].as_str(),
+        Some(replay_manifest_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        replay_report["replay_comparison"]["passed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        replay_manifest["format"].as_str(),
+        Some("continuitydb.workload.replay_bundle")
+    );
+    assert_eq!(replay_manifest["format_version"].as_u64(), Some(1));
+    assert_eq!(
+        replay_manifest["replay_report_path"].as_str(),
+        Some(replay_report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        replay_manifest["input_artifact_dir"].as_str(),
+        Some(artifact_dir.display().to_string().as_str())
+    );
+    assert_eq!(
+        replay_manifest["replay_comparison"]["mismatches"][0]["CheckoutSelectedCountChanged"]
+            ["previous"]
+            .as_u64(),
+        Some(2)
+    );
+    assert!(
+        replay_report["replay_bundle_manifest"]["manifest_fingerprint"]
+            .as_str()
+            .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:"))
+    );
+    assert!(replay_report["replay_bundle_manifest"]["manifest_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_dir_all(replay_artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error::Error>> {

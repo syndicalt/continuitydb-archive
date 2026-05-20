@@ -62,6 +62,17 @@ struct WorkloadMeasureOptions<'a> {
     fail_on_regression: bool,
 }
 
+struct WorkloadReplayOptions<'a> {
+    kernel: WorkloadKernelProfile,
+    artifact_dir: &'a Path,
+    store_path: Option<&'a PathBuf>,
+    report_path: Option<&'a PathBuf>,
+    failure_report_path: Option<&'a PathBuf>,
+    replay_artifact_dir: Option<&'a PathBuf>,
+    compare_report: bool,
+    fail_on_mismatch: bool,
+}
+
 #[cfg(feature = "local-model")]
 struct LocalModelBenchmarkOptions<'a> {
     candidate_id: &'a str,
@@ -260,6 +271,9 @@ enum Command {
         /// Optional path to write workload replay JSON when a mismatch gate fails.
         #[arg(long = "failure-report-path")]
         failure_report_path: Option<PathBuf>,
+        /// Directory where a workload replay artifact bundle is written.
+        #[arg(long = "replay-artifact-dir")]
+        replay_artifact_dir: Option<PathBuf>,
         /// Compare replay counts against workload-report.json in the artifact directory.
         #[arg(long = "compare-report")]
         compare_report: bool,
@@ -481,18 +495,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             store_path,
             report_path,
             failure_report_path,
+            replay_artifact_dir,
             compare_report,
             fail_on_mismatch,
         }) => {
-            let output = replay_workload_json(
+            let output = replay_workload_json(WorkloadReplayOptions {
                 kernel,
-                &artifact_dir,
-                store_path.as_ref(),
-                report_path.as_ref(),
-                failure_report_path.as_ref(),
-                compare_report || fail_on_mismatch,
+                artifact_dir: &artifact_dir,
+                store_path: store_path.as_ref(),
+                report_path: report_path.as_ref(),
+                failure_report_path: failure_report_path.as_ref(),
+                replay_artifact_dir: replay_artifact_dir.as_ref(),
+                compare_report: compare_report || fail_on_mismatch,
                 fail_on_mismatch,
-            )?;
+            })?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
@@ -2059,16 +2075,10 @@ fn write_workload_artifact_bundle_report(
 }
 
 fn replay_workload_json(
-    kernel: WorkloadKernelProfile,
-    artifact_dir: &Path,
-    store_path: Option<&PathBuf>,
-    report_path: Option<&PathBuf>,
-    failure_report_path: Option<&PathBuf>,
-    compare_report: bool,
-    fail_on_mismatch: bool,
+    options: WorkloadReplayOptions<'_>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let cells_path = artifact_dir.join("workload-cells.json");
-    let checkout_request_path = artifact_dir.join("checkout-request.json");
+    let cells_path = options.artifact_dir.join("workload-cells.json");
+    let checkout_request_path = options.artifact_dir.join("checkout-request.json");
     let cells_text = std::fs::read_to_string(&cells_path)?;
     let request_text = std::fs::read_to_string(&checkout_request_path)?;
     let cells_artifact: serde_json::Value = serde_json::from_str(&cells_text)?;
@@ -2077,7 +2087,7 @@ fn replay_workload_json(
     let request = checkout_request_from_artifact(&request_artifact)?;
     let committed_at = workload_commit_time()?;
 
-    let (measurement, lookup_plan) = match kernel {
+    let (measurement, lookup_plan) = match options.kernel {
         WorkloadKernelProfile::Memory => {
             let mut memory = MemoryKernel::default();
             (
@@ -2086,7 +2096,9 @@ fn replay_workload_json(
             )
         }
         WorkloadKernelProfile::File => {
-            let path = store_path.ok_or_else(|| std::io::Error::other("store path is required"))?;
+            let path = options
+                .store_path
+                .ok_or_else(|| std::io::Error::other("store path is required"))?;
             let mut file = continuitydb_kernel::FileKernel::open(path)?;
             let measurement =
                 measure_ingest_and_checkout(&mut file, &workload, committed_at, request.clone())?;
@@ -2097,11 +2109,13 @@ fn replay_workload_json(
     };
 
     let mut output = serde_json::json!({
-        "kernel": workload_kernel_name(kernel),
-        "artifact_dir": artifact_dir.display().to_string(),
-        "store_path": store_path.map(|path| path.display().to_string()),
-        "report_path": report_path.map(|path| path.display().to_string()),
-        "failure_report_path": failure_report_path.map(|path| path.display().to_string()),
+        "kernel": workload_kernel_name(options.kernel),
+        "artifact_dir": options.artifact_dir.display().to_string(),
+        "store_path": options.store_path.map(|path| path.display().to_string()),
+        "report_path": options.report_path.map(|path| path.display().to_string()),
+        "failure_report_path": options.failure_report_path.map(|path| path.display().to_string()),
+        "replay_artifact_dir": options.replay_artifact_dir.map(|path| path.display().to_string()),
+        "replay_bundle_manifest": serde_json::Value::Null,
         "workload_artifacts": {
             "cells_path": cells_path.display().to_string(),
             "cells_fingerprint": fnv1a64_fingerprint(&cells_text),
@@ -2134,13 +2148,20 @@ fn replay_workload_json(
         },
     });
 
-    if compare_report {
-        let comparison = replay_report_comparison(artifact_dir, &measurement)?;
+    if options.compare_report {
+        let comparison = replay_report_comparison(options.artifact_dir, &measurement)?;
         let passed = comparison["passed"].as_bool().unwrap_or(false);
         output["replay_comparison"] = comparison;
-        if fail_on_mismatch && !passed {
-            if let Some(path) = failure_report_path {
+        if options.fail_on_mismatch && !passed {
+            if let Some(path) = options.failure_report_path {
                 write_pretty_json_file(path, &output)?;
+            }
+            if let Some(replay_artifact_dir) = options.replay_artifact_dir {
+                write_workload_replay_artifact_bundle_report(
+                    replay_artifact_dir,
+                    options.artifact_dir,
+                    output,
+                )?;
             }
             return Err(std::io::Error::other("workload replay mismatch detected").into());
         }
@@ -2148,11 +2169,68 @@ fn replay_workload_json(
         output["replay_comparison"] = serde_json::Value::Null;
     }
 
-    if let Some(path) = report_path {
+    if let Some(path) = options.report_path {
         write_pretty_json_file(path, &output)?;
+    }
+    if let Some(replay_artifact_dir) = options.replay_artifact_dir {
+        output = write_workload_replay_artifact_bundle_report(
+            replay_artifact_dir,
+            options.artifact_dir,
+            output,
+        )?;
     }
 
     Ok(output)
+}
+
+fn write_workload_replay_artifact_bundle_report(
+    replay_artifact_dir: &Path,
+    input_artifact_dir: &Path,
+    mut report: serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(replay_artifact_dir)?;
+    let report_path = replay_artifact_dir.join("replay-report.json");
+    write_pretty_json_file(&report_path, &report)?;
+    let bundle_manifest = write_workload_replay_bundle_manifest(
+        replay_artifact_dir,
+        input_artifact_dir,
+        &report_path,
+        &report,
+    )?;
+    report["replay_bundle_manifest"] = workload_bundle_manifest_json(&bundle_manifest);
+    write_pretty_json_file(&report_path, &report)?;
+    Ok(report)
+}
+
+fn write_workload_replay_bundle_manifest(
+    replay_artifact_dir: &Path,
+    input_artifact_dir: &Path,
+    report_path: &Path,
+    report: &serde_json::Value,
+) -> Result<WorkloadBundleManifest, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(replay_artifact_dir)?;
+    let manifest_path = replay_artifact_dir.join("continuitydb-workload-replay.manifest.json");
+    let manifest = serde_json::json!({
+        "format": "continuitydb.workload.replay_bundle",
+        "format_version": 1,
+        "replay_report_path": report_path.display().to_string(),
+        "input_artifact_dir": input_artifact_dir.display().to_string(),
+        "kernel": report["kernel"].clone(),
+        "store_path": report["store_path"].clone(),
+        "workload_artifacts": report["workload_artifacts"].clone(),
+        "lookup_plan": report["lookup_plan"].clone(),
+        "workload": report["workload"].clone(),
+        "checkout": report["checkout"].clone(),
+        "replay_comparison": report["replay_comparison"].clone(),
+    });
+    let manifest_text = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, &manifest_text)?;
+
+    Ok(WorkloadBundleManifest {
+        manifest_path,
+        manifest_fingerprint: fnv1a64_fingerprint(&manifest_text),
+        manifest_bytes: manifest_text.len(),
+    })
 }
 
 fn replay_report_comparison(
