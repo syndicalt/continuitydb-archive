@@ -2285,6 +2285,25 @@ fn validate_workload_artifact_manifest(
         return Err(std::io::Error::other("unsupported workload artifact manifest").into());
     }
 
+    let expected_cells_path = artifact_dir
+        .join("workload-cells.json")
+        .display()
+        .to_string();
+    let manifest_cells_path = required_json_string(&manifest["workload_artifacts"], "cells_path")?;
+    if manifest_cells_path != expected_cells_path {
+        return Err(std::io::Error::other("workload artifact manifest path mismatch").into());
+    }
+
+    let expected_request_path = artifact_dir
+        .join("checkout-request.json")
+        .display()
+        .to_string();
+    let manifest_request_path =
+        required_json_string(&manifest["workload_artifacts"], "checkout_request_path")?;
+    if manifest_request_path != expected_request_path {
+        return Err(std::io::Error::other("workload artifact manifest path mismatch").into());
+    }
+
     let manifest_cells_fingerprint =
         required_json_string(&manifest["workload_artifacts"], "cells_fingerprint")?;
     let current_cells_fingerprint = fnv1a64_fingerprint(cells_text);

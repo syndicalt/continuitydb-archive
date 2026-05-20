@@ -188,6 +188,7 @@ Storage kernel
 21. Add CLI workload replay validated input manifest metadata. Extended `replay-workload --require-manifest` reports and replay bundle manifests with validated input manifest path, fingerprint, and byte-count metadata so archived replay evidence identifies the enforced source bundle manifest.
 22. Add CLI workload replay manifest-validation failure report artifacts. Extended `replay-workload --require-manifest --failure-report-path` so input manifest validation failures write structured JSON with the validation stage, error message, artifact paths, and fixture fingerprints before exiting non-zero.
 23. Add CLI workload replay manifest-validation failure artifact bundles. Extended `replay-workload --require-manifest --replay-artifact-dir` so input manifest validation failures archive `replay-report.json` and `continuitydb-workload-replay.manifest.json` with failure stage, message, artifact paths, and fixture fingerprints before exiting non-zero.
+24. Add CLI workload replay manifest fixture-path validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `workload-cells.json` or `checkout-request.json` paths do not match the replayed artifact directory, even when fixture fingerprints still match.
 
 ## Native API Milestones
 

@@ -27,6 +27,7 @@ The first milestone builds:
 - CLI workload replay validated input manifest metadata.
 - CLI workload replay manifest-validation failure report artifacts.
 - CLI workload replay manifest-validation failure artifact bundles.
+- CLI workload replay manifest fixture-path validation.
 - CLI workload measurement report artifact output.
 - CLI workload regression failure report artifact output.
 - CLI workload measurement baseline recording.
