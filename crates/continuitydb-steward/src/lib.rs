@@ -1016,6 +1016,7 @@ mod tests {
         let target = StateCellId::from_u128(2);
         let supersession_source = StateCellId::from_u128(4);
         let supersession_target = StateCellId::from_u128(5);
+        let confidence_cell = StateCellId::from_u128(6);
         let response = serde_json::json!({
             "proposals": [
                 {
@@ -1058,6 +1059,15 @@ mod tests {
                 },
                 {
                     "action": {
+                        "type": "adjust_confidence",
+                        "cell_id": confidence_cell,
+                        "proposed_confidence": 0.42
+                    },
+                    "rationale": "The cited evidence lowers confidence in the stale deployment status.",
+                    "citations": ["continuitydb://evaluation/confidence-evidence"]
+                },
+                {
+                    "action": {
                         "type": "mark_frontier",
                         "cell_id": "00000000-0000-0000-0000-000000000003"
                     },
@@ -1084,7 +1094,7 @@ mod tests {
         let report = default_steward_evaluation_suite().evaluate(&steward);
 
         assert!(report.passed());
-        assert_eq!(report.case_reports().len(), 6);
+        assert_eq!(report.case_reports().len(), 7);
         assert!(report.case_reports()[1].passed());
         assert_eq!(report.case_reports()[1].name(), "conflict classification");
         assert!(report.case_reports()[2].passed());
@@ -1098,13 +1108,15 @@ mod tests {
             "unsupported claim boundary"
         );
         assert!(report.case_reports()[4].passed());
-        assert_eq!(
-            report.case_reports()[4].name(),
-            "multi-source citation preservation"
-        );
+        assert_eq!(report.case_reports()[4].name(), "confidence adjustment");
         assert!(report.case_reports()[5].passed());
         assert_eq!(
             report.case_reports()[5].name(),
+            "multi-source citation preservation"
+        );
+        assert!(report.case_reports()[6].passed());
+        assert_eq!(
+            report.case_reports()[6].name(),
             "policy rejection avoidance"
         );
         Ok(())
@@ -1115,7 +1127,7 @@ mod tests {
     fn default_steward_evaluation_suite_exposes_case_contracts() {
         let suite = default_steward_evaluation_suite();
 
-        assert_eq!(suite.len(), 6);
+        assert_eq!(suite.len(), 7);
         assert!(!suite.is_empty());
         let cases = suite.cases();
 
@@ -1219,22 +1231,52 @@ mod tests {
                 if request == "Verify deployment status before treating the release as shipped."
         ));
 
-        assert_eq!(cases[4].name(), "multi-source citation preservation");
+        assert_eq!(cases[4].name(), "confidence adjustment");
         assert_eq!(
             cases[4].input().task(),
-            "Decide whether a release-status change should stay on the active frontier."
+            "Adjust confidence for stale deployment status evidence."
         );
-        assert_eq!(cases[4].input().evidence().len(), 2);
         assert_eq!(
             cases[4].input().evidence()[0].locator(),
-            "continuitydb://evaluation/release-build-source"
-        );
-        assert_eq!(
-            cases[4].input().evidence()[1].locator(),
-            "continuitydb://evaluation/release-incident-source"
+            "continuitydb://evaluation/confidence-evidence"
         );
         assert_eq!(
             cases[4].required_citations(),
+            ["continuitydb://evaluation/confidence-evidence".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[4].required_rationale_terms(),
+            ["confidence".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[4].forbidden_rationale_terms(),
+            ["fully trusted".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[4].expected_actions()[0],
+            StewardAction::AdjustConfidence {
+                cell_id,
+                proposed_confidence
+            } if *cell_id == StateCellId::from_u128(6)
+                && (*proposed_confidence - 0.42).abs() < f32::EPSILON
+        ));
+
+        assert_eq!(cases[5].name(), "multi-source citation preservation");
+        assert_eq!(
+            cases[5].input().task(),
+            "Decide whether a release-status change should stay on the active frontier."
+        );
+        assert_eq!(cases[5].input().evidence().len(), 2);
+        assert_eq!(
+            cases[5].input().evidence()[0].locator(),
+            "continuitydb://evaluation/release-build-source"
+        );
+        assert_eq!(
+            cases[5].input().evidence()[1].locator(),
+            "continuitydb://evaluation/release-incident-source"
+        );
+        assert_eq!(
+            cases[5].required_citations(),
             [
                 "continuitydb://evaluation/release-build-source".to_string(),
                 "continuitydb://evaluation/release-incident-source".to_string(),
@@ -1242,38 +1284,38 @@ mod tests {
             .as_slice()
         );
         assert_eq!(
-            cases[4].required_rationale_terms(),
+            cases[5].required_rationale_terms(),
             ["frontier".to_string()].as_slice()
         );
         assert!(matches!(
-            &cases[4].expected_actions()[0],
+            &cases[5].expected_actions()[0],
             StewardAction::MarkFrontier { cell_id }
                 if *cell_id == StateCellId::from_u128(3)
         ));
 
-        assert_eq!(cases[5].name(), "policy rejection avoidance");
+        assert_eq!(cases[6].name(), "policy rejection avoidance");
         assert_eq!(
-            cases[5].input().task(),
+            cases[6].input().task(),
             "Handle invalid answerability-label evidence without emitting an invalid label."
         );
         assert_eq!(
-            cases[5].input().evidence()[0].locator(),
+            cases[6].input().evidence()[0].locator(),
             "continuitydb://evaluation/invalid-answerability-label"
         );
         assert_eq!(
-            cases[5].required_citations(),
+            cases[6].required_citations(),
             ["continuitydb://evaluation/invalid-answerability-label".to_string()].as_slice()
         );
         assert_eq!(
-            cases[5].required_rationale_terms(),
+            cases[6].required_rationale_terms(),
             ["invalid".to_string()].as_slice()
         );
         assert_eq!(
-            cases[5].forbidden_rationale_terms(),
+            cases[6].forbidden_rationale_terms(),
             ["label applied".to_string()].as_slice()
         );
         assert!(matches!(
-            &cases[5].expected_actions()[0],
+            &cases[6].expected_actions()[0],
             StewardAction::RequestVerification { cell_id: None, request }
                 if request == "Ask for a concrete answerability question before labeling the cell."
         ));

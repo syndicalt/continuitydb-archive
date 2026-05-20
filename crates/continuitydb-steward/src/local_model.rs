@@ -959,6 +959,7 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
     let frontier_cell = StateCellId::from_u128(3);
     let supersession_source = StateCellId::from_u128(4);
     let supersession_target = StateCellId::from_u128(5);
+    let confidence_cell = StateCellId::from_u128(6);
 
     StewardEvaluationSuite::new(vec![
         StewardEvaluationCase::new(
@@ -1025,6 +1026,22 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .require_citation("continuitydb://evaluation/unsupported-release-claim")
         .require_rationale_term("unsupported")
         .forbid_rationale_term("deployed to all customers"),
+        StewardEvaluationCase::new(
+            "confidence adjustment",
+            created_at,
+            "Adjust confidence for stale deployment status evidence.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/confidence-evidence",
+            "Deployment status evidence is stale and should lower confidence until a newer production signal is available.",
+        )
+        .expect_action(StewardAction::AdjustConfidence {
+            cell_id: confidence_cell,
+            proposed_confidence: 0.42,
+        })
+        .require_citation("continuitydb://evaluation/confidence-evidence")
+        .require_rationale_term("confidence")
+        .forbid_rationale_term("fully trusted"),
         StewardEvaluationCase::new(
             "multi-source citation preservation",
             created_at,
