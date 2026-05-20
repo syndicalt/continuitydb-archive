@@ -9,6 +9,7 @@ The primitive unit is the `StateCell`, an append-only, evidence-backed, temporal
 The first milestone builds:
 
 - Core StateCell domain types.
+- Deterministic StateCell workload generation for benchmark and storage-engine comparisons.
 - A pluggable storage kernel trait.
 - An in-memory kernel for correctness tests.
 - Basic revision links.

@@ -256,6 +256,19 @@ mod tests {
     }
 
     #[test]
+    fn state_cell_id_from_u128_is_stable() -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::from_u128(42);
+        let repeated = StateCellId::from_u128(42);
+        let different = StateCellId::from_u128(43);
+        let parsed: StateCellId = cell_id.to_string().parse()?;
+
+        assert_eq!(cell_id, repeated);
+        assert_eq!(parsed, cell_id);
+        assert_ne!(cell_id, different);
+        Ok(())
+    }
+
+    #[test]
     fn state_cell_id_rejects_invalid_uuid_text() {
         let result = "not-a-uuid".parse::<StateCellId>();
 

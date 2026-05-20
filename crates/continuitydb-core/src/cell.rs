@@ -15,6 +15,11 @@ impl StateCellId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Creates a deterministic StateCell identifier from a 128-bit value.
+    pub fn from_u128(value: u128) -> Self {
+        Self(Uuid::from_u128(value))
+    }
 }
 
 impl Default for StateCellId {

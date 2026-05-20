@@ -10,6 +10,7 @@ members = [
     "crates/continuitydb-api",
     "crates/continuitydb-cli",
     "crates/continuitydb-steward",
+    "crates/continuitydb-workload",
 ]
 
 [workspace.package]

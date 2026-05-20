@@ -144,6 +144,10 @@ Storage kernel
 13. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
 14. Execute saved query files from the CLI. Extended `continuitydb checkout-query` to accept raw typed query JSON, versioned `continuitydb.query` envelopes, and strict text `CHECKOUT` query files through the native query-file API.
 
+## Benchmark and Workload Milestones
+
+1. Add deterministic world-model workload generation. Implemented `continuitydb-workload` with stable StateCell IDs, semantic anchors, scoped evidence, frontier activation cadence, dependency edges, utility signals, and workload summaries so storage engines and checkout algorithms can be compared against repeatable corpora.
+
 ## Native API Milestones
 
 1. Add typed embeddable operations for ingest, checkout, and audit. Implemented in `continuitydb-api` as `ContinuityDb<K>` over any `StorageKernel`, backed by first-class `CellLookup.cell_id` support in memory and file kernels.
