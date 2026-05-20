@@ -552,13 +552,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 fail_on_regression,
             })?;
             if let Some(artifact_dir) = artifact_dir.as_ref() {
-                let report_path = artifact_dir.join("benchmark-report.json");
-                write_pretty_json_file(&report_path, &output)?;
-                let bundle_manifest =
-                    write_local_model_bundle_manifest(artifact_dir, &report_path, &output)?;
-                output["bundle_manifest"] =
-                    local_model_bundle_manifest_json(Some(&bundle_manifest));
-                write_pretty_json_file(&report_path, &output)?;
+                output = write_local_model_artifact_bundle_report(artifact_dir, output)?;
             }
             if let Some(report_path) = explicit_report_path {
                 write_pretty_json_file(&report_path, &output)?;
@@ -856,20 +850,23 @@ fn benchmark_local_model_json(
     };
     let current_baseline = LocalModelBenchmarkBaseline::from_report(report, Utc::now());
     if options.fail_on_failed_cases && !current_baseline.evaluation_summary().passed() {
+        let mut report = local_model_benchmark_json(
+            options.baseline_path,
+            options.compare_baseline,
+            &current_baseline,
+            None,
+            LocalModelBenchmarkArtifacts {
+                contract: contract_artifacts.as_ref(),
+                prompts: &prompt_artifacts,
+                responses: &response_artifacts,
+                response_manifest: response_manifest.as_ref(),
+            },
+            stability.as_ref(),
+        );
+        if let Some(artifact_dir) = options.artifact_dir {
+            report = write_local_model_artifact_bundle_report(artifact_dir, report)?;
+        }
         if let Some(report_path) = options.failure_report_path {
-            let report = local_model_benchmark_json(
-                options.baseline_path,
-                options.compare_baseline,
-                &current_baseline,
-                None,
-                LocalModelBenchmarkArtifacts {
-                    contract: contract_artifacts.as_ref(),
-                    prompts: &prompt_artifacts,
-                    responses: &response_artifacts,
-                    response_manifest: response_manifest.as_ref(),
-                },
-                stability.as_ref(),
-            );
             write_pretty_json_file(report_path, &report)?;
         }
         return Err(
@@ -1281,6 +1278,19 @@ fn local_model_bundle_manifest_json(
             })
         })
         .unwrap_or(serde_json::Value::Null)
+}
+
+#[cfg(feature = "local-model")]
+fn write_local_model_artifact_bundle_report(
+    artifact_dir: &Path,
+    mut report: serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let report_path = artifact_dir.join("benchmark-report.json");
+    write_pretty_json_file(&report_path, &report)?;
+    let bundle_manifest = write_local_model_bundle_manifest(artifact_dir, &report_path, &report)?;
+    report["bundle_manifest"] = local_model_bundle_manifest_json(Some(&bundle_manifest));
+    write_pretty_json_file(&report_path, &report)?;
+    Ok(report)
 }
 
 #[cfg(feature = "local-model")]

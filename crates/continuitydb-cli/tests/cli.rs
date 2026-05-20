@@ -1040,6 +1040,94 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_benchmark_local_model_artifact_dir_writes_failed_case_bundle(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path = temp_store_path("continuitydb-cli-local-model-failed-bundle-runner");
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-failed-bundle-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-failed-bundle-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    let script = r#"#!/usr/bin/env sh
+cat >/dev/null
+printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":null,"request":"Gather additional source evidence."},"rationale":"The evidence is thin, so uncertainty remains.","citations":["continuitydb://evaluation/thin-evidence"]}]}'
+"#;
+    fs::write(&executable_path, script)?;
+    let mut permissions = fs::metadata(&executable_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable_path, permissions)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--fail-on-failed-cases")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg(&executable_path)
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model benchmark fixed evaluation cases failed",
+        ));
+
+    assert!(!baseline_path.exists());
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let bundle_manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let bundle_manifest: Value = serde_json::from_str(&fs::read_to_string(&bundle_manifest_path)?)?;
+
+    assert_eq!(report["passed"].as_bool(), Some(false));
+    assert_eq!(report["failed_cases"].as_u64(), Some(8));
+    assert_eq!(
+        report["bundle_manifest"]["manifest_path"].as_str(),
+        Some(bundle_manifest_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["format"].as_str(),
+        Some("continuitydb.local_model.benchmark_bundle")
+    );
+    assert_eq!(
+        bundle_manifest["benchmark_report_path"].as_str(),
+        Some(report_path.display().to_string().as_str())
+    );
+    assert_eq!(
+        bundle_manifest["prompt_artifacts"].as_array().map(Vec::len),
+        Some(9)
+    );
+    assert_eq!(
+        bundle_manifest["response_artifacts"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+    assert!(
+        bundle_manifest["response_artifact_manifest"]["manifest_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("responses/local-model-responses.manifest.json"))
+    );
+    assert!(artifact_dir
+        .join("contracts/local-model-response.schema.json")
+        .exists());
+    assert!(artifact_dir
+        .join("responses/local-model-responses.manifest.json")
+        .exists());
+
+    fs::remove_file(executable_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_benchmark_local_model_failure_report_path_records_passing_baseline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path = temp_store_path("continuitydb-cli-local-model-passing-gate-runner");
