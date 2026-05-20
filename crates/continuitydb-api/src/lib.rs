@@ -102,6 +102,13 @@ pub struct CommitExportFileSummary {
     pub next_after: Option<CommitId>,
 }
 
+/// Summary of a non-mutating commit import validation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommitImportValidation {
+    /// Number of commit slices that would be imported.
+    pub valid_commits: usize,
+}
+
 /// Summary of a conditional file-store compaction attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileCompactionSummary {
@@ -342,7 +349,7 @@ impl<K: StorageKernel> ContinuityDb<K> {
         &mut self,
         batch: CommitExportBatch,
     ) -> Result<usize, ContinuityError> {
-        self.validate_commit_export_batch(&batch)?;
+        self.validate_commit_import(&batch)?;
         let imported = batch.slices.len();
         for slice in batch.slices {
             self.kernel.append_cells_at_with_commit_id(
@@ -352,6 +359,17 @@ impl<K: StorageKernel> ContinuityDb<K> {
             )?;
         }
         Ok(imported)
+    }
+
+    /// Validates a commit export batch without mutating the backing kernel.
+    pub fn validate_commit_import(
+        &self,
+        batch: &CommitExportBatch,
+    ) -> Result<CommitImportValidation, ContinuityError> {
+        self.validate_commit_export_batch(batch)?;
+        Ok(CommitImportValidation {
+            valid_commits: batch.slices.len(),
+        })
     }
 
     /// Records utility feedback as an append-only successor StateCell.
@@ -586,6 +604,16 @@ impl ContinuityDb<FileKernel> {
         let encoded = fs::read(input_path).map_err(|_error| ContinuityError::CommitExportFileIo)?;
         let batch = Self::decode_commit_export_json(&encoded)?;
         self.import_commit_batch(batch)
+    }
+
+    /// Validates a versioned JSON commit export envelope from a file without mutating the store.
+    pub fn validate_commits_json_file<P: AsRef<Path>>(
+        &self,
+        input_path: P,
+    ) -> Result<CommitImportValidation, ContinuityError> {
+        let encoded = fs::read(input_path).map_err(|_error| ContinuityError::CommitExportFileIo)?;
+        let batch = Self::decode_commit_export_json(&encoded)?;
+        self.validate_commit_import(&batch)
     }
 }
 
@@ -1319,6 +1347,79 @@ mod tests {
     }
 
     #[test]
+    fn api_validates_commit_import_without_mutation() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:dry-run-source",
+                0.91,
+                12,
+            )?],
+            committed_at,
+            commit_id,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup::default())?;
+        let target = ContinuityDb::new(MemoryKernel::default());
+
+        let validation = target.validate_commit_import(&batch)?;
+
+        assert_eq!(validation.valid_commits, 1);
+        assert_eq!(
+            target.commit_slices(CommitManifestLookup::default())?.len(),
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_validate_commit_import_reports_duplicate_commit(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:dry-run-duplicate",
+                0.91,
+                12,
+            )?],
+            committed_at,
+            commit_id,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup::default())?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+        target.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:dry-run-existing",
+                0.83,
+                15,
+            )?],
+            committed_at,
+            commit_id,
+        )?;
+
+        let result = target.validate_commit_import(&batch);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Kernel(KernelError::DuplicateCommit))
+        ));
+        assert_eq!(
+            target.commit_slices(CommitManifestLookup::default())?.len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
     fn api_exports_commit_backup_json_file() -> Result<(), Box<dyn std::error::Error>> {
         let source_path = temp_file_kernel_path("continuitydb-api-export-backup-source");
         let backup_path = temp_file_kernel_path("continuitydb-api-export-backup-file");
@@ -1353,6 +1454,40 @@ mod tests {
 
         std::fs::remove_file(source_path)?;
         std::fs::remove_file(backup_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_validates_commit_backup_json_file_without_mutation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_path = temp_file_kernel_path("api-dry-run-source");
+        let target_path = temp_file_kernel_path("api-dry-run-target");
+        let backup_path = temp_file_kernel_path("api-dry-run-backup");
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::open_file(&source_path)?;
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:dry-run-file", 0.91, 12)?],
+            committed_at,
+            commit_id,
+        )?;
+        source.export_commits_json_file(CommitManifestLookup::default(), &backup_path)?;
+        let target = ContinuityDb::open_file(&target_path)?;
+
+        let validation = target.validate_commits_json_file(&backup_path)?;
+
+        assert_eq!(validation.valid_commits, 1);
+        assert_eq!(
+            target.commit_slices(CommitManifestLookup::default())?.len(),
+            0
+        );
+
+        fs::remove_file(source_path)?;
+        fs::remove_file(target_path)?;
+        fs::remove_file(backup_path)?;
         Ok(())
     }
 
