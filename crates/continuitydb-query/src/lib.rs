@@ -4,7 +4,9 @@ mod text;
 
 use chrono::{DateTime, Utc};
 use continuitydb_checkout::CheckoutRequest;
-use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCellId};
+use continuitydb_core::{
+    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCellId,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -135,6 +137,7 @@ impl CheckoutQuery {
             valid_at: self.requirements.valid_at,
             system_at: self.requirements.system_at,
             commit_id: self.requirements.commit_id,
+            activation: self.requirements.activation,
             answerability_question: Some(self.task.answerability_question),
             evidence_source: self.requirements.evidence_source,
             dependency_target: self.requirements.dependency_target,
@@ -175,6 +178,8 @@ pub struct QueryRequirements {
     pub system_at: Option<DateTime<Utc>>,
     /// Optional database commit identifier filter.
     pub commit_id: Option<CommitId>,
+    /// Optional activation-state filter.
+    pub activation: Option<ActivationState>,
     /// Optional exact evidence-source filter.
     pub evidence_source: Option<String>,
     /// Optional dependency target filter.
@@ -194,6 +199,7 @@ impl Default for QueryRequirements {
             valid_at: None,
             system_at: None,
             commit_id: None,
+            activation: None,
             evidence_source: None,
             dependency_target: None,
             dependency_kind: None,
@@ -266,7 +272,9 @@ pub fn decode_query_json(bytes: &[u8]) -> Result<ContinuityQuery, QueryEnvelopeE
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCellId};
+    use continuitydb_core::{
+        ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCellId,
+    };
 
     #[test]
     fn minimal_checkout_query_compiles_task_answerability_and_defaults(
@@ -282,6 +290,7 @@ mod tests {
         assert_eq!(request.valid_at, None);
         assert_eq!(request.system_at, None);
         assert_eq!(request.commit_id, None);
+        assert_eq!(request.activation, None);
         assert_eq!(request.evidence_source, None);
         assert_eq!(request.dependency_target, None);
         assert_eq!(request.dependency_kind, None);
@@ -351,6 +360,22 @@ mod tests {
         );
         assert_eq!(request.dependency_target, Some(dependency_target));
         assert_eq!(request.dependency_kind, Some(CellDependencyKind::DependsOn));
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_query_compiles_activation_requirement() -> Result<(), Box<dyn std::error::Error>> {
+        let task = QueryTask::new("frontier-review", "what frontier cells need review?");
+        let requirements = QueryRequirements {
+            activation: Some(ActivationState::Frontier),
+            ..QueryRequirements::default()
+        };
+
+        let request = CheckoutQuery::new(task)
+            .with_requirements(requirements)
+            .compile_checkout()?;
+
+        assert_eq!(request.activation, Some(ActivationState::Frontier));
         Ok(())
     }
 
@@ -688,6 +713,21 @@ WHERE dependency_target = "{dependency_target}"
     }
 
     #[test]
+    fn text_query_parses_activation_constraint() -> Result<(), Box<dyn std::error::Error>> {
+        let query = parse_query_text(
+            r#"CHECKOUT "frontier-review" ANSWER "what frontier cells need review?"
+WHERE activation = frontier"#,
+        )?;
+
+        let ContinuityQuery::Checkout(checkout) = query;
+        assert_eq!(
+            checkout.requirements().activation,
+            Some(ActivationState::Frontier)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn text_query_keywords_are_case_insensitive() -> Result<(), Box<dyn std::error::Error>> {
         let query = parse_query_text(
             r#"checkout "release" answer "what should ship?" where scope = global"#,
@@ -741,6 +781,12 @@ WHERE dependency_target = "{dependency_target}"
         assert_eq!(
             parse_query_text(
                 r#"CHECKOUT "release" ANSWER "what should ship?" WHERE dependency_kind = unknown_kind"#
+            ),
+            Err(QueryTextError::InvalidValue)
+        );
+        assert_eq!(
+            parse_query_text(
+                r#"CHECKOUT "release" ANSWER "what should ship?" WHERE activation = unknown"#
             ),
             Err(QueryTextError::InvalidValue)
         );

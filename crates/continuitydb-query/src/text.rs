@@ -1,7 +1,9 @@
 //! Text parser for ContinuityDB queries.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCellId};
+use continuitydb_core::{
+    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCellId,
+};
 use thiserror::Error;
 
 use crate::{CheckoutQuery, ContinuityQuery, QueryRequirements, QueryTask};
@@ -215,6 +217,10 @@ impl Parser {
                 self.expect_token(Token::Eq)?;
                 requirements.commit_id = Some(self.parse_commit_id()?);
             }
+            "activation" => {
+                self.expect_token(Token::Eq)?;
+                requirements.activation = Some(self.parse_activation()?);
+            }
             "dependency_target" => {
                 self.expect_token(Token::Eq)?;
                 requirements.dependency_target = Some(self.parse_state_cell_id()?);
@@ -262,6 +268,17 @@ impl Parser {
         self.expect_string()?
             .parse::<CommitId>()
             .map_err(|_error| QueryTextError::InvalidValue)
+    }
+
+    fn parse_activation(&mut self) -> Result<ActivationState, QueryTextError> {
+        let ident = self.expect_ident()?;
+        match ident.to_ascii_lowercase().as_str() {
+            "dormant" => Ok(ActivationState::Dormant),
+            "active" => Ok(ActivationState::Active),
+            "frontier" => Ok(ActivationState::Frontier),
+            "retired" => Ok(ActivationState::Retired),
+            _ => Err(QueryTextError::InvalidValue),
+        }
     }
 
     fn parse_state_cell_id(&mut self) -> Result<StateCellId, QueryTextError> {

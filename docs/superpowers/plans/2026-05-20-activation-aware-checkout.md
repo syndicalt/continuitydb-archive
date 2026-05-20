@@ -148,7 +148,7 @@ cargo test -p continuitydb-checkout --all-features
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit checkout implementation**
+- [x] **Step 4: Commit checkout implementation**
 
 ```bash
 git add crates/continuitydb-checkout/src/lib.rs docs/superpowers/plans/2026-05-20-activation-aware-checkout.md
@@ -160,7 +160,7 @@ git commit -m "feat: add activation-aware checkout"
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add activation import**
+- [x] **Step 1: Add activation import**
 
 Update the test import to include `ActivationState`:
 
@@ -170,7 +170,7 @@ use continuitydb_core::{
 };
 ```
 
-- [ ] **Step 2: Add default assertion**
+- [x] **Step 2: Add default assertion**
 
 In `minimal_checkout_query_compiles_task_answerability_and_defaults`, assert:
 
@@ -178,7 +178,7 @@ In `minimal_checkout_query_compiles_task_answerability_and_defaults`, assert:
 assert_eq!(request.activation, None);
 ```
 
-- [ ] **Step 3: Add typed query activation compile test**
+- [x] **Step 3: Add typed query activation compile test**
 
 Add this test after `checkout_query_compiles_evidence_and_dependency_requirements`:
 
@@ -200,7 +200,7 @@ fn checkout_query_compiles_activation_requirement() -> Result<(), Box<dyn std::e
 }
 ```
 
-- [ ] **Step 4: Add text parser activation tests**
+- [x] **Step 4: Add text parser activation tests**
 
 Add this test after `text_query_parses_dependency_constraints`:
 
@@ -232,7 +232,7 @@ assert_eq!(
 );
 ```
 
-- [ ] **Step 5: Verify RED**
+- [x] **Step 5: Verify RED**
 
 Run:
 
@@ -248,7 +248,7 @@ Expected: FAIL because `QueryRequirements` and the text parser do not support ac
 - Modify: `crates/continuitydb-query/src/lib.rs`
 - Modify: `crates/continuitydb-query/src/text.rs`
 
-- [ ] **Step 1: Add production import**
+- [x] **Step 1: Add production import**
 
 Update the production core import in `lib.rs`:
 
@@ -258,7 +258,7 @@ use continuitydb_core::{
 };
 ```
 
-- [ ] **Step 2: Add QueryRequirements field and default**
+- [x] **Step 2: Add QueryRequirements field and default**
 
 Add this field after `commit_id`:
 
@@ -269,7 +269,7 @@ pub activation: Option<ActivationState>,
 
 Set it to `None` in `Default`.
 
-- [ ] **Step 3: Compile activation**
+- [x] **Step 3: Compile activation**
 
 Add this field in `CheckoutQuery::compile_checkout`:
 
@@ -277,7 +277,7 @@ Add this field in `CheckoutQuery::compile_checkout`:
 activation: self.requirements.activation,
 ```
 
-- [ ] **Step 4: Add text parser import**
+- [x] **Step 4: Add text parser import**
 
 Update the core import in `text.rs`:
 
@@ -287,7 +287,7 @@ use continuitydb_core::{
 };
 ```
 
-- [ ] **Step 5: Parse activation constraint**
+- [x] **Step 5: Parse activation constraint**
 
 Add this branch after `commit_id`:
 
@@ -313,7 +313,7 @@ fn parse_activation(&mut self) -> Result<ActivationState, QueryTextError> {
 }
 ```
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run:
 
