@@ -240,6 +240,7 @@ Storage kernel
 28. Add compatible local-model regression gates. Updated record-and-compare baseline gating to compare only previous baselines with matching candidate identity, response schema version, and runtime manifest, preventing invalid regressions across runtime or contract changes.
 29. Add public compatible local-model baseline lookup. Implemented a feature-gated API that returns the newest stored baseline matching candidate identity, response schema version, and runtime manifest without recording a new benchmark run.
 30. Add local-model evaluation summary metrics. Implemented serializable deterministic evaluation summaries for reports and baselines so embedders can inspect total, passed, failed, and pass-rate metrics without duplicating regression internals.
+31. Add CLI local-model evaluation summary output. Routed `benchmark-local-model` JSON through the public evaluation summary API and exposed failed-case and pass-rate metrics alongside existing pass counts.
 
 ## Small Embeddable Model Track
 

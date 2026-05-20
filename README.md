@@ -75,6 +75,7 @@ The first milestone builds:
 - Compatible local model benchmark regression gates.
 - Public compatible local model benchmark baseline lookup for embedders.
 - Public local model evaluation summary metrics.
+- CLI local model evaluation summary output.
 - Feature-gated CLI local model benchmark baseline recording.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.

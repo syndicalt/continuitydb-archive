@@ -488,21 +488,17 @@ fn local_model_benchmark_json(
     baseline: &LocalModelBenchmarkBaseline,
     regression: Option<&LocalModelBenchmarkRegression>,
 ) -> serde_json::Value {
-    let total_cases = baseline.evaluation().case_reports().len();
-    let passed_cases = baseline
-        .evaluation()
-        .case_reports()
-        .iter()
-        .filter(|case| case.passed())
-        .count();
+    let summary = baseline.evaluation_summary();
     serde_json::json!({
         "candidate_model_id": baseline.candidate_model_id(),
         "candidate_role": baseline.candidate_role(),
         "baseline_path": baseline_path.display().to_string(),
         "recorded_at": baseline.recorded_at(),
-        "passed": baseline.passed(),
-        "passed_cases": passed_cases,
-        "total_cases": total_cases,
+        "passed": summary.passed(),
+        "passed_cases": summary.passed_cases(),
+        "failed_cases": summary.failed_cases(),
+        "total_cases": summary.total_cases(),
+        "pass_rate": summary.pass_rate(),
         "response_schema_version": baseline.response_schema_version(),
         "runtime": {
             "executable": baseline.runtime().executable(),

@@ -240,7 +240,9 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert_eq!(json["candidate_role"].as_str(), Some("default-feasibility"));
     assert_eq!(json["passed"].as_bool(), Some(true));
     assert_eq!(json["passed_cases"].as_u64(), Some(1));
+    assert_eq!(json["failed_cases"].as_u64(), Some(0));
     assert_eq!(json["total_cases"].as_u64(), Some(1));
+    assert_eq!(json["pass_rate"].as_f64(), Some(1.0));
     assert_eq!(json["response_schema_version"].as_u64(), Some(1));
     assert_eq!(
         json["baseline_path"].as_str(),
