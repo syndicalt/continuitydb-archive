@@ -1429,6 +1429,10 @@ printf '%s\n' '{"proposals":[]}'
         Some(0)
     );
     assert_eq!(
+        report["baseline_comparison"]["changed_cases"].as_u64(),
+        Some(9)
+    );
+    assert_eq!(
         report["baseline_comparison"]["outcome_changed_cases"].as_u64(),
         Some(0)
     );
@@ -1540,6 +1544,10 @@ fn cli_benchmark_local_model_reports_passing_response_changes(
     assert_eq!(
         report["baseline_comparison"]["pass_count_delta"].as_i64(),
         Some(0)
+    );
+    assert_eq!(
+        report["baseline_comparison"]["changed_cases"].as_u64(),
+        Some(9)
     );
     assert_eq!(
         report["baseline_comparison"]["outcome_changed_cases"].as_u64(),

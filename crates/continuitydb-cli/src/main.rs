@@ -1399,26 +1399,7 @@ fn local_model_benchmark_json(
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),
         },
-        "baseline_comparison": regression.map(|regression| {
-            serde_json::json!({
-                "compared": true,
-                "regressed": regression.regressed(),
-                "previous_recorded_at": regression.previous_recorded_at(),
-                "current_recorded_at": regression.current_recorded_at(),
-                "previous_passed_cases": regression.previous_passed_cases(),
-                "current_passed_cases": regression.current_passed_cases(),
-                "previous_failure_counts": regression.previous_failure_counts(),
-                "current_failure_counts": regression.current_failure_counts(),
-                "failure_count_deltas": regression.failure_count_deltas(),
-                "regressed_cases": regression.regressed_case_names(),
-                "recovered_cases": regression.recovered_case_names(),
-                "outcome_changed_cases": regression.outcome_changed_cases(),
-                "failure_count_changed_cases": regression.failure_count_changed_cases(),
-                "response_changed_cases": regression.response_changed_cases(),
-                "changed_case_summaries": regression.changed_case_summaries(),
-                "pass_count_delta": regression.pass_count_delta(),
-            })
-        }).or_else(|| compared.then(|| serde_json::json!({
+        "baseline_comparison": regression.map(local_model_regression_json).or_else(|| compared.then(|| serde_json::json!({
             "compared": true,
             "regressed": false,
             "previous_recorded_at": null,
@@ -1428,6 +1409,77 @@ fn local_model_benchmark_json(
         value["stability"] = local_model_stability_report_json(stability);
     }
     value
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_regression_json(regression: &LocalModelBenchmarkRegression) -> serde_json::Value {
+    let mut value = serde_json::Map::new();
+    value.insert("compared".to_string(), serde_json::json!(true));
+    value.insert(
+        "regressed".to_string(),
+        serde_json::json!(regression.regressed()),
+    );
+    value.insert(
+        "previous_recorded_at".to_string(),
+        serde_json::json!(regression.previous_recorded_at()),
+    );
+    value.insert(
+        "current_recorded_at".to_string(),
+        serde_json::json!(regression.current_recorded_at()),
+    );
+    value.insert(
+        "previous_passed_cases".to_string(),
+        serde_json::json!(regression.previous_passed_cases()),
+    );
+    value.insert(
+        "current_passed_cases".to_string(),
+        serde_json::json!(regression.current_passed_cases()),
+    );
+    value.insert(
+        "previous_failure_counts".to_string(),
+        serde_json::json!(regression.previous_failure_counts()),
+    );
+    value.insert(
+        "current_failure_counts".to_string(),
+        serde_json::json!(regression.current_failure_counts()),
+    );
+    value.insert(
+        "failure_count_deltas".to_string(),
+        serde_json::json!(regression.failure_count_deltas()),
+    );
+    value.insert(
+        "regressed_cases".to_string(),
+        serde_json::json!(regression.regressed_case_names()),
+    );
+    value.insert(
+        "recovered_cases".to_string(),
+        serde_json::json!(regression.recovered_case_names()),
+    );
+    value.insert(
+        "changed_cases".to_string(),
+        serde_json::json!(regression.changed_cases()),
+    );
+    value.insert(
+        "outcome_changed_cases".to_string(),
+        serde_json::json!(regression.outcome_changed_cases()),
+    );
+    value.insert(
+        "failure_count_changed_cases".to_string(),
+        serde_json::json!(regression.failure_count_changed_cases()),
+    );
+    value.insert(
+        "response_changed_cases".to_string(),
+        serde_json::json!(regression.response_changed_cases()),
+    );
+    value.insert(
+        "changed_case_summaries".to_string(),
+        serde_json::json!(regression.changed_case_summaries()),
+    );
+    value.insert(
+        "pass_count_delta".to_string(),
+        serde_json::json!(regression.pass_count_delta()),
+    );
+    serde_json::Value::Object(value)
 }
 
 #[cfg(feature = "local-model")]

@@ -1717,6 +1717,7 @@ pub struct LocalModelBenchmarkRegression {
     failure_count_deltas: BTreeMap<String, isize>,
     regressed_case_names: Vec<String>,
     recovered_case_names: Vec<String>,
+    changed_cases: usize,
     outcome_changed_cases: usize,
     failure_count_changed_cases: usize,
     response_changed_cases: usize,
@@ -1845,6 +1846,7 @@ impl LocalModelBenchmarkRegression {
             .filter(|case| !case.previous_passed() && case.current_passed())
             .map(|case| case.case_name().to_string())
             .collect();
+        let changed_cases = changed_case_summaries.len();
         let outcome_changed_cases = changed_case_summaries
             .iter()
             .filter(|case| case.outcome_changed())
@@ -1873,6 +1875,7 @@ impl LocalModelBenchmarkRegression {
             failure_count_deltas,
             regressed_case_names,
             recovered_case_names,
+            changed_cases,
             outcome_changed_cases,
             failure_count_changed_cases,
             response_changed_cases,
@@ -1935,6 +1938,11 @@ impl LocalModelBenchmarkRegression {
     /// Returns case names that failed previously and pass in the current baseline.
     pub fn recovered_case_names(&self) -> &[String] {
         &self.recovered_case_names
+    }
+
+    /// Returns the number of changed case summaries.
+    pub fn changed_cases(&self) -> usize {
+        self.changed_cases
     }
 
     /// Returns the number of changed case summaries whose pass/fail outcome changed.

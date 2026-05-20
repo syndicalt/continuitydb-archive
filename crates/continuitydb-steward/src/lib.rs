@@ -2637,6 +2637,7 @@ mod tests {
         assert_eq!(regression.pass_count_delta(), 0);
         assert!(regression.regressed_case_names().is_empty());
         assert!(regression.recovered_case_names().is_empty());
+        assert_eq!(regression.changed_cases(), 1);
         assert_eq!(regression.outcome_changed_cases(), 0);
         assert_eq!(regression.failure_count_changed_cases(), 0);
         assert_eq!(regression.response_changed_cases(), 1);
