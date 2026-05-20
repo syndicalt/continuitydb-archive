@@ -103,7 +103,7 @@ cargo test -p continuitydb-api --all-features
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit implementation**
+- [x] **Step 3: Commit implementation**
 
 ```bash
 git add crates/continuitydb-api/src/lib.rs docs/superpowers/plans/2026-05-20-native-query-text-execution.md
@@ -117,7 +117,7 @@ git commit -m "feat: execute text queries through native api"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-native-query-text-execution.md`
 
-- [ ] **Step 1: Update README current scope**
+- [x] **Step 1: Update README current scope**
 
 Add this bullet after native saved text query-file execution:
 
@@ -125,7 +125,7 @@ Add this bullet after native saved text query-file execution:
 - Native API execution for strict text `CHECKOUT` query strings.
 ```
 
-- [ ] **Step 2: Update Native API roadmap**
+- [x] **Step 2: Update Native API roadmap**
 
 Add this milestone after native saved text query-file execution and renumber the later Native API milestones:
 
@@ -133,7 +133,7 @@ Add this milestone after native saved text query-file execution and renumber the
 6. Add native strict text query execution. Implemented `ContinuityDb::checkout_query_text` so embedders can execute strict `CHECKOUT` text directly without creating saved query files, preserving text parser and query compilation error boundaries.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -147,7 +147,7 @@ git diff --check
 
 Expected: all commands exit successfully.
 
-- [ ] **Step 4: Commit documentation**
+- [x] **Step 4: Commit documentation**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-native-query-text-execution.md
