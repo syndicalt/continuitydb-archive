@@ -2810,13 +2810,14 @@ fn write_workload_bundle_validation_failure_report(
     message: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let manifest = workload_validation_failure_manifest_json(artifact_dir);
+    let workload_report = workload_validation_failure_report_json(artifact_dir);
     let workload_artifacts = workload_validation_failure_artifacts_json(artifact_dir);
     let output = serde_json::json!({
         "artifact_dir": artifact_dir.display().to_string(),
         "report_path": report_path.map(|path| path.display().to_string()),
         "failure_report_path": failure_report_path.display().to_string(),
         "manifest": manifest,
-        "workload_report": serde_json::Value::Null,
+        "workload_report": workload_report,
         "workload_artifacts": workload_artifacts,
         "failure": {
             "stage": "workload_bundle_validation",
@@ -2837,6 +2838,23 @@ fn workload_validation_failure_manifest_json(artifact_dir: &Path) -> serde_json:
         "manifest_path": manifest_path.display().to_string(),
         "manifest_fingerprint": fnv1a64_fingerprint(&manifest_text),
         "manifest_bytes": manifest_text.len(),
+    })
+}
+
+fn workload_validation_failure_report_json(artifact_dir: &Path) -> serde_json::Value {
+    let report_path = artifact_dir.join("workload-report.json");
+    let Ok(report_text) = std::fs::read_to_string(&report_path) else {
+        return serde_json::Value::Null;
+    };
+    let canonical_report_text = serde_json::from_str::<serde_json::Value>(&report_text)
+        .ok()
+        .and_then(|report| workload_report_manifest_payload_text(&report).ok())
+        .unwrap_or_else(|| report_text.clone());
+
+    serde_json::json!({
+        "report_path": report_path.display().to_string(),
+        "report_fingerprint": fnv1a64_fingerprint(&canonical_report_text),
+        "report_bytes": canonical_report_text.len(),
     })
 }
 
