@@ -13,8 +13,14 @@ use continuitydb_revision::{
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
     ConflictResolutionRecommendation, ConflictResolutionScan,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use thiserror::Error;
+
+/// Wire-format marker for JSON commit export envelopes.
+pub const COMMIT_EXPORT_FORMAT: &str = "continuitydb.commit_export";
+/// Supported JSON commit export envelope version.
+pub const COMMIT_EXPORT_FORMAT_VERSION: u32 = 1;
 
 /// Errors produced by the native ContinuityDB operation API.
 #[derive(Debug, Error, PartialEq)]
@@ -37,6 +43,12 @@ pub enum ContinuityError {
         /// Commit whose export slice failed validation.
         commit_id: CommitId,
     },
+    /// Commit export envelope has an unsupported format or version.
+    #[error("commit export envelope is invalid")]
+    InvalidCommitExportEnvelope,
+    /// Commit export envelope JSON could not be encoded or decoded.
+    #[error("commit export envelope JSON is invalid")]
+    CommitExportJson,
 }
 
 /// Native embeddable ContinuityDB operation boundary.
@@ -46,7 +58,7 @@ pub struct ContinuityDb<K> {
 }
 
 /// Materialized cells for one database commit boundary.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CommitSlice {
     /// Commit manifest that defines the boundary and cell order.
     pub manifest: CommitManifest,
@@ -55,12 +67,43 @@ pub struct CommitSlice {
 }
 
 /// Cursor-selected commit slices ready for backup, sync, or replay export.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CommitExportBatch {
     /// Exported commit slices in database visibility order.
     pub slices: Vec<CommitSlice>,
     /// Cursor to use as `CommitManifestLookup.after` for the next export batch.
     pub next_after: Option<CommitId>,
+}
+
+/// Versioned JSON envelope for portable commit export batches.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CommitExportEnvelope {
+    /// Wire-format marker.
+    pub format: String,
+    /// Wire-format version.
+    pub version: u32,
+    /// Exported commit batch.
+    pub batch: CommitExportBatch,
+}
+
+impl CommitExportEnvelope {
+    /// Wraps a commit export batch in the current JSON envelope.
+    pub fn new(batch: CommitExportBatch) -> Self {
+        Self {
+            format: COMMIT_EXPORT_FORMAT.to_string(),
+            version: COMMIT_EXPORT_FORMAT_VERSION,
+            batch,
+        }
+    }
+
+    /// Validates the envelope format and version.
+    pub fn validate(&self) -> Result<(), ContinuityError> {
+        if self.format == COMMIT_EXPORT_FORMAT && self.version == COMMIT_EXPORT_FORMAT_VERSION {
+            Ok(())
+        } else {
+            Err(ContinuityError::InvalidCommitExportEnvelope)
+        }
+    }
 }
 
 impl<K> ContinuityDb<K> {
@@ -82,6 +125,20 @@ impl<K> ContinuityDb<K> {
     /// Consumes the API wrapper and returns the backing storage kernel.
     pub fn into_kernel(self) -> K {
         self.kernel
+    }
+
+    /// Encodes a commit export batch as a versioned JSON envelope.
+    pub fn encode_commit_export_json(batch: CommitExportBatch) -> Result<Vec<u8>, ContinuityError> {
+        serde_json::to_vec(&CommitExportEnvelope::new(batch))
+            .map_err(|_error| ContinuityError::CommitExportJson)
+    }
+
+    /// Decodes a versioned JSON commit export envelope.
+    pub fn decode_commit_export_json(bytes: &[u8]) -> Result<CommitExportBatch, ContinuityError> {
+        let envelope = serde_json::from_slice::<CommitExportEnvelope>(bytes)
+            .map_err(|_error| ContinuityError::CommitExportJson)?;
+        envelope.validate()?;
+        Ok(envelope.batch)
     }
 }
 
@@ -849,6 +906,71 @@ mod tests {
             result,
             Err(ContinuityError::Kernel(KernelError::CommitNotFound))
         ));
+    }
+
+    #[test]
+    fn api_encodes_and_decodes_commit_export_json() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:json-export", 0.91, 12)?],
+            committed_at,
+            commit_id,
+        )?;
+        let batch = db.export_commits(CommitManifestLookup::default())?;
+
+        let encoded = ContinuityDb::<MemoryKernel>::encode_commit_export_json(batch.clone())?;
+        let envelope: serde_json::Value = serde_json::from_slice(&encoded)?;
+        let decoded = ContinuityDb::<MemoryKernel>::decode_commit_export_json(&encoded)?;
+
+        assert_eq!(envelope["format"], "continuitydb.commit_export");
+        assert_eq!(envelope["version"], 1);
+        assert_eq!(decoded, batch);
+        Ok(())
+    }
+
+    #[test]
+    fn api_rejects_unsupported_commit_export_json_version() {
+        let encoded = br#"{"format":"continuitydb.commit_export","version":999,"batch":{"slices":[],"next_after":null}}"#;
+
+        let result = ContinuityDb::<MemoryKernel>::decode_commit_export_json(encoded);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::InvalidCommitExportEnvelope)
+        ));
+    }
+
+    #[test]
+    fn api_imports_decoded_commit_export_json() -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:json-import", 0.91, 12)?],
+            committed_at,
+            commit_id,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup::default())?;
+        let encoded = ContinuityDb::<MemoryKernel>::encode_commit_export_json(batch.clone())?;
+        let decoded = ContinuityDb::<MemoryKernel>::decode_commit_export_json(&encoded)?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let imported = target.import_commit_batch(decoded)?;
+
+        assert_eq!(imported, 1);
+        assert_eq!(
+            target.export_commits(CommitManifestLookup::default())?,
+            batch
+        );
+        Ok(())
     }
 
     #[test]

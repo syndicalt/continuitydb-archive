@@ -22,7 +22,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Import envelope type in tests**
+- [x] **Step 1: Import envelope type in tests**
 
 Change:
 
@@ -36,7 +36,7 @@ to:
 use super::{CommitExportBatch, CommitExportEnvelope, CommitSlice, ContinuityDb, ContinuityError};
 ```
 
-- [ ] **Step 2: Add JSON roundtrip test**
+- [x] **Step 2: Add JSON roundtrip test**
 
 Add near commit export tests:
 
@@ -67,7 +67,7 @@ fn api_encodes_and_decodes_commit_export_json() -> Result<(), Box<dyn std::error
 }
 ```
 
-- [ ] **Step 3: Add unsupported version test**
+- [x] **Step 3: Add unsupported version test**
 
 Add:
 
@@ -85,7 +85,7 @@ fn api_rejects_unsupported_commit_export_json_version() {
 }
 ```
 
-- [ ] **Step 4: Add decoded import test**
+- [x] **Step 4: Add decoded import test**
 
 Add:
 
@@ -116,7 +116,7 @@ fn api_imports_decoded_commit_export_json() -> Result<(), Box<dyn std::error::Er
 }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify RED**
+- [x] **Step 5: Run targeted tests and verify RED**
 
 Run:
 
@@ -132,7 +132,7 @@ Expected: compilation fails because envelope type and helpers do not exist.
 - Modify: `crates/continuitydb-api/Cargo.toml`
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add dependencies**
+- [x] **Step 1: Add dependencies**
 
 Add:
 
@@ -141,7 +141,7 @@ serde.workspace = true
 serde_json.workspace = true
 ```
 
-- [ ] **Step 2: Add serde import and constants**
+- [x] **Step 2: Add serde import and constants**
 
 Add:
 
@@ -152,7 +152,7 @@ pub const COMMIT_EXPORT_FORMAT: &str = "continuitydb.commit_export";
 pub const COMMIT_EXPORT_FORMAT_VERSION: u32 = 1;
 ```
 
-- [ ] **Step 3: Derive serde for export structs and add envelope**
+- [x] **Step 3: Derive serde for export structs and add envelope**
 
 Change export structs to derive `Serialize, Deserialize`, and add:
 
@@ -165,7 +165,7 @@ pub struct CommitExportEnvelope {
 }
 ```
 
-- [ ] **Step 4: Add envelope validation**
+- [x] **Step 4: Add envelope validation**
 
 Add:
 
@@ -176,7 +176,7 @@ impl CommitExportEnvelope {
 }
 ```
 
-- [ ] **Step 5: Add errors and helpers**
+- [x] **Step 5: Add errors and helpers**
 
 Add error variants for serde decode/encode and invalid envelope. Add static helpers:
 
@@ -185,7 +185,7 @@ pub fn encode_commit_export_json(batch: CommitExportBatch) -> Result<Vec<u8>, Co
 pub fn decode_commit_export_json(bytes: &[u8]) -> Result<CommitExportBatch, ContinuityError>
 ```
 
-- [ ] **Step 6: Run targeted tests and verify GREEN**
+- [x] **Step 6: Run targeted tests and verify GREEN**
 
 Run:
 
@@ -202,7 +202,7 @@ Expected: JSON envelope tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-commit-export-json-envelope.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope:
 
@@ -210,7 +210,7 @@ Add to Current Scope:
 - Versioned JSON commit export envelope for backup and sync files.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add Native API milestone:
 
@@ -218,7 +218,7 @@ Add Native API milestone:
 10. Add versioned JSON commit export envelopes. Implemented `CommitExportEnvelope` plus JSON encode/decode helpers so native commit export batches can be written to files or sync channels with explicit format/version validation.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -232,7 +232,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
