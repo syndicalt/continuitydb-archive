@@ -176,6 +176,7 @@ Storage kernel
 28. Add native Steward frontier/watch audit operations. Implemented optional `steward` feature method `audit_frontier_watch_with_steward` so embedders can run subscribed frontier watch events, emit deterministic Steward proposals, and record policy-evaluated proposal audits through the backing `StorageKernel`.
 29. Add native accepted Steward `MarkFrontier` application. Implemented optional `steward` feature method `apply_accepted_mark_frontier_proposal_at` so embedders can deterministically apply accepted frontier proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
 30. Add native accepted Steward `LabelAnswerability` application. Implemented optional `steward` feature method `apply_accepted_label_answerability_proposal_at` so embedders can deterministically apply accepted answerability-label proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
+31. Add native accepted Steward `AdjustConfidence` application. Implemented optional `steward` feature method `apply_accepted_adjust_confidence_proposal_at` so embedders can deterministically apply accepted confidence proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
 
 ## Steward Milestones
 
@@ -195,6 +196,7 @@ Storage kernel
 14. Add native API frontier/watch stewardship. Implemented `ContinuityDb::audit_frontier_watch_with_steward` so subscribed frontier watch events can become audited Steward proposal decisions without leaving the embeddable database API.
 15. Add accepted `MarkFrontier` proposal application. Implemented the first deterministic proposal-to-state mutation path: accepted frontier proposals append successor StateCells with `Frontier` activation through the native API, while models remain proposal-only.
 16. Add accepted `LabelAnswerability` proposal application. Implemented deterministic answerability-label proposal application through the native API, preserving the model-as-proposer boundary while allowing accepted labels to become committed append-only StateCell revisions.
+17. Add accepted `AdjustConfidence` proposal application. Implemented deterministic confidence proposal application through the native API by appending successor StateCells with revised evidence confidence while preserving the model-as-proposer boundary.
 
 ## Small Embeddable Model Track
 

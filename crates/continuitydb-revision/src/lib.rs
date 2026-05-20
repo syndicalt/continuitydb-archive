@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use continuitydb_core::{
-    ActivationState, Answerability, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
+    ActivationState, Answerability, Confidence, SemanticAnchor, StateCell, StateCellId,
+    UtilityFeedback,
 };
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +109,32 @@ pub fn revise_answerability(
     revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
 
     AnswerabilityRevision { cell, revision }
+}
+
+/// Result of applying evidence confidence as an append-only StateCell revision.
+pub struct EvidenceConfidenceRevision {
+    /// New StateCell version carrying revised evidence confidence.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with all evidence confidence replaced.
+pub fn revise_evidence_confidence(
+    previous: &StateCell,
+    confidence: Confidence,
+) -> EvidenceConfidenceRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    for evidence in &mut cell.evidence {
+        evidence.confidence = confidence;
+    }
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    EvidenceConfidenceRevision { cell, revision }
 }
 
 /// Deterministic reason two StateCell versions conflict.
@@ -359,9 +386,9 @@ mod tests {
 
     use super::{
         detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
-        revise_activation_state, revise_answerability, revise_utility_feedback,
-        scan_cell_conflicts, CellConflictKind, ConflictResolutionKind, RevisionGraph,
-        RevisionLinkKind,
+        revise_activation_state, revise_answerability, revise_evidence_confidence,
+        revise_utility_feedback, scan_cell_conflicts, CellConflictKind, ConflictResolutionKind,
+        RevisionGraph, RevisionLinkKind,
     };
 
     fn timestamp(day: u32) -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
@@ -511,6 +538,44 @@ mod tests {
             &["what feedback applies?".to_string()]
         );
         assert_eq!(revised.cell.answerability, answerability);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn evidence_confidence_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell_with_anchor_payload_time_and_confidence(
+            "project:continuitydb:confidence-revision",
+            "Confidence revision target.",
+            20,
+            None,
+            0.4,
+        )?;
+        let confidence = Confidence::new(0.85)?;
+
+        let revised = revise_evidence_confidence(&previous, confidence);
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.evidence[0].confidence, Confidence::new(0.4)?);
+        assert_eq!(revised.cell.evidence[0].confidence, confidence);
+        assert_eq!(revised.cell.evidence[0].source, previous.evidence[0].source);
+        assert_eq!(
+            revised.cell.evidence[0].citation,
+            previous.evidence[0].citation
+        );
+        assert_eq!(revised.cell.evidence[0].trust, previous.evidence[0].trust);
         assert_eq!(
             revised
                 .revision

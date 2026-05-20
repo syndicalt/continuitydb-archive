@@ -5,7 +5,7 @@ use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
 #[cfg(feature = "steward")]
-use continuitydb_core::{ActivationState, Answerability};
+use continuitydb_core::{ActivationState, Answerability, Confidence};
 use continuitydb_core::{
     CommitId, CommitManifest, CoreError, StateCell, StateCellId, UtilityFeedback,
 };
@@ -23,7 +23,9 @@ use continuitydb_revision::{
     ConflictResolutionRecommendation, ConflictResolutionScan,
 };
 #[cfg(feature = "steward")]
-use continuitydb_revision::{revise_activation_state, revise_answerability};
+use continuitydb_revision::{
+    revise_activation_state, revise_answerability, revise_evidence_confidence,
+};
 #[cfg(feature = "steward")]
 use continuitydb_steward::{
     BorrowedKernelProposalStore, ConflictResolutionSteward, FrontierSubscriptionRunner,
@@ -605,6 +607,33 @@ impl<K: StorageKernel> ContinuityDb<K> {
         let answerability = Answerability::new(questions.clone())?;
         let previous = self.lookup_one_cell(cell_id)?;
         let revision = revise_answerability(&previous, answerability);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        Ok(Some(successor_id))
+    }
+
+    /// Applies an accepted AdjustConfidence Steward proposal as an append-only successor StateCell.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_adjust_confidence_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Option<StateCellId>, ContinuityError> {
+        if record.decision().outcome() == ProposalOutcome::Rejected {
+            return Ok(None);
+        }
+
+        let (cell_id, proposed_confidence) = match record.proposal().action() {
+            StewardAction::AdjustConfidence {
+                cell_id,
+                proposed_confidence,
+            } => (*cell_id, *proposed_confidence),
+            _ => return Err(ContinuityError::UnsupportedStewardProposalAction),
+        };
+
+        let confidence = Confidence::new(proposed_confidence)?;
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_evidence_confidence(&previous, confidence);
         let successor_id = revision.cell.id;
         self.kernel.append_cell_at(revision.cell, committed_at)?;
         Ok(Some(successor_id))
@@ -3859,6 +3888,164 @@ WHERE scope = project("continuitydb")
             db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
 
         let result = db.apply_accepted_label_answerability_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_adjust_confidence_application_appends_successor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:apply-confidence", 0.41, 12)?,
+            initial_commit,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::AdjustConfidence {
+                cell_id: original_id,
+                proposed_confidence: 0.86,
+            },
+            "New evidence increases confidence.",
+            vec!["test://confidence-apply".to_string()],
+            initial_commit,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), initial_commit)?;
+
+        let successor_id = db
+            .apply_accepted_adjust_confidence_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected successor"))?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.evidence[0].confidence, Confidence::new(0.41)?);
+        assert_eq!(successor.evidence[0].confidence, Confidence::new(0.86)?);
+        assert_eq!(successor.evidence[0].source, original.evidence[0].source);
+        assert_eq!(
+            successor.evidence[0].citation,
+            original.evidence[0].citation
+        );
+        assert_eq!(successor.evidence[0].trust, original.evidence[0].trust);
+        assert_eq!(successor.system_time.from(), apply_commit);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_adjust_confidence_application_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-confidence", 0.41, 12)?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::AdjustConfidence {
+                cell_id: original_id,
+                proposed_confidence: 0.86,
+            },
+            "Policy rejected this confidence application.",
+            vec!["test://confidence-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied = db.apply_accepted_adjust_confidence_proposal_at(&record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_adjust_confidence_application_rejects_unsupported_accepted_action(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: StateCellId::new(),
+            },
+            "Frontier application belongs to a different method.",
+            vec!["test://unsupported-confidence-apply".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_adjust_confidence_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::UnsupportedStewardProposalAction)
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_adjust_confidence_application_reports_missing_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_id = StateCellId::new();
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::AdjustConfidence {
+                cell_id: missing_id,
+                proposed_confidence: 0.86,
+            },
+            "Missing target should be reported before application.",
+            vec!["test://confidence-missing".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_adjust_confidence_proposal_at(&record, committed_at);
 
         assert!(matches!(
             result,
