@@ -124,6 +124,7 @@ Storage kernel
 9. Add conditional file-store compaction. Implemented `continuitydb compact-file --if-needed` so operators can compact only when health recommends it.
 10. Add commit import dry-run validation. Implemented `continuitydb import-commits --dry-run` so operators can validate backup files against a target store before mutation.
 11. Add incremental commit export. Implemented `continuitydb export-commits --after --limit` so operators can page commit backups through the same cursor semantics exposed by the native API.
+12. Report commit import cursors. Extended `continuitydb import-commits` output with `next_after` so operators can checkpoint imported backup pages.
 
 ## Native API Milestones
 
@@ -145,6 +146,7 @@ Storage kernel
 16. Add canonical file-store requirement gate. Implemented `ensure_file_store_canonical` and `open_canonical_file` so embedders can reject readable but compaction-worthy file stores without automatic mutation.
 17. Add conditional file-store compaction. Implemented `compact_file_store_if_needed` with before/after health summaries so embedders can automate explicit maintenance without rewriting canonical stores.
 18. Add commit import dry-run validation. Implemented `validate_commit_import` and `validate_commits_json_file` so embedders can validate replay batches and backup files without mutating target stores.
+19. Add commit import summaries. Implemented summary-returning import APIs so embedders can retrieve imported counts and backup cursors without decoding envelopes separately.
 
 ## Steward Milestones
 

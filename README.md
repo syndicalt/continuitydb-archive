@@ -58,6 +58,7 @@ The first milestone builds:
 - Native commit export batch API for backup and sync flows.
 - Native validated commit import batch API for replay flows.
 - Commit import dry-run validation for backup and sync workflows.
+- Commit import summaries with cursor metadata for checkpointed sync.
 - Versioned JSON commit export envelope for backup and sync files.
 - Native commit backup and restore file helper API.
 - Native typed operation API for ingest, checkout, and audit.
