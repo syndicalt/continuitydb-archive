@@ -12,7 +12,7 @@ mod proposal;
 pub use error::StewardError;
 pub use frontier::{
     FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription, FrontierSubscriptionId,
-    FrontierSubscriptionStore, FrontierWatchEvent, FrontierWatchSignal,
+    FrontierSubscriptionRunner, FrontierSubscriptionStore, FrontierWatchEvent, FrontierWatchSignal,
     MemoryFrontierSubscriptionStore,
 };
 pub use ledger::{
@@ -40,8 +40,8 @@ mod tests {
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
-        FrontierSubscriptionId, FrontierSubscriptionStore, FrontierWatchEvent, FrontierWatchSignal,
-        MemoryFrontierSubscriptionStore,
+        FrontierSubscriptionId, FrontierSubscriptionRunner, FrontierSubscriptionStore,
+        FrontierWatchEvent, FrontierWatchSignal, MemoryFrontierSubscriptionStore,
     };
     use super::{
         FileProposalStore, MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule,
@@ -955,11 +955,13 @@ mod tests {
         )?;
 
         assert_eq!(proposals.len(), 1);
-        assert!(matches!(
+        assert_eq!(
             proposals[0].action(),
-            StewardAction::RequestVerification { cell_id: actual, request }
-                if actual == &Some(cell_id) && request == "Refresh stale evidence for frontier cell."
-        ));
+            &StewardAction::RequestVerification {
+                cell_id: Some(cell_id),
+                request: "Refresh stale evidence for frontier cell.".to_string(),
+            }
+        );
         assert_eq!(proposals[0].citations(), &["test://stale".to_string()]);
         Ok(())
     }
@@ -982,7 +984,7 @@ mod tests {
         assert_eq!(proposals.len(), 1);
         assert!(matches!(
             proposals[0].action(),
-            StewardAction::MarkFrontier { cell_id: actual } if actual == &cell_id
+            StewardAction::MarkFrontier { cell_id: actual } if *actual == cell_id
         ));
         assert_eq!(proposals[0].citations(), &["test://uncertain".to_string()]);
         Ok(())
@@ -1185,6 +1187,121 @@ mod tests {
             Err(StewardError::FrontierSubscriptionStoreCorrupt)
         ));
         fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn frontier_subscription_runner_emits_matching_verification_proposal(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let subscription = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            cell_id,
+            vec![FrontierWatchSignal::StaleEvidence],
+            "test://subscription",
+            created_at(),
+        )?;
+        let mut store = MemoryFrontierSubscriptionStore::default();
+        store.append_subscription(subscription)?;
+        let runner = FrontierSubscriptionRunner::new(FrontierSteward::new(steward()?), store);
+
+        let proposals = runner.propose_subscribed(
+            vec![FrontierWatchEvent::new(
+                cell_id,
+                FrontierWatchSignal::StaleEvidence,
+                "test://stale",
+                created_at(),
+            )],
+            created_at(),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].action(),
+            &StewardAction::RequestVerification {
+                cell_id: Some(cell_id),
+                request: "Refresh stale evidence for frontier cell.".to_string(),
+            }
+        );
+        assert_eq!(proposals[0].citations(), &["test://stale".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn frontier_subscription_runner_suppresses_unsubscribed_events(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let subscription = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            cell_id,
+            vec![FrontierWatchSignal::StaleEvidence],
+            "test://subscription",
+            created_at(),
+        )?;
+        let mut store = MemoryFrontierSubscriptionStore::default();
+        store.append_subscription(subscription)?;
+        let runner = FrontierSubscriptionRunner::new(FrontierSteward::new(steward()?), store);
+
+        let proposals = runner.propose_subscribed(
+            vec![
+                FrontierWatchEvent::new(
+                    cell_id,
+                    FrontierWatchSignal::HighImpactUncertainty,
+                    "test://wrong-signal",
+                    created_at(),
+                ),
+                FrontierWatchEvent::new(
+                    StateCellId::new(),
+                    FrontierWatchSignal::StaleEvidence,
+                    "test://wrong-cell",
+                    created_at(),
+                ),
+            ],
+            created_at(),
+        )?;
+
+        assert!(proposals.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn frontier_subscription_runner_deduplicates_multiple_matching_subscriptions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let first = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            cell_id,
+            vec![FrontierWatchSignal::HighImpactUncertainty],
+            "test://first",
+            created_at(),
+        )?;
+        let second = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            cell_id,
+            vec![FrontierWatchSignal::HighImpactUncertainty],
+            "test://second",
+            created_at(),
+        )?;
+        let mut store = MemoryFrontierSubscriptionStore::default();
+        store.append_subscription(first)?;
+        store.append_subscription(second)?;
+        let runner = FrontierSubscriptionRunner::new(FrontierSteward::new(steward()?), store);
+
+        let proposals = runner.propose_subscribed(
+            vec![FrontierWatchEvent::new(
+                cell_id,
+                FrontierWatchSignal::HighImpactUncertainty,
+                "test://uncertain",
+                created_at(),
+            )],
+            created_at(),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].action(),
+            &StewardAction::MarkFrontier { cell_id }
+        );
         Ok(())
     }
 

@@ -231,6 +231,56 @@ impl FrontierSubscriptionStore for FileFrontierSubscriptionStore {
     }
 }
 
+/// Deterministic runner that applies durable subscriptions to frontier events.
+pub struct FrontierSubscriptionRunner<S> {
+    steward: FrontierSteward,
+    store: S,
+}
+
+impl<S> FrontierSubscriptionRunner<S>
+where
+    S: FrontierSubscriptionStore,
+{
+    /// Creates a subscription runner from a frontier Steward and subscription store.
+    pub fn new(steward: FrontierSteward, store: S) -> Self {
+        Self { steward, store }
+    }
+
+    /// Returns the subscription store.
+    pub fn store(&self) -> &S {
+        &self.store
+    }
+
+    /// Returns the mutable subscription store.
+    pub fn store_mut(&mut self) -> &mut S {
+        &mut self.store
+    }
+
+    /// Returns the backing subscription store.
+    pub fn into_store(self) -> S {
+        self.store
+    }
+
+    /// Emits Steward proposals only for watch events matched by durable subscriptions.
+    pub fn propose_subscribed(
+        &self,
+        events: Vec<FrontierWatchEvent>,
+        created_at: DateTime<Utc>,
+    ) -> Result<Vec<StewardProposal>, StewardError> {
+        let subscriptions = self.store.list_subscriptions()?;
+        let subscribed_events: Vec<FrontierWatchEvent> = events
+            .into_iter()
+            .filter(|event| {
+                subscriptions
+                    .iter()
+                    .any(|subscription| subscription.matches_event(event))
+            })
+            .collect();
+
+        self.steward.propose(subscribed_events, created_at)
+    }
+}
+
 /// Evidence-backed frontier watch event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FrontierWatchEvent {

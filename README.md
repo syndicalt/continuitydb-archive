@@ -24,6 +24,7 @@ The first milestone builds:
 - Executable local model benchmark fixture.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.
+- Deterministic frontier subscription runner.
 - A thin CLI over library APIs.
 
 ## Roadmap
