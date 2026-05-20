@@ -103,6 +103,52 @@ pub enum StewardAction {
     },
 }
 
+impl StewardAction {
+    /// Returns deterministic policy rejection reasons for invalid action payloads.
+    pub fn validation_reasons(&self) -> Vec<String> {
+        match self {
+            Self::CreateCellDraft {
+                anchors,
+                payload_text,
+            } => {
+                let mut reasons = Vec::new();
+                if anchors.is_empty() {
+                    reasons.push("policy:missing-create-cell-anchor".to_string());
+                }
+                if payload_text.trim().is_empty() {
+                    reasons.push("policy:empty-create-cell-payload".to_string());
+                }
+                reasons
+            }
+            Self::LabelAnswerability { questions, .. } => {
+                if questions.iter().any(|question| !question.trim().is_empty()) {
+                    Vec::new()
+                } else {
+                    vec!["policy:empty-answerability".to_string()]
+                }
+            }
+            Self::AdjustConfidence {
+                proposed_confidence,
+                ..
+            } => {
+                if (0.0..=1.0).contains(proposed_confidence) {
+                    Vec::new()
+                } else {
+                    vec!["policy:invalid-confidence".to_string()]
+                }
+            }
+            Self::RequestVerification { request, .. } => {
+                if request.trim().is_empty() {
+                    vec!["policy:empty-verification-request".to_string()]
+                } else {
+                    Vec::new()
+                }
+            }
+            Self::LinkRevision { .. } | Self::MarkFrontier { .. } => Vec::new(),
+        }
+    }
+}
+
 /// Structured proposal emitted by a deterministic or model-backed Steward.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StewardProposal {
