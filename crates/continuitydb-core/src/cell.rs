@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{CoreError, Evidence, ValidTimeRange};
+use crate::{Confidence, CoreError, Evidence, ValidTimeRange};
 
 /// Immutable identifier for a StateCell version.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -119,6 +119,33 @@ impl CellCost {
     }
 }
 
+/// Learned or explicit utility signals for future context packing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UtilityFeedback {
+    /// How often this cell is relevant to requested work.
+    pub relevance: Confidence,
+    /// How useful the cell's freshness has been for decisions.
+    pub recency: Confidence,
+    /// How much this cell has affected successful decisions.
+    pub decision_impact: Confidence,
+}
+
+impl UtilityFeedback {
+    /// Creates utility feedback from bounded utility signals.
+    pub fn new(relevance: Confidence, recency: Confidence, decision_impact: Confidence) -> Self {
+        Self {
+            relevance,
+            recency,
+            decision_impact,
+        }
+    }
+
+    /// Returns a simple deterministic aggregate utility score.
+    pub fn utility_score(self) -> f32 {
+        (self.relevance.value() + self.recency.value() + self.decision_impact.value()) / 3.0
+    }
+}
+
 /// Hybrid content payload for a StateCell.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CellPayload {
@@ -151,6 +178,9 @@ pub struct StateCell {
     pub payload: CellPayload,
     /// Estimated cost.
     pub cost: CellCost,
+    /// Utility signals learned from prior use and outcomes.
+    #[serde(default)]
+    pub utility_feedback: UtilityFeedback,
 }
 
 impl StateCell {
@@ -184,6 +214,7 @@ impl StateCell {
             evidence,
             payload,
             cost,
+            utility_feedback: UtilityFeedback::default(),
         })
     }
 }

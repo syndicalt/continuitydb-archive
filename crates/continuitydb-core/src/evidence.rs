@@ -47,6 +47,12 @@ impl Confidence {
     }
 }
 
+impl Default for Confidence {
+    fn default() -> Self {
+        Self(0.5)
+    }
+}
+
 /// Signal about source trust or evidence quality.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TrustSignal {
