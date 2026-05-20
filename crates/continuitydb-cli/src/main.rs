@@ -2301,7 +2301,6 @@ fn validate_workload_artifact_manifest(
             std::io::Error::other("workload artifact manifest report path mismatch").into(),
         );
     }
-
     let expected_cells_path = artifact_dir
         .join("workload-cells.json")
         .display()
@@ -2359,11 +2358,40 @@ fn validate_workload_artifact_manifest(
         );
     }
 
+    let report_text = std::fs::read_to_string(artifact_dir.join("workload-report.json"))?;
+    let report: serde_json::Value = serde_json::from_str(&report_text)?;
+    validate_workload_manifest_report_content(&manifest, &report)?;
+
     Ok(WorkloadBundleManifest {
         manifest_path,
         manifest_fingerprint: fnv1a64_fingerprint(&manifest_text),
         manifest_bytes: manifest_text.len(),
     })
+}
+
+fn validate_workload_manifest_report_content(
+    manifest: &serde_json::Value,
+    report: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for key in [
+        "kernel",
+        "store_path",
+        "artifact_dir",
+        "baseline_path",
+        "baseline_label",
+        "baseline_comparison",
+        "lookup_plan",
+        "workload_artifacts",
+        "workload",
+    ] {
+        if manifest[key] != report[key] {
+            return Err(std::io::Error::other(
+                "workload artifact manifest report content mismatch",
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn write_workload_replay_artifact_bundle_report(
