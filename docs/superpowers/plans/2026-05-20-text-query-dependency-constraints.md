@@ -225,7 +225,7 @@ cargo test -p continuitydb-query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit parser implementation**
+- [x] **Step 5: Commit parser implementation**
 
 ```bash
 git add crates/continuitydb-query/src/lib.rs crates/continuitydb-query/src/text.rs docs/superpowers/plans/2026-05-20-text-query-dependency-constraints.md
@@ -239,7 +239,7 @@ git commit -m "feat: parse dependency text query constraints"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-text-query-dependency-constraints.md`
 
-- [ ] **Step 1: Update README current scope**
+- [x] **Step 1: Update README current scope**
 
 Add this bullet after the bitemporal text query constraint bullet:
 
@@ -247,7 +247,7 @@ Add this bullet after the bitemporal text query constraint bullet:
 - Dependency-aware constraints in strict text `CHECKOUT` queries.
 ```
 
-- [ ] **Step 2: Update Query Language roadmap**
+- [x] **Step 2: Update Query Language roadmap**
 
 Add this milestone after the temporal and commit text query milestone:
 
@@ -255,7 +255,7 @@ Add this milestone after the temporal and commit text query milestone:
 9. Add dependency constraints to text checkout queries. Implemented `dependency_target` and `dependency_kind` constraints, backed by `StateCellId` text parsing, so strict text `CHECKOUT` can express causality-aware materialization already available in the typed AST.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -269,7 +269,7 @@ git diff --check
 
 Expected: all commands exit successfully.
 
-- [ ] **Step 4: Commit documentation**
+- [x] **Step 4: Commit documentation**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-text-query-dependency-constraints.md
