@@ -146,6 +146,45 @@ impl UtilityFeedback {
     }
 }
 
+/// Meaning of a StateCell dependency edge.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CellDependencyKind {
+    /// This cell depends on the target cell.
+    DependsOn,
+    /// This cell was caused by the target cell.
+    CausedBy,
+    /// This cell supports the target cell.
+    Supports,
+    /// This cell was derived from the target cell.
+    DerivedFrom,
+}
+
+/// Dependency or causal reference from one StateCell to another.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CellDependency {
+    /// Target StateCell identifier.
+    pub target: StateCellId,
+    /// Dependency edge meaning.
+    pub kind: CellDependencyKind,
+    /// Human-readable rationale for the dependency.
+    pub rationale: String,
+}
+
+impl CellDependency {
+    /// Creates a dependency reference.
+    pub fn new(
+        target: StateCellId,
+        kind: CellDependencyKind,
+        rationale: impl Into<String>,
+    ) -> Self {
+        Self {
+            target,
+            kind,
+            rationale: rationale.into(),
+        }
+    }
+}
+
 /// Hybrid content payload for a StateCell.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CellPayload {
@@ -181,6 +220,9 @@ pub struct StateCell {
     /// Utility signals learned from prior use and outcomes.
     #[serde(default)]
     pub utility_feedback: UtilityFeedback,
+    /// Dependency and causal references to other StateCells.
+    #[serde(default)]
+    pub dependencies: Vec<CellDependency>,
 }
 
 impl StateCell {
@@ -215,6 +257,7 @@ impl StateCell {
             payload,
             cost,
             utility_feedback: UtilityFeedback::default(),
+            dependencies: Vec::new(),
         })
     }
 }

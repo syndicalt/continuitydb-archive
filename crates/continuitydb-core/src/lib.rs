@@ -6,8 +6,8 @@ mod evidence;
 mod time;
 
 pub use cell::{
-    ActivationState, Answerability, CellCost, CellPayload, Scope, SemanticAnchor, StateCell,
-    StateCellId, UtilityFeedback,
+    ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
+    Scope, SemanticAnchor, StateCell, StateCellId, UtilityFeedback,
 };
 pub use error::CoreError;
 pub use evidence::{Citation, Confidence, Evidence, SourceId, TrustSignal};
@@ -17,6 +17,31 @@ pub use time::{SystemTimeRange, ValidTimeRange};
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
+
+    fn sample_state_cell(anchor: &str) -> Result<StateCell, Box<dyn std::error::Error>> {
+        let valid_from = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        StateCell::new(
+            StateCellId::new(),
+            vec![SemanticAnchor::new(anchor)],
+            ValidTimeRange::new(valid_from, None)?,
+            Scope::Project("continuitydb".to_string()),
+            Answerability::new(vec!["what should the agent know?".to_string()])?,
+            vec![Evidence {
+                source: SourceId::new("test"),
+                citation: Citation {
+                    locator: format!("test://{anchor}"),
+                },
+                confidence: Confidence::new(0.8)?,
+                trust: vec![TrustSignal::DirectObservation],
+            }],
+            CellPayload::Text(anchor.to_string()),
+            CellCost::new(5, 0)?,
+        )
+        .map_err(Into::into)
+    }
 
     #[test]
     fn state_cell_requires_anchor_and_evidence() -> Result<(), Box<dyn std::error::Error>> {
@@ -123,6 +148,47 @@ mod tests {
         let decoded: StateCell = serde_json::from_value(value)?;
 
         assert_eq!(decoded.utility_feedback, UtilityFeedback::default());
+        Ok(())
+    }
+
+    #[test]
+    fn cell_dependency_records_target_kind_and_rationale() {
+        let target = StateCellId::new();
+        let dependency = CellDependency::new(
+            target,
+            CellDependencyKind::DependsOn,
+            "release status depends on verification evidence",
+        );
+
+        assert_eq!(dependency.target, target);
+        assert_eq!(dependency.kind, CellDependencyKind::DependsOn);
+        assert_eq!(
+            dependency.rationale,
+            "release status depends on verification evidence"
+        );
+    }
+
+    #[test]
+    fn state_cell_starts_with_empty_dependencies() -> Result<(), Box<dyn std::error::Error>> {
+        let cell = sample_state_cell("project:continuitydb:dependencies")?;
+
+        assert!(cell.dependencies.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn state_cell_deserializes_missing_dependencies_as_empty(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell = sample_state_cell("project:continuitydb:legacy-dependencies")?;
+        let mut value = serde_json::to_value(cell)?;
+        value
+            .as_object_mut()
+            .ok_or_else(|| std::io::Error::other("state cell did not serialize as object"))?
+            .remove("dependencies");
+
+        let decoded: StateCell = serde_json::from_value(value)?;
+
+        assert!(decoded.dependencies.is_empty());
         Ok(())
     }
 
