@@ -95,6 +95,10 @@ Storage kernel
 
 1. Expose deterministic checkout JSON from the CLI. Implemented as `continuitydb demo-checkout`, showing selected cells, audit traces, uncertainty, frontier recommendations, and alternatives.
 
+## Native API Milestones
+
+1. Add typed embeddable operations for ingest, checkout, and audit. Implemented in `continuitydb-api` as `ContinuityDb<K>` over any `StorageKernel`, backed by first-class `CellLookup.cell_id` support in memory and file kernels.
+
 ## Steward Milestones
 
 1. Define `StewardProposal` types without invoking any model. Implemented in `continuitydb-steward`.

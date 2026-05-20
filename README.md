@@ -28,6 +28,7 @@ The first milestone builds:
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.
 - Deterministic frontier subscription runner.
+- Native typed operation API for ingest, checkout, and audit.
 - A thin CLI over library APIs.
 
 ## Roadmap

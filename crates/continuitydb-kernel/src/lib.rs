@@ -5,7 +5,7 @@ use continuitydb_core::{
     ActivationState, CellDependencyKind, Confidence, Scope, StateCell, StateCellId, SystemTimeRange,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -29,6 +29,8 @@ pub enum KernelError {
 /// Query constraints supported by baseline storage kernels.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CellLookup {
+    /// Optional immutable StateCell identifier filter.
+    pub cell_id: Option<StateCellId>,
     /// Optional semantic anchor filter.
     pub semantic_anchor: Option<String>,
     /// Optional scope filter.
@@ -72,7 +74,7 @@ pub trait StorageKernel {
 #[derive(Clone, Debug, Default, PartialEq)]
 struct FileKernelIndex {
     cells: Vec<StateCell>,
-    ids: HashSet<StateCellId>,
+    ids: HashMap<StateCellId, usize>,
     anchors: HashMap<String, Vec<usize>>,
 }
 
@@ -86,11 +88,12 @@ impl FileKernelIndex {
     }
 
     fn insert(&mut self, cell: StateCell) -> Result<(), KernelError> {
-        if !self.ids.insert(cell.id) {
+        if self.ids.contains_key(&cell.id) {
             return Err(KernelError::DuplicateCell);
         }
 
         let position = self.cells.len();
+        self.ids.insert(cell.id, position);
         for anchor in &cell.anchors {
             self.anchors
                 .entry(anchor.as_str().to_string())
@@ -102,7 +105,11 @@ impl FileKernelIndex {
     }
 
     fn contains_id(&self, id: StateCellId) -> bool {
-        self.ids.contains(&id)
+        self.ids.contains_key(&id)
+    }
+
+    fn position_by_id(&self, id: StateCellId) -> Option<usize> {
+        self.ids.get(&id).copied()
     }
 }
 
@@ -192,7 +199,12 @@ impl StorageKernel for FileKernel {
     }
 
     fn lookup_cells(&self, lookup: CellLookup) -> Result<Vec<StateCell>, KernelError> {
-        let candidates: Vec<&StateCell> = if let Some(anchor) = lookup.semantic_anchor.as_ref() {
+        let candidates: Vec<&StateCell> = if let Some(cell_id) = lookup.cell_id {
+            self.index
+                .position_by_id(cell_id)
+                .map(|position| vec![&self.index.cells[position]])
+                .unwrap_or_default()
+        } else if let Some(anchor) = lookup.semantic_anchor.as_ref() {
             self.index
                 .anchors
                 .get(anchor)
@@ -209,6 +221,7 @@ impl StorageKernel for FileKernel {
 
         let cells = candidates
             .into_iter()
+            .filter(|cell| lookup.cell_id.map_or(true, |cell_id| cell.id == cell_id))
             .filter(|cell| {
                 lookup.semantic_anchor.as_ref().map_or(true, |anchor| {
                     cell.anchors
@@ -433,6 +446,28 @@ mod tests {
         assert!(parent.exists());
         assert!(path.exists());
         fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_kernel_filters_by_cell_id() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_kernel_path("continuitydb-file-kernel-cell-id");
+        let first = sample_cell("project:continuitydb:first", 0.91, 12)?;
+        let mut second = sample_cell("project:continuitydb:second", 0.83, 15)?;
+        {
+            let mut kernel = FileKernel::open(&path)?;
+            append_committed(&mut kernel, first)?;
+            second = append_committed(&mut kernel, second)?;
+        }
+
+        let reopened = FileKernel::open(&path)?;
+        let results = reopened.lookup_cells(CellLookup {
+            cell_id: Some(second.id),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![second]);
+        fs::remove_file(path)?;
         Ok(())
     }
 

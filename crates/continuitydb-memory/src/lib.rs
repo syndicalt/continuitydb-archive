@@ -29,6 +29,7 @@ impl StorageKernel for MemoryKernel {
         let cells = self
             .cells
             .iter()
+            .filter(|cell| lookup.cell_id.map_or(true, |cell_id| cell.id == cell_id))
             .filter(|cell| {
                 lookup.semantic_anchor.as_ref().map_or(true, |anchor| {
                     cell.anchors
@@ -179,6 +180,23 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![cell]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_cell_id() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let first = sample_cell("project:continuitydb:first", 0.9, 12)?;
+        let second = sample_cell("project:continuitydb:second", 0.8, 15)?;
+        append_committed(&mut kernel, first)?;
+        let second = append_committed(&mut kernel, second)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            cell_id: Some(second.id),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![second]);
         Ok(())
     }
 
