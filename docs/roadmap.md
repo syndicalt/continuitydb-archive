@@ -120,6 +120,7 @@ Storage kernel
 6. Add cursor-based commit slice materialization. Implemented `CommitSlice` and `ContinuityDb::commit_slices` so callers can materialize cursor-selected commit manifests with their ordered StateCells for audit, backup, sync, and replay flows.
 7. Add native file-backed compaction API. Implemented `ContinuityDb<FileKernel>::compact_file_store` so embedders can run JSONL store compaction through the native API without expanding the generic storage-kernel trait.
 8. Add native commit export batches. Implemented `CommitExportBatch` and `ContinuityDb::export_commits` so embedders can page commit slices with a deterministic next cursor for backup, sync, and replay flows.
+9. Add native validated commit import batches. Implemented `ContinuityDb::import_commit_batch` so exported commit batches can be validated and replayed into another store while preserving commit IDs, commit times, cell IDs, and manifest ordering.
 
 ## Steward Milestones
 

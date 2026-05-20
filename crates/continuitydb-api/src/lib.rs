@@ -13,6 +13,7 @@ use continuitydb_revision::{
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
     ConflictResolutionRecommendation, ConflictResolutionScan,
 };
+use std::collections::HashSet;
 use thiserror::Error;
 
 /// Errors produced by the native ContinuityDB operation API.
@@ -29,6 +30,12 @@ pub enum ContinuityError {
     CellNotFound {
         /// Missing cell identifier.
         cell_id: StateCellId,
+    },
+    /// Commit export batch failed deterministic validation.
+    #[error("commit export batch is invalid for commit {commit_id:?}")]
+    InvalidCommitExport {
+        /// Commit whose export slice failed validation.
+        commit_id: CommitId,
     },
 }
 
@@ -212,6 +219,23 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(CommitExportBatch { slices, next_after })
     }
 
+    /// Imports a validated commit export batch into the backing kernel.
+    pub fn import_commit_batch(
+        &mut self,
+        batch: CommitExportBatch,
+    ) -> Result<usize, ContinuityError> {
+        self.validate_commit_export_batch(&batch)?;
+        let imported = batch.slices.len();
+        for slice in batch.slices {
+            self.kernel.append_cells_at_with_commit_id(
+                slice.cells,
+                slice.manifest.committed_at,
+                slice.manifest.commit_id,
+            )?;
+        }
+        Ok(imported)
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -304,6 +328,50 @@ impl<K: StorageKernel> ContinuityDb<K> {
             .next()
             .ok_or(ContinuityError::CellNotFound { cell_id })
     }
+
+    fn validate_commit_export_batch(
+        &self,
+        batch: &CommitExportBatch,
+    ) -> Result<(), ContinuityError> {
+        let mut commit_ids = HashSet::new();
+        let mut cell_ids = HashSet::new();
+        for slice in &batch.slices {
+            let commit_id = slice.manifest.commit_id;
+            if !commit_ids.insert(commit_id) {
+                return Err(ContinuityError::InvalidCommitExport { commit_id });
+            }
+            if self.commit_manifest(commit_id)?.is_some() {
+                return Err(ContinuityError::Kernel(KernelError::DuplicateCommit));
+            }
+
+            let exported_ids = slice.cells.iter().map(|cell| cell.id).collect::<Vec<_>>();
+            if exported_ids != slice.manifest.cell_ids {
+                return Err(ContinuityError::InvalidCommitExport { commit_id });
+            }
+
+            for cell in &slice.cells {
+                if cell.commit_id != commit_id
+                    || cell.system_time.from() != slice.manifest.committed_at
+                {
+                    return Err(ContinuityError::InvalidCommitExport { commit_id });
+                }
+                if !cell_ids.insert(cell.id) {
+                    return Err(ContinuityError::InvalidCommitExport { commit_id });
+                }
+                if !self
+                    .kernel
+                    .lookup_cells(CellLookup {
+                        cell_id: Some(cell.id),
+                        ..CellLookup::default()
+                    })?
+                    .is_empty()
+                {
+                    return Err(ContinuityError::Kernel(KernelError::DuplicateCell));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ContinuityDb<FileKernel> {
@@ -327,7 +395,7 @@ mod tests {
     };
     use continuitydb_memory::MemoryKernel;
 
-    use super::{CommitExportBatch, ContinuityDb, ContinuityError};
+    use super::{CommitExportBatch, CommitSlice, ContinuityDb, ContinuityError};
 
     fn sample_cell(
         anchor: &str,
@@ -781,6 +849,140 @@ mod tests {
             result,
             Err(ContinuityError::Kernel(KernelError::CommitNotFound))
         ));
+    }
+
+    #[test]
+    fn api_imports_exported_commit_batch() -> Result<(), Box<dyn std::error::Error>> {
+        let first_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell("project:continuitydb:import-first", 0.91, 12)?],
+            first_time,
+            first_commit,
+        )?;
+        source.ingest_cells_at_with_commit_id(
+            vec![
+                sample_cell("project:continuitydb:import-second-a", 0.83, 15)?,
+                sample_cell("project:continuitydb:import-second-b", 0.82, 16)?,
+            ],
+            second_time,
+            second_commit,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup::default())?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let imported = target.import_commit_batch(batch.clone())?;
+
+        assert_eq!(imported, 2);
+        assert_eq!(
+            target.export_commits(CommitManifestLookup::default())?,
+            batch
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_imports_empty_commit_batch_without_mutation() -> Result<(), Box<dyn std::error::Error>> {
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let imported = target.import_commit_batch(CommitExportBatch {
+            slices: Vec::new(),
+            next_after: None,
+        })?;
+
+        assert_eq!(imported, 0);
+        assert!(target
+            .commit_slices(CommitManifestLookup::default())?
+            .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn api_import_rejects_malformed_batch_without_mutation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut cell = sample_cell("project:continuitydb:malformed-import", 0.91, 12)?;
+        cell.commit_id = commit_id;
+        cell.system_time = continuitydb_core::SystemTimeRange::open_from(committed_at);
+        let manifest = continuitydb_core::CommitManifest::new(
+            commit_id,
+            committed_at,
+            vec![StateCellId::new()],
+        );
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+
+        let result = target.import_commit_batch(CommitExportBatch {
+            slices: vec![CommitSlice {
+                manifest,
+                cells: vec![cell],
+            }],
+            next_after: Some(commit_id),
+        });
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::InvalidCommitExport { commit_id: rejected }) if rejected == commit_id
+        ));
+        assert!(target
+            .commit_slices(CommitManifestLookup::default())?
+            .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn api_import_rejects_existing_target_commit_without_mutation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let commit_id = CommitId::new();
+        let mut source = ContinuityDb::new(MemoryKernel::default());
+        source.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:existing-source",
+                0.91,
+                12,
+            )?],
+            committed_at,
+            commit_id,
+        )?;
+        let batch = source.export_commits(CommitManifestLookup::default())?;
+        let mut target = ContinuityDb::new(MemoryKernel::default());
+        target.ingest_cells_at_with_commit_id(
+            vec![sample_cell(
+                "project:continuitydb:existing-target",
+                0.83,
+                15,
+            )?],
+            committed_at,
+            commit_id,
+        )?;
+
+        let result = target.import_commit_batch(batch);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Kernel(KernelError::DuplicateCommit))
+        ));
+        assert_eq!(
+            target.commit_slices(CommitManifestLookup::default())?.len(),
+            1
+        );
+        Ok(())
     }
 
     #[test]

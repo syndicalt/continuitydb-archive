@@ -21,7 +21,7 @@
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add successful import test**
+- [x] **Step 1: Add successful import test**
 
 Add this test near the export batch tests:
 
@@ -63,7 +63,7 @@ fn api_imports_exported_commit_batch() -> Result<(), Box<dyn std::error::Error>>
 }
 ```
 
-- [ ] **Step 2: Add empty import test**
+- [x] **Step 2: Add empty import test**
 
 Add:
 
@@ -83,7 +83,7 @@ fn api_imports_empty_commit_batch_without_mutation() -> Result<(), Box<dyn std::
 }
 ```
 
-- [ ] **Step 3: Add malformed batch test**
+- [x] **Step 3: Add malformed batch test**
 
 Add:
 
@@ -119,7 +119,7 @@ fn api_import_rejects_malformed_batch_without_mutation(
 }
 ```
 
-- [ ] **Step 4: Add existing commit rejection test**
+- [x] **Step 4: Add existing commit rejection test**
 
 Add:
 
@@ -157,7 +157,7 @@ fn api_import_rejects_existing_target_commit_without_mutation(
 }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify RED**
+- [x] **Step 5: Run targeted tests and verify RED**
 
 Run:
 
@@ -172,7 +172,7 @@ Expected: compilation fails because `import_commit_batch` and `InvalidCommitExpo
 **Files:**
 - Modify: `crates/continuitydb-api/src/lib.rs`
 
-- [ ] **Step 1: Add `HashSet` import**
+- [x] **Step 1: Add `HashSet` import**
 
 Add near the top:
 
@@ -180,7 +180,7 @@ Add near the top:
 use std::collections::HashSet;
 ```
 
-- [ ] **Step 2: Add error variant**
+- [x] **Step 2: Add error variant**
 
 Add to `ContinuityError`:
 
@@ -193,7 +193,7 @@ InvalidCommitExport {
 },
 ```
 
-- [ ] **Step 3: Add import method**
+- [x] **Step 3: Add import method**
 
 Add near `export_commits`:
 
@@ -216,7 +216,7 @@ pub fn import_commit_batch(
 }
 ```
 
-- [ ] **Step 4: Add validation helper**
+- [x] **Step 4: Add validation helper**
 
 Add below `lookup_one_cell`:
 
@@ -265,12 +265,13 @@ fn validate_commit_export_batch(
 }
 ```
 
-- [ ] **Step 5: Run targeted tests and verify GREEN**
+- [x] **Step 5: Run targeted tests and verify GREEN**
 
 Run:
 
 ```bash
 cargo test -p continuitydb-api import_
+cargo test -p continuitydb-api imports_
 ```
 
 Expected: all import batch tests pass.
@@ -282,7 +283,7 @@ Expected: all import batch tests pass.
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-native-commit-import-batches.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add to Current Scope:
 
@@ -290,7 +291,7 @@ Add to Current Scope:
 - Native validated commit import batch API for replay flows.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add Native API milestone:
 
@@ -298,7 +299,7 @@ Add Native API milestone:
 9. Add native validated commit import batches. Implemented `ContinuityDb::import_commit_batch` so exported commit batches can be validated and replayed into another store while preserving commit IDs, commit times, cell IDs, and manifest ordering.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -312,7 +313,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
