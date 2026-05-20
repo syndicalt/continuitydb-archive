@@ -1010,6 +1010,7 @@ mod tests {
 
         let returned_id = db.ingest_cell_at(cell, committed_at)?;
         let slice = db.checkout(CheckoutRequest {
+            semantic_anchor: None,
             scope: Some(Scope::Project("continuitydb".to_string())),
             valid_at: Some(committed_at),
             system_at: Some(committed_at),

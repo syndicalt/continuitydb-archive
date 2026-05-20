@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_core::{
-    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCellId,
+    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, SemanticAnchor, StateCellId,
 };
 use thiserror::Error;
 
@@ -201,6 +201,10 @@ impl Parser {
     ) -> Result<(), QueryTextError> {
         let field = self.expect_ident()?;
         match field.to_ascii_lowercase().as_str() {
+            "semantic_anchor" => {
+                self.expect_token(Token::Eq)?;
+                requirements.semantic_anchor = Some(SemanticAnchor::new(self.expect_string()?));
+            }
             "scope" => {
                 self.expect_token(Token::Eq)?;
                 requirements.scope = Some(self.parse_scope()?);

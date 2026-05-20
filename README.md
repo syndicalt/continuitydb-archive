@@ -13,6 +13,7 @@ The first milestone builds:
 - An in-memory kernel for correctness tests.
 - Basic revision links.
 - Deterministic checkout.
+- Semantic-anchor scoped checkout and strict text query constraints.
 - Activation-aware checkout and strict text query constraints.
 - Typed Continuity Query AST compiling checkout semantics into native requests.
 - First strict text parser for `CHECKOUT` queries.

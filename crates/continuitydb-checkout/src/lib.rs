@@ -23,6 +23,8 @@ pub enum CheckoutError {
 /// Request constraints for deterministic checkout.
 #[derive(Clone, Debug)]
 pub struct CheckoutRequest {
+    /// Optional semantic anchor filter.
+    pub semantic_anchor: Option<SemanticAnchor>,
     /// Optional scope filter.
     pub scope: Option<Scope>,
     /// Optional valid-time filter.
@@ -147,7 +149,10 @@ pub fn checkout<K: StorageKernel>(
     request: CheckoutRequest,
 ) -> Result<CheckoutSlice, CheckoutError> {
     let mut candidates = kernel.lookup_cells(CellLookup {
-        semantic_anchor: None,
+        semantic_anchor: request
+            .semantic_anchor
+            .as_ref()
+            .map(|anchor| anchor.as_str().to_string()),
         scope: request.scope,
         valid_at: request.valid_at,
         system_at: request.system_at,
@@ -402,6 +407,7 @@ mod tests {
         checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -435,6 +441,39 @@ mod tests {
     }
 
     #[test]
+    fn checkout_pushes_semantic_anchor_to_kernel() -> Result<(), Box<dyn std::error::Error>> {
+        let kernel = RecordingKernel::default();
+        checkout(
+            &kernel,
+            CheckoutRequest {
+                semantic_anchor: Some(SemanticAnchor::new("project:continuitydb:release-status")),
+                scope: None,
+                valid_at: None,
+                system_at: None,
+                commit_id: None,
+                activation: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.8)?,
+                token_budget: 10,
+            },
+        )?;
+
+        let lookup = kernel
+            .lookup
+            .borrow()
+            .clone()
+            .ok_or_else(|| std::io::Error::other("lookup was not captured"))?;
+        assert_eq!(
+            lookup.semantic_anchor.as_deref(),
+            Some("project:continuitydb:release-status")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn checkout_pushes_dependency_constraints_to_kernel() -> Result<(), Box<dyn std::error::Error>>
     {
         let kernel = RecordingKernel::default();
@@ -442,6 +481,7 @@ mod tests {
         checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -472,6 +512,7 @@ mod tests {
         checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: None,
                 valid_at: None,
                 system_at: None,
@@ -502,6 +543,7 @@ mod tests {
         checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: None,
                 valid_at: None,
                 system_at: Some(system_at),
@@ -532,6 +574,7 @@ mod tests {
         checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: None,
                 valid_at: None,
                 system_at: None,
@@ -566,6 +609,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -601,6 +645,7 @@ mod tests {
         let historical = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: Some(before_commit),
@@ -617,6 +662,7 @@ mod tests {
         let current = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: Some(committed_at),
@@ -652,6 +698,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -697,6 +744,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -750,6 +798,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -766,6 +815,36 @@ mod tests {
 
         assert_eq!(slice.cells, vec![dependent]);
         assert_eq!(slice.total_tokens, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_filters_by_semantic_anchor() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let selected = sample_cell("project:continuitydb:anchor-selected", 0.91, 10)?;
+        let unrelated = sample_cell("project:continuitydb:anchor-unrelated", 0.9, 10)?;
+        let selected = append_committed(&mut kernel, selected)?;
+        append_committed(&mut kernel, unrelated)?;
+
+        let slice = checkout(
+            &kernel,
+            CheckoutRequest {
+                semantic_anchor: Some(SemanticAnchor::new("project:continuitydb:anchor-selected")),
+                scope: None,
+                valid_at: None,
+                system_at: None,
+                commit_id: None,
+                activation: None,
+                answerability_question: None,
+                evidence_source: None,
+                dependency_target: None,
+                dependency_kind: None,
+                minimum_confidence: Confidence::new(0.7)?,
+                token_budget: 20,
+            },
+        )?;
+
+        assert_eq!(slice.cells, vec![selected]);
         Ok(())
     }
 
@@ -792,6 +871,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -834,6 +914,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -865,6 +946,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -896,6 +978,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -945,6 +1028,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -1055,6 +1139,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,
@@ -1094,6 +1179,7 @@ mod tests {
         let slice = checkout(
             &kernel,
             CheckoutRequest {
+                semantic_anchor: None,
                 scope: Some(Scope::Project("continuitydb".to_string())),
                 valid_at: None,
                 system_at: None,

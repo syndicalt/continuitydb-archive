@@ -5,7 +5,7 @@ mod text;
 use chrono::{DateTime, Utc};
 use continuitydb_checkout::CheckoutRequest;
 use continuitydb_core::{
-    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCellId,
+    ActivationState, CellDependencyKind, CommitId, Confidence, Scope, SemanticAnchor, StateCellId,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -133,6 +133,7 @@ impl CheckoutQuery {
         }
 
         Ok(CheckoutRequest {
+            semantic_anchor: self.requirements.semantic_anchor,
             scope: self.requirements.scope,
             valid_at: self.requirements.valid_at,
             system_at: self.requirements.system_at,
@@ -170,6 +171,8 @@ impl QueryTask {
 /// Deterministic requirements accepted by the first checkout query compiler.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueryRequirements {
+    /// Optional semantic anchor filter.
+    pub semantic_anchor: Option<SemanticAnchor>,
     /// Optional scope filter.
     pub scope: Option<Scope>,
     /// Optional valid-time filter.
@@ -195,6 +198,7 @@ pub struct QueryRequirements {
 impl Default for QueryRequirements {
     fn default() -> Self {
         Self {
+            semantic_anchor: None,
             scope: None,
             valid_at: None,
             system_at: None,
@@ -273,7 +277,8 @@ mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        ActivationState, CellDependencyKind, CommitId, Confidence, Scope, StateCellId,
+        ActivationState, CellDependencyKind, CommitId, Confidence, Scope, SemanticAnchor,
+        StateCellId,
     };
 
     #[test]
@@ -286,6 +291,7 @@ mod tests {
             request.answerability_question.as_deref(),
             Some("what is the release status?")
         );
+        assert_eq!(request.semantic_anchor, None);
         assert_eq!(request.scope, None);
         assert_eq!(request.valid_at, None);
         assert_eq!(request.system_at, None);
@@ -376,6 +382,24 @@ mod tests {
             .compile_checkout()?;
 
         assert_eq!(request.activation, Some(ActivationState::Frontier));
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_query_compiles_semantic_anchor_requirement(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let anchor = SemanticAnchor::new("project:continuitydb:release-status");
+        let task = QueryTask::new("release-status", "what is the release status?");
+        let requirements = QueryRequirements {
+            semantic_anchor: Some(anchor.clone()),
+            ..QueryRequirements::default()
+        };
+
+        let request = CheckoutQuery::new(task)
+            .with_requirements(requirements)
+            .compile_checkout()?;
+
+        assert_eq!(request.semantic_anchor, Some(anchor));
         Ok(())
     }
 
@@ -723,6 +747,21 @@ WHERE activation = frontier"#,
         assert_eq!(
             checkout.requirements().activation,
             Some(ActivationState::Frontier)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn text_query_parses_semantic_anchor_constraint() -> Result<(), Box<dyn std::error::Error>> {
+        let query = parse_query_text(
+            r#"CHECKOUT "release-status" ANSWER "what is the release status?"
+WHERE semantic_anchor = "project:continuitydb:release-status""#,
+        )?;
+
+        let ContinuityQuery::Checkout(checkout) = query;
+        assert_eq!(
+            checkout.requirements().semantic_anchor,
+            Some(SemanticAnchor::new("project:continuitydb:release-status"))
         );
         Ok(())
     }

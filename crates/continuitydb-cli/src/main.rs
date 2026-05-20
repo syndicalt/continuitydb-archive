@@ -347,6 +347,7 @@ fn demo_checkout() -> Result<continuitydb_checkout::CheckoutSlice, Box<dyn std::
     checkout(
         &kernel,
         CheckoutRequest {
+            semantic_anchor: None,
             scope: Some(Scope::Project("continuitydb".to_string())),
             valid_at: None,
             system_at: None,
