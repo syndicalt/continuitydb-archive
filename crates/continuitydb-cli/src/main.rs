@@ -275,6 +275,9 @@ enum Command {
         /// Path to write benchmark JSON when a pre-recording quality gate fails.
         #[arg(long = "failure-report-path")]
         failure_report_path: Option<PathBuf>,
+        /// Path to write successful benchmark or dry-run JSON output.
+        #[arg(long = "report-path")]
+        report_path: Option<PathBuf>,
         /// Print benchmark configuration without executing the model or recording a baseline.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -481,6 +484,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             fail_on_unstable,
             fail_on_failed_cases,
             failure_report_path,
+            report_path,
             dry_run,
             compare_baseline,
             fail_on_regression,
@@ -504,6 +508,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 compare_baseline: compare_baseline || fail_on_regression,
                 fail_on_regression,
             })?;
+            if let Some(report_path) = report_path {
+                write_pretty_json_file(&report_path, &output)?;
+            }
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         #[cfg(feature = "local-model")]
@@ -780,7 +787,7 @@ fn benchmark_local_model_json(
                 &prompt_artifacts,
                 stability.as_ref(),
             );
-            write_local_model_failure_report(report_path, &report)?;
+            write_pretty_json_file(report_path, &report)?;
         }
         return Err(
             std::io::Error::other("local model benchmark fixed evaluation cases failed").into(),
@@ -862,7 +869,7 @@ fn local_model_benchmark_dry_run_json(
 }
 
 #[cfg(feature = "local-model")]
-fn write_local_model_failure_report(
+fn write_pretty_json_file(
     report_path: &Path,
     report: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
