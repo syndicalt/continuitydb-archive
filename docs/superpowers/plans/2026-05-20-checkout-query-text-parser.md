@@ -23,11 +23,11 @@
 **Files:**
 - Modify: `crates/continuitydb-query/src/lib.rs`
 
-- [ ] **Step 1: Add parser imports**
+- [x] **Step 1: Add parser imports**
 
 Update the test import block to use `parse_query_text` and `QueryTextError` through `super::*`. No additional external imports are needed.
 
-- [ ] **Step 2: Add parser behavior tests**
+- [x] **Step 2: Add parser behavior tests**
 
 Add tests after `decoded_query_envelope_can_be_inspected_before_compile` for:
 
@@ -100,7 +100,7 @@ fn text_query_rejects_invalid_values() {
 }
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -116,7 +116,7 @@ Expected: FAIL because `parse_query_text` and `QueryTextError` do not exist.
 - Modify: `crates/continuitydb-query/src/lib.rs`
 - Create: `crates/continuitydb-query/src/text.rs`
 
-- [ ] **Step 1: Add module and exports**
+- [x] **Step 1: Add module and exports**
 
 At the top of `lib.rs`, add:
 
@@ -126,7 +126,7 @@ mod text;
 pub use text::{parse_query_text, QueryTextError};
 ```
 
-- [ ] **Step 2: Implement `text.rs`**
+- [x] **Step 2: Implement `text.rs`**
 
 Create `crates/continuitydb-query/src/text.rs` with:
 
@@ -137,7 +137,7 @@ Create `crates/continuitydb-query/src/text.rs` with:
 - scope constructors for `project`, `team`, `org`, `personal`, `task`, and `global`;
 - bounded confidence and non-negative token budget validation.
 
-- [ ] **Step 3: Verify GREEN**
+- [x] **Step 3: Verify GREEN**
 
 Run:
 
@@ -148,7 +148,7 @@ cargo test -p continuitydb-query --all-features
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit parser implementation**
+- [x] **Step 4: Commit parser implementation**
 
 ```bash
 git add crates/continuitydb-query/src/lib.rs crates/continuitydb-query/src/text.rs docs/superpowers/plans/2026-05-20-checkout-query-text-parser.md

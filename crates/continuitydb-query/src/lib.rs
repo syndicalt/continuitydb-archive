@@ -1,10 +1,14 @@
 //! Typed ContinuityDB query AST.
 
+mod text;
+
 use chrono::{DateTime, Utc};
 use continuitydb_checkout::CheckoutRequest;
 use continuitydb_core::{CellDependencyKind, CommitId, Confidence, Scope, StateCellId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use text::{parse_query_text, QueryTextError};
 
 /// Wire-format marker for versioned query JSON envelopes.
 pub const QUERY_ENVELOPE_FORMAT: &str = "continuitydb.query";
@@ -590,5 +594,78 @@ mod tests {
             QueryError::UnsupportedReturnShape(QueryReturnShape::CellsOnly)
         );
         Ok(())
+    }
+
+    #[test]
+    fn text_query_parses_minimal_checkout() -> Result<(), Box<dyn std::error::Error>> {
+        let query = parse_query_text(r#"CHECKOUT "release" ANSWER "what should ship?""#)?;
+
+        let ContinuityQuery::Checkout(checkout) = query;
+        assert_eq!(checkout.task().name, "release");
+        assert_eq!(checkout.task().answerability_question, "what should ship?");
+        assert_eq!(checkout.requirements(), &QueryRequirements::default());
+        Ok(())
+    }
+
+    #[test]
+    fn text_query_parses_checkout_where_constraints() -> Result<(), Box<dyn std::error::Error>> {
+        let query = parse_query_text(
+            r#"CHECKOUT "release" ANSWER "what should ship?"
+WHERE scope = project("continuitydb")
+  AND min_confidence >= 0.7
+  AND token_budget <= 1200
+  AND evidence_source = "source:release-notes""#,
+        )?;
+
+        let ContinuityQuery::Checkout(checkout) = query;
+        assert_eq!(
+            checkout.requirements().scope,
+            Some(Scope::Project("continuitydb".to_string()))
+        );
+        assert_eq!(
+            checkout.requirements().minimum_confidence,
+            Confidence::new(0.7)?
+        );
+        assert_eq!(checkout.requirements().token_budget, 1200);
+        assert_eq!(
+            checkout.requirements().evidence_source.as_deref(),
+            Some("source:release-notes")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn text_query_keywords_are_case_insensitive() -> Result<(), Box<dyn std::error::Error>> {
+        let query = parse_query_text(
+            r#"checkout "release" answer "what should ship?" where scope = global"#,
+        )?;
+
+        let ContinuityQuery::Checkout(checkout) = query;
+        assert_eq!(checkout.requirements().scope, Some(Scope::Global));
+        Ok(())
+    }
+
+    #[test]
+    fn text_query_rejects_invalid_syntax() {
+        assert_eq!(
+            parse_query_text(r#"CHECKOUT "release" WHERE scope = global"#),
+            Err(QueryTextError::InvalidSyntax)
+        );
+    }
+
+    #[test]
+    fn text_query_rejects_invalid_values() {
+        assert_eq!(
+            parse_query_text(
+                r#"CHECKOUT "release" ANSWER "what should ship?" WHERE min_confidence >= 1.5"#
+            ),
+            Err(QueryTextError::InvalidValue)
+        );
+        assert_eq!(
+            parse_query_text(
+                r#"CHECKOUT "release" ANSWER "what should ship?" WHERE token_budget <= -1"#
+            ),
+            Err(QueryTextError::InvalidValue)
+        );
     }
 }
