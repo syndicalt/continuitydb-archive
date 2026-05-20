@@ -6,7 +6,8 @@ use continuitydb_checkout::{
 };
 use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{
-    CellLookup, CommitManifestLookup, FileKernel, KernelCapabilities, KernelError, StorageKernel,
+    CellLookup, CommitManifestLookup, FileKernel, KernelCapabilities, KernelError,
+    KernelRequirements, StorageKernel,
 };
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
@@ -52,6 +53,14 @@ pub enum ContinuityError {
     /// Commit export envelope file could not be read or written.
     #[error("commit export envelope file I/O failed")]
     CommitExportFileIo,
+    /// Backing kernel does not satisfy required storage guarantees.
+    #[error("storage kernel requirements are not met")]
+    KernelRequirementsNotMet {
+        /// Required storage guarantees.
+        required: KernelRequirements,
+        /// Actual backing kernel guarantees.
+        actual: KernelCapabilities,
+    },
 }
 
 /// Native embeddable ContinuityDB operation boundary.
@@ -158,6 +167,24 @@ impl<K: StorageKernel> ContinuityDb<K> {
     /// Returns the storage guarantees exposed by the backing kernel.
     pub fn kernel_capabilities(&self) -> KernelCapabilities {
         self.kernel.capabilities()
+    }
+
+    /// Returns true when the backing kernel satisfies the requested storage guarantees.
+    pub fn kernel_satisfies(&self, requirements: KernelRequirements) -> bool {
+        self.kernel_capabilities().satisfies(requirements)
+    }
+
+    /// Fails when the backing kernel does not satisfy the requested storage guarantees.
+    pub fn ensure_kernel_requirements(
+        &self,
+        required: KernelRequirements,
+    ) -> Result<(), ContinuityError> {
+        let actual = self.kernel_capabilities();
+        if actual.satisfies(required) {
+            Ok(())
+        } else {
+            Err(ContinuityError::KernelRequirementsNotMet { required, actual })
+        }
     }
 
     /// Appends an immutable StateCell version and returns its identifier.
@@ -491,7 +518,8 @@ mod tests {
         ValidTimeRange,
     };
     use continuitydb_kernel::{
-        CellLookup, CommitManifestLookup, FileKernel, KernelDurability, KernelError, StorageKernel,
+        CellLookup, CommitManifestLookup, FileKernel, KernelDurability, KernelError,
+        KernelRequirements, StorageKernel,
     };
     use continuitydb_memory::MemoryKernel;
 
@@ -551,6 +579,36 @@ mod tests {
         assert_eq!(KernelDurability::Ephemeral, capabilities.durability);
         assert!(capabilities.append_only);
         assert!(!capabilities.durable_flush);
+    }
+
+    #[test]
+    fn api_accepts_satisfied_kernel_requirements() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-kernel-requirements");
+        let db = ContinuityDb::new(FileKernel::open(&path)?);
+
+        assert!(db.kernel_satisfies(KernelRequirements::durable_append_log()));
+        db.ensure_kernel_requirements(KernelRequirements::durable_append_log())?;
+
+        let _ = std::fs::remove_file(path);
+        Ok(())
+    }
+
+    #[test]
+    fn api_rejects_unsatisfied_kernel_requirements() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+        let required = KernelRequirements::durable_append_log();
+        let actual = db.kernel_capabilities();
+
+        let result = db.ensure_kernel_requirements(required);
+
+        assert!(!db.kernel_satisfies(required));
+        assert!(matches!(
+            result,
+            Err(ContinuityError::KernelRequirementsNotMet {
+                required: error_required,
+                actual: error_actual,
+            }) if error_required == required && error_actual == actual
+        ));
     }
 
     #[test]
