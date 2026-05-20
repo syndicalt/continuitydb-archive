@@ -642,6 +642,54 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(Some(successor_id))
     }
 
+    /// Applies an accepted CreateCellDraft Steward proposal as an append-only StateCell.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_create_cell_draft_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Option<StateCellId>, ContinuityError> {
+        if record.decision().outcome() == ProposalOutcome::Rejected {
+            return Ok(None);
+        }
+
+        let (anchors, payload_text) = match record.proposal().action() {
+            StewardAction::CreateCellDraft {
+                anchors,
+                payload_text,
+            } => (anchors.clone(), payload_text.clone()),
+            _ => return Err(ContinuityError::UnsupportedStewardProposalAction),
+        };
+
+        let derived_confidence = Confidence::new(1.0)?;
+        let cell = StateCell::new(
+            StateCellId::new(),
+            anchors,
+            ValidTimeRange::new(committed_at, None)?,
+            Scope::Project("continuitydb-steward".to_string()),
+            Answerability::new(vec!["what StateCell did the Steward draft?".to_string()])?,
+            record
+                .proposal()
+                .citations()
+                .iter()
+                .map(|citation| Evidence {
+                    source: SourceId::new("continuitydb-steward"),
+                    citation: Citation {
+                        locator: citation.clone(),
+                    },
+                    confidence: derived_confidence,
+                    trust: vec![TrustSignal::Derived],
+                })
+                .collect(),
+            CellPayload::Text(payload_text.clone()),
+            CellCost::new(payload_text.split_whitespace().count() as i64, 0)?,
+        )?;
+
+        let cell_id = cell.id;
+        self.kernel.append_cell_at(cell, committed_at)?;
+        Ok(Some(cell_id))
+    }
+
     /// Applies an accepted RequestVerification Steward proposal as an operational work StateCell.
     #[cfg(feature = "steward")]
     pub fn apply_accepted_request_verification_proposal_at(
@@ -4657,6 +4705,145 @@ WHERE scope = project("continuitydb")
         assert!(matches!(
             result,
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_target
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_create_cell_draft_application_appends_state_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposal_time = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 14, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let anchors = vec![
+            SemanticAnchor::new("project:continuitydb:accepted-draft"),
+            SemanticAnchor::new("project:continuitydb:accepted-draft:summary"),
+        ];
+        let payload_text = "ContinuityDB can promote accepted Steward drafts into StateCells.";
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::CreateCellDraft {
+                anchors: anchors.clone(),
+                payload_text: payload_text.to_string(),
+            },
+            "The cited evidence supports creating this StateCell.",
+            vec![
+                "test://create-cell-draft-1".to_string(),
+                "test://create-cell-draft-2".to_string(),
+            ],
+            proposal_time,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), proposal_time)?;
+
+        let created_cell_id = db
+            .apply_accepted_create_cell_draft_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected created StateCell"))?;
+
+        let created_cell = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(created_cell_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing created StateCell"))?;
+
+        assert_eq!(created_cell.anchors, anchors);
+        assert_eq!(created_cell.valid_time.from(), apply_commit);
+        assert_eq!(created_cell.system_time.from(), apply_commit);
+        assert_eq!(
+            created_cell.answerability.questions(),
+            &["what StateCell did the Steward draft?".to_string()]
+        );
+        assert_eq!(
+            created_cell.payload,
+            CellPayload::Text(payload_text.to_string())
+        );
+        assert_eq!(
+            created_cell.cost.token_count,
+            payload_text.split_whitespace().count() as i64
+        );
+        assert_eq!(created_cell.evidence.len(), 2);
+        assert_eq!(
+            created_cell.evidence[0].source.as_str(),
+            "continuitydb-steward"
+        );
+        assert_eq!(
+            created_cell.evidence[0].citation.locator,
+            "test://create-cell-draft-1"
+        );
+        assert_eq!(created_cell.evidence[0].confidence, Confidence::new(1.0)?);
+        assert_eq!(created_cell.evidence[0].trust, vec![TrustSignal::Derived]);
+        assert_eq!(
+            created_cell.evidence[1].citation.locator,
+            "test://create-cell-draft-2"
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_create_cell_draft_application_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::CreateCellDraft {
+                anchors: vec![SemanticAnchor::new("project:continuitydb:rejected-draft")],
+                payload_text: "Rejected draft should not become committed state.".to_string(),
+            },
+            "Policy rejected this draft.",
+            vec!["test://create-cell-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied = db.apply_accepted_create_cell_draft_proposal_at(&record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 0);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_create_cell_draft_application_rejects_unsupported_accepted_action(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: StateCellId::new(),
+            },
+            "Frontier application belongs to a different method.",
+            vec!["test://unsupported-create-cell-apply".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_create_cell_draft_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::UnsupportedStewardProposalAction)
         ));
         Ok(())
     }

@@ -44,6 +44,7 @@ The first milestone builds:
 - Native feature-gated Steward `AdjustConfidence` application API.
 - Native feature-gated Steward `RequestVerification` application API.
 - Native feature-gated Steward `LinkRevision` application API.
+- Native feature-gated Steward `CreateCellDraft` application API.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.
