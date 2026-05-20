@@ -125,6 +125,12 @@ fn cli_measure_workload_reports_file_kernel_json() -> Result<(), Box<dyn std::er
     );
     assert_eq!(json["workload"]["cell_count"].as_u64(), Some(8));
     assert_eq!(json["checkout"]["matched_count"].as_u64(), Some(8));
+    assert_eq!(
+        json["lookup_plan"]["indexed_constraints"],
+        serde_json::json!(["scope", "minimum_confidence"])
+    );
+    assert_eq!(json["lookup_plan"]["candidate_count"].as_u64(), Some(8));
+    assert_eq!(json["lookup_plan"]["full_scan"].as_bool(), Some(false));
     assert!(store_path.exists());
 
     fs::remove_file(store_path)?;

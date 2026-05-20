@@ -12,6 +12,7 @@ The first milestone builds:
 - Deterministic StateCell workload generation for benchmark and storage-engine comparisons.
 - Storage-kernel-generic deterministic workload measurement for ingest and checkout.
 - CLI workload measurement for memory and file-backed kernels.
+- CLI file workload lookup-plan diagnostics.
 - JSONL workload measurement baseline recording.
 - CLI workload measurement baseline recording.
 - Deterministic workload baseline regression comparison.

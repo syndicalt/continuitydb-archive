@@ -172,6 +172,7 @@ Storage kernel
 5. Add CLI workload baseline recording. Extended `continuitydb measure-workload` with `--baseline-path` and `--label` so operator and CI runs can append durable JSONL baseline records while still printing current measurement JSON.
 6. Add deterministic workload baseline regression comparison. Implemented latest matching baseline lookup and count/timing comparison reports so future storage-engine changes can be checked against durable workload evidence before adding CI gates.
 7. Add CLI workload baseline regression gate. Extended `continuitydb measure-workload` with baseline comparison, elapsed-growth tolerance, JSON comparison reporting, and optional non-zero exits for deterministic regressions.
+8. Add file-kernel lookup-plan diagnostics to workload measurement. Extended `continuitydb measure-workload --kernel file` JSON with the exact checkout request's file lookup plan so workload artifacts capture indexed constraints, per-index cardinalities, final candidate counts, and full-scan fallback alongside ingest and checkout timings.
 
 ## Native API Milestones
 

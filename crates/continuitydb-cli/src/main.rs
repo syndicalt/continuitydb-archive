@@ -3,7 +3,7 @@
 use chrono::{TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use continuitydb_api::{ContinuityDb, ContinuityError};
-use continuitydb_checkout::{checkout, CheckoutRequest};
+use continuitydb_checkout::{cell_lookup_from_checkout_request, checkout, CheckoutRequest};
 #[cfg(feature = "local-model")]
 use continuitydb_core::RevisionLinkKind;
 use continuitydb_core::{
@@ -1608,17 +1608,24 @@ fn measure_workload_json(
     let committed_at = workload_commit_time()?;
     let request = workload_checkout_request(options.token_budget)?;
 
-    let measurement = match options.kernel {
+    let (measurement, lookup_plan) = match options.kernel {
         WorkloadKernelProfile::Memory => {
             let mut memory = MemoryKernel::default();
-            measure_ingest_and_checkout(&mut memory, &workload, committed_at, request)?
+            (
+                measure_ingest_and_checkout(&mut memory, &workload, committed_at, request)?,
+                None,
+            )
         }
         WorkloadKernelProfile::File => {
             let path = options
                 .store_path
                 .ok_or_else(|| std::io::Error::other("store path is required"))?;
             let mut file = continuitydb_kernel::FileKernel::open(path)?;
-            measure_ingest_and_checkout(&mut file, &workload, committed_at, request)?
+            let measurement =
+                measure_ingest_and_checkout(&mut file, &workload, committed_at, request.clone())?;
+            let lookup = cell_lookup_from_checkout_request(&request);
+            let lookup_plan = file.lookup_plan(&lookup);
+            (measurement, Some(lookup_plan))
         }
     };
 
@@ -1655,6 +1662,7 @@ fn measure_workload_json(
         options.baseline_path,
         options.label,
         comparison.as_ref(),
+        lookup_plan,
         measurement,
     ))
 }
@@ -1665,6 +1673,7 @@ fn workload_measurement_json(
     baseline_path: Option<&PathBuf>,
     label: &str,
     comparison: Option<&WorkloadBaselineComparison>,
+    lookup_plan: Option<continuitydb_kernel::FileKernelLookupPlan>,
     measurement: WorkloadMeasurement,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -1673,6 +1682,7 @@ fn workload_measurement_json(
         "baseline_path": baseline_path.map(|path| path.display().to_string()),
         "baseline_label": baseline_path.map(|_| label),
         "baseline_comparison": comparison.map(workload_baseline_comparison_json),
+        "lookup_plan": lookup_plan.map(file_lookup_plan_json),
         "workload": {
             "cell_count": measurement.workload_summary.cell_count,
             "frontier_count": measurement.workload_summary.frontier_count,

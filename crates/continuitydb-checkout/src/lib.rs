@@ -150,23 +150,7 @@ pub fn checkout<K: StorageKernel>(
     kernel: &K,
     request: CheckoutRequest,
 ) -> Result<CheckoutSlice, CheckoutError> {
-    let mut candidates = kernel.lookup_cells(CellLookup {
-        semantic_anchor: request
-            .semantic_anchor
-            .as_ref()
-            .map(|anchor| anchor.as_str().to_string()),
-        scope: request.scope,
-        valid_at: request.valid_at,
-        system_at: request.system_at,
-        commit_id: request.commit_id,
-        activation: request.activation,
-        answerability_question: request.answerability_question,
-        evidence_source: request.evidence_source,
-        dependency_target: request.dependency_target,
-        dependency_kind: request.dependency_kind,
-        minimum_confidence: Some(request.minimum_confidence),
-        ..CellLookup::default()
-    })?;
+    let mut candidates = kernel.lookup_cells(cell_lookup_from_checkout_request(&request))?;
 
     candidates.retain(|cell| {
         cell.evidence
@@ -233,6 +217,27 @@ pub fn checkout<K: StorageKernel>(
         frontier_recommendations,
         alternatives,
     })
+}
+
+/// Converts deterministic checkout constraints into storage lookup constraints.
+pub fn cell_lookup_from_checkout_request(request: &CheckoutRequest) -> CellLookup {
+    CellLookup {
+        semantic_anchor: request
+            .semantic_anchor
+            .as_ref()
+            .map(|anchor| anchor.as_str().to_string()),
+        scope: request.scope.clone(),
+        valid_at: request.valid_at,
+        system_at: request.system_at,
+        commit_id: request.commit_id,
+        activation: request.activation,
+        answerability_question: request.answerability_question.clone(),
+        evidence_source: request.evidence_source.clone(),
+        dependency_target: request.dependency_target,
+        dependency_kind: request.dependency_kind,
+        minimum_confidence: Some(request.minimum_confidence),
+        ..CellLookup::default()
+    }
 }
 
 /// Produces a basic audit trace for a StateCell.
@@ -322,7 +327,7 @@ mod tests {
     use continuitydb_kernel::{CellLookup, KernelError, StorageKernel};
     use continuitydb_memory::MemoryKernel;
 
-    use super::{audit, checkout, CheckoutRequest};
+    use super::{audit, cell_lookup_from_checkout_request, checkout, CheckoutRequest};
 
     fn sample_cell(
         anchor: &str,
@@ -481,6 +486,48 @@ mod tests {
         );
         assert_eq!(lookup.evidence_source, Some("human".to_string()));
         assert_eq!(lookup.minimum_confidence, Some(Confidence::new(0.8)?));
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_request_builds_storage_lookup_without_token_budget(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let semantic_anchor = SemanticAnchor::new("project:continuitydb:lookup");
+        let request = CheckoutRequest {
+            semantic_anchor: Some(semantic_anchor.clone()),
+            scope: Some(Scope::Project("continuitydb".to_string())),
+            valid_at: Some(test_commit_time()?),
+            system_at: Some(test_commit_time()?),
+            commit_id: Some(CommitId::new()),
+            activation: Some(ActivationState::Frontier),
+            answerability_question: Some("what changed?".to_string()),
+            evidence_source: Some("source:ops".to_string()),
+            dependency_target: Some(StateCellId::from_u128(7)),
+            dependency_kind: Some(CellDependencyKind::DerivedFrom),
+            minimum_confidence: Confidence::new(0.7)?,
+            token_budget: 123,
+        };
+
+        let lookup = cell_lookup_from_checkout_request(&request);
+
+        assert_eq!(
+            lookup.semantic_anchor.as_deref(),
+            Some(semantic_anchor.as_str())
+        );
+        assert_eq!(lookup.scope, request.scope);
+        assert_eq!(lookup.valid_at, request.valid_at);
+        assert_eq!(lookup.system_at, request.system_at);
+        assert_eq!(lookup.commit_id, request.commit_id);
+        assert_eq!(lookup.activation, request.activation);
+        assert_eq!(
+            lookup.answerability_question,
+            request.answerability_question
+        );
+        assert_eq!(lookup.evidence_source, request.evidence_source);
+        assert_eq!(lookup.dependency_target, request.dependency_target);
+        assert_eq!(lookup.dependency_kind, request.dependency_kind);
+        assert_eq!(lookup.minimum_confidence, Some(request.minimum_confidence));
+        assert_eq!(lookup.cell_id, None);
         Ok(())
     }
 
