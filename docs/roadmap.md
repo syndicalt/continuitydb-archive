@@ -178,6 +178,7 @@ Storage kernel
 30. Add native accepted Steward `LabelAnswerability` application. Implemented optional `steward` feature method `apply_accepted_label_answerability_proposal_at` so embedders can deterministically apply accepted answerability-label proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
 31. Add native accepted Steward `AdjustConfidence` application. Implemented optional `steward` feature method `apply_accepted_adjust_confidence_proposal_at` so embedders can deterministically apply accepted confidence proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
 32. Add native accepted Steward `RequestVerification` application. Implemented optional `steward` feature method `apply_accepted_request_verification_proposal_at` so embedders can deterministically materialize accepted verification work as append-only operational StateCells while preserving the model-as-proposer boundary.
+33. Add native accepted Steward `LinkRevision` application. Implemented optional `steward` feature method `apply_accepted_link_revision_proposal_at` so embedders can deterministically materialize accepted revision-link assertions as append-only operational StateCells until the storage kernel grows native revision-link records.
 
 ## Steward Milestones
 
@@ -199,6 +200,7 @@ Storage kernel
 16. Add accepted `LabelAnswerability` proposal application. Implemented deterministic answerability-label proposal application through the native API, preserving the model-as-proposer boundary while allowing accepted labels to become committed append-only StateCell revisions.
 17. Add accepted `AdjustConfidence` proposal application. Implemented deterministic confidence proposal application through the native API by appending successor StateCells with revised evidence confidence while preserving the model-as-proposer boundary.
 18. Add accepted `RequestVerification` proposal application. Implemented deterministic verification-work materialization through the native API by appending operational StateCells with derived evidence, target dependencies when present, and full proposal audit payloads.
+19. Add accepted `LinkRevision` proposal application. Implemented deterministic revision-link assertion materialization through the native API by appending operational StateCells with derived evidence, endpoint dependencies, and full proposal audit payloads.
 
 ## Small Embeddable Model Track
 

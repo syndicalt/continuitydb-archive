@@ -710,6 +710,78 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(Some(work_cell_id))
     }
 
+    /// Applies an accepted LinkRevision Steward proposal as an operational link StateCell.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_link_revision_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Option<StateCellId>, ContinuityError> {
+        if record.decision().outcome() == ProposalOutcome::Rejected {
+            return Ok(None);
+        }
+
+        let (source, kind, target) = match record.proposal().action() {
+            StewardAction::LinkRevision {
+                source,
+                kind,
+                target,
+            } => (*source, *kind, *target),
+            _ => return Err(ContinuityError::UnsupportedStewardProposalAction),
+        };
+
+        self.lookup_one_cell(source)?;
+        self.lookup_one_cell(target)?;
+
+        let payload =
+            serde_json::to_value(record).map_err(|_error| StewardError::ProposalStoreCorrupt)?;
+        let derived_confidence = Confidence::new(1.0)?;
+        let mut cell = StateCell::new(
+            StateCellId::new(),
+            vec![
+                SemanticAnchor::new("continuitydb:steward:revision-link"),
+                SemanticAnchor::new(format!(
+                    "continuitydb:steward:revision-link:{source}:{kind:?}:{target}"
+                )),
+            ],
+            ValidTimeRange::new(committed_at, None)?,
+            Scope::Project("continuitydb-steward".to_string()),
+            Answerability::new(vec![
+                "what revision link did the Steward propose?".to_string()
+            ])?,
+            record
+                .proposal()
+                .citations()
+                .iter()
+                .map(|citation| Evidence {
+                    source: SourceId::new("continuitydb-steward"),
+                    citation: Citation {
+                        locator: citation.clone(),
+                    },
+                    confidence: derived_confidence,
+                    trust: vec![TrustSignal::Derived],
+                })
+                .collect(),
+            CellPayload::Json(payload),
+            CellCost::new(0, 0)?,
+        )?;
+
+        cell.dependencies.push(CellDependency::new(
+            source,
+            CellDependencyKind::DerivedFrom,
+            "revision link source StateCell",
+        ));
+        cell.dependencies.push(CellDependency::new(
+            target,
+            CellDependencyKind::DerivedFrom,
+            "revision link target StateCell",
+        ));
+
+        let link_cell_id = cell.id;
+        self.kernel.append_cell_at(cell, committed_at)?;
+        Ok(Some(link_cell_id))
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -4355,6 +4427,236 @@ WHERE scope = project("continuitydb")
         assert!(matches!(
             result,
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_link_revision_application_appends_revision_link_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 14, 15, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:revision-link-source", 0.91, 12)?,
+            initial_commit,
+        )?;
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:revision-link-target", 0.41, 12)?,
+            initial_commit,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: source_id,
+                kind: RevisionLinkKind::Supersedes,
+                target: target_id,
+            },
+            "Accepted policy records that the stronger source supersedes the target.",
+            vec!["test://revision-link-apply".to_string()],
+            initial_commit,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), initial_commit)?;
+
+        let link_cell_id = db
+            .apply_accepted_link_revision_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected revision link cell"))?;
+
+        let link_cell = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(link_cell_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing revision link cell"))?;
+        let decoded_record: continuitydb_steward::ProposalAuditRecord =
+            match link_cell.payload.clone() {
+                CellPayload::Json(value) => serde_json::from_value(value)?,
+                CellPayload::Text(_) | CellPayload::BlobRef(_) => {
+                    return Err(std::io::Error::other("expected JSON payload").into())
+                }
+            };
+
+        assert_eq!(link_cell.system_time.from(), apply_commit);
+        assert_eq!(link_cell.valid_time.from(), apply_commit);
+        assert_eq!(
+            link_cell.answerability.questions(),
+            &["what revision link did the Steward propose?".to_string()]
+        );
+        assert!(link_cell
+            .anchors
+            .iter()
+            .any(|anchor| anchor.as_str() == "continuitydb:steward:revision-link"));
+        assert!(link_cell.anchors.iter().any(|anchor| anchor.as_str()
+            == format!("continuitydb:steward:revision-link:{source_id}:Supersedes:{target_id}")));
+        assert_eq!(
+            link_cell.evidence[0].source.as_str(),
+            "continuitydb-steward"
+        );
+        assert_eq!(
+            link_cell.evidence[0].citation.locator,
+            "test://revision-link-apply"
+        );
+        assert_eq!(link_cell.evidence[0].confidence, Confidence::new(1.0)?);
+        assert_eq!(link_cell.evidence[0].trust, vec![TrustSignal::Derived]);
+        assert_eq!(decoded_record, record);
+        assert_eq!(link_cell.dependencies.len(), 2);
+        assert!(link_cell
+            .dependencies
+            .iter()
+            .any(|dependency| dependency.target == source_id
+                && dependency.kind == CellDependencyKind::DerivedFrom));
+        assert!(link_cell
+            .dependencies
+            .iter()
+            .any(|dependency| dependency.target == target_id
+                && dependency.kind == CellDependencyKind::DerivedFrom));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_link_revision_application_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-link-source", 0.91, 12)?,
+            committed_at,
+        )?;
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-link-target", 0.41, 12)?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: source_id,
+                kind: RevisionLinkKind::Supersedes,
+                target: target_id,
+            },
+            "Policy rejected this revision link application.",
+            vec!["test://revision-link-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied = db.apply_accepted_link_revision_proposal_at(&record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 2);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_link_revision_application_rejects_unsupported_accepted_action(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: StateCellId::new(),
+            },
+            "Frontier application belongs to a different method.",
+            vec!["test://unsupported-link-apply".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_link_revision_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::UnsupportedStewardProposalAction)
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_link_revision_application_reports_missing_source(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_source = StateCellId::new();
+        let target_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:missing-source-target", 0.41, 12)?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: missing_source,
+                kind: RevisionLinkKind::Supersedes,
+                target: target_id,
+            },
+            "Missing source should be reported before application.",
+            vec!["test://revision-link-missing-source".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_link_revision_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_source
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_link_revision_application_reports_missing_target(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let source_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:missing-target-source", 0.91, 12)?,
+            committed_at,
+        )?;
+        let missing_target = StateCellId::new();
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: source_id,
+                kind: RevisionLinkKind::Supersedes,
+                target: missing_target,
+            },
+            "Missing target should be reported before application.",
+            vec!["test://revision-link-missing-target".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_link_revision_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_target
         ));
         Ok(())
     }
