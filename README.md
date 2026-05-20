@@ -21,6 +21,7 @@ The first milestone builds:
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.
+- Deterministic llama.cpp and mistral.rs runtime profiles.
 - Fixed Steward proposal-quality evaluation harness.
 - Executable local model benchmark fixture.
 - Durable local model benchmark baseline store.

@@ -71,6 +71,122 @@ impl LocalExecutableRunnerConfig {
     }
 }
 
+/// Deterministic llama.cpp runtime profile for Steward benchmark runs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LlamaCppRuntimeProfile {
+    executable: PathBuf,
+    model_path: PathBuf,
+    context_size: usize,
+    temperature: String,
+    grammar_file: Option<PathBuf>,
+}
+
+impl LlamaCppRuntimeProfile {
+    /// Creates a llama.cpp profile with conservative deterministic defaults.
+    pub fn new(executable: impl Into<PathBuf>, model_path: impl Into<PathBuf>) -> Self {
+        Self {
+            executable: executable.into(),
+            model_path: model_path.into(),
+            context_size: 4096,
+            temperature: "0".to_string(),
+            grammar_file: None,
+        }
+    }
+
+    /// Sets the context window size.
+    pub fn with_context_size(mut self, context_size: usize) -> Self {
+        self.context_size = context_size;
+        self
+    }
+
+    /// Sets the sampling temperature.
+    pub fn with_temperature(mut self, temperature: impl Into<String>) -> Self {
+        self.temperature = temperature.into();
+        self
+    }
+
+    /// Sets the grammar file used to constrain Steward JSON output.
+    pub fn with_grammar_file(mut self, grammar_file: impl Into<PathBuf>) -> Self {
+        self.grammar_file = Some(grammar_file.into());
+        self
+    }
+
+    /// Builds the executable runner configuration for this profile.
+    pub fn runner_config(&self) -> LocalExecutableRunnerConfig {
+        let mut config = LocalExecutableRunnerConfig::new(self.executable.clone())
+            .with_model_path(self.model_path.clone())
+            .with_argument("--ctx-size")
+            .with_argument(self.context_size.to_string())
+            .with_argument("--temp")
+            .with_argument(&self.temperature);
+
+        if let Some(grammar_file) = &self.grammar_file {
+            config = config
+                .with_argument("--grammar-file")
+                .with_argument(grammar_file);
+        }
+
+        config.with_argument("--prompt").with_argument("-")
+    }
+}
+
+/// Deterministic mistral.rs runtime profile for Steward benchmark runs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MistralRsRuntimeProfile {
+    executable: PathBuf,
+    model_path: PathBuf,
+    context_size: usize,
+    temperature: String,
+    json_output: bool,
+}
+
+impl MistralRsRuntimeProfile {
+    /// Creates a mistral.rs profile with conservative deterministic defaults.
+    pub fn new(executable: impl Into<PathBuf>, model_path: impl Into<PathBuf>) -> Self {
+        Self {
+            executable: executable.into(),
+            model_path: model_path.into(),
+            context_size: 4096,
+            temperature: "0".to_string(),
+            json_output: false,
+        }
+    }
+
+    /// Sets the context window size.
+    pub fn with_context_size(mut self, context_size: usize) -> Self {
+        self.context_size = context_size;
+        self
+    }
+
+    /// Sets the sampling temperature.
+    pub fn with_temperature(mut self, temperature: impl Into<String>) -> Self {
+        self.temperature = temperature.into();
+        self
+    }
+
+    /// Requests JSON output from the runtime wrapper.
+    pub fn with_json_output(mut self) -> Self {
+        self.json_output = true;
+        self
+    }
+
+    /// Builds the executable runner configuration for this profile.
+    pub fn runner_config(&self) -> LocalExecutableRunnerConfig {
+        let mut config = LocalExecutableRunnerConfig::new(self.executable.clone())
+            .with_model_path(self.model_path.clone())
+            .with_argument("--max-seq-len")
+            .with_argument(self.context_size.to_string())
+            .with_argument("--temperature")
+            .with_argument(&self.temperature);
+
+        if self.json_output {
+            config = config.with_argument("--json-output");
+        }
+
+        config.with_argument("--prompt-stdin")
+    }
+}
+
 /// Local executable backend for model inference.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalExecutableRunner {

@@ -58,7 +58,7 @@ Storage kernel
 2. Add policy validation for accepting and rejecting proposals. Implemented in `continuitydb-steward`.
 3. Persist accepted and rejected proposals for audit. Implemented as an in-memory append-only ledger, a pluggable `ProposalLedgerStore` contract, a JSONL `FileProposalStore`, and a generic `StorageKernel`-backed proposal audit adapter in `continuitydb-steward`; specialized production-engine adapters remain future work.
 4. Build a deterministic mock steward for test-first development. Implemented in `continuitydb-steward`.
-5. Add local model inference behind a feature flag. Implemented as a `local-model` backend boundary and local executable runner in `continuitydb-steward`; model-specific llama.cpp/mistral.rs benchmarking remains future work.
+5. Add local model inference behind a feature flag. Implemented as a `local-model` backend boundary, local executable runner, and deterministic llama.cpp/mistral.rs runner profiles in `continuitydb-steward`; real runtime execution remains future work.
 6. Evaluate small open-source steward models against fixed proposal-quality tests. Implemented as a `local-model` evaluation harness with candidate metadata, deterministic pass/fail reasons, an executable runner benchmark fixture, and durable JSONL benchmark baseline records; collecting real model result baselines remains future work.
 7. Add frontier/watch integration so the Steward can propose refresh and verification work. Implemented as deterministic frontier watch events that emit `RequestVerification` and `MarkFrontier` proposals, durable frontier subscription records with in-memory and JSONL file-backed stores, and a subscription runner that filters incoming watch events through stored subscriptions in `continuitydb-steward`.
 

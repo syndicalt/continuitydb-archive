@@ -21,13 +21,13 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalExecutableRunner,
-    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
+    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkReport,
     LocalModelRequest, LocalModelSteward, LocalModelStewardInput,
-    MemoryLocalModelBenchmarkBaselineStore, SmallModelCandidate, StewardEvaluationCase,
-    StewardEvaluationCaseReport, StewardEvaluationFailure, StewardEvaluationReport,
-    StewardEvaluationSuite,
+    MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
+    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
+    StewardEvaluationReport, StewardEvaluationSuite,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -37,10 +37,10 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 mod tests {
     #[cfg(feature = "local-model")]
     use super::{
-        small_model_candidates, FileLocalModelBenchmarkBaselineStore, LocalModelBenchmark,
-        LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
-        MemoryLocalModelBenchmarkBaselineStore, StewardEvaluationCase, StewardEvaluationFailure,
-        StewardEvaluationSuite,
+        small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
+        LocalModelBenchmark, LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
+        MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, StewardEvaluationCase,
+        StewardEvaluationFailure, StewardEvaluationSuite,
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
@@ -855,6 +855,60 @@ mod tests {
             Err(StewardError::LocalModelExecutionFailed)
         ));
         Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn llama_cpp_runtime_profile_builds_deterministic_runner_config() {
+        let profile = LlamaCppRuntimeProfile::new("llama-cli", "models/qwen2.5-0.5b.gguf")
+            .with_context_size(8192)
+            .with_temperature("0")
+            .with_grammar_file("schemas/steward-proposal.gbnf");
+
+        let config = profile.runner_config();
+
+        assert_eq!(config.executable(), std::path::Path::new("llama-cli"));
+        assert_eq!(
+            config.command_arguments(),
+            &[
+                "--model".to_string(),
+                "models/qwen2.5-0.5b.gguf".to_string(),
+                "--ctx-size".to_string(),
+                "8192".to_string(),
+                "--temp".to_string(),
+                "0".to_string(),
+                "--grammar-file".to_string(),
+                "schemas/steward-proposal.gbnf".to_string(),
+                "--prompt".to_string(),
+                "-".to_string(),
+            ]
+        );
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn mistral_rs_runtime_profile_builds_deterministic_runner_config() {
+        let profile = MistralRsRuntimeProfile::new("mistralrs-cli", "models/qwen2.5-0.5b.gguf")
+            .with_context_size(4096)
+            .with_temperature("0")
+            .with_json_output();
+
+        let config = profile.runner_config();
+
+        assert_eq!(config.executable(), std::path::Path::new("mistralrs-cli"));
+        assert_eq!(
+            config.command_arguments(),
+            &[
+                "--model".to_string(),
+                "models/qwen2.5-0.5b.gguf".to_string(),
+                "--max-seq-len".to_string(),
+                "4096".to_string(),
+                "--temperature".to_string(),
+                "0".to_string(),
+                "--json-output".to_string(),
+                "--prompt-stdin".to_string(),
+            ]
+        );
     }
 
     #[cfg(feature = "local-model")]
