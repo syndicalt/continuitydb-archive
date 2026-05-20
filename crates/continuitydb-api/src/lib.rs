@@ -1605,8 +1605,8 @@ mod tests {
     }
 
     #[test]
-    fn api_skips_file_compaction_when_store_is_canonical(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn api_skips_file_compaction_when_store_is_canonical() -> Result<(), Box<dyn std::error::Error>>
+    {
         let path = temp_file_kernel_path("api-file-compact-if-needed-canonical");
         let mut db = ContinuityDb::open_file(&path)?;
 
@@ -1621,8 +1621,8 @@ mod tests {
     }
 
     #[test]
-    fn api_compacts_file_store_when_health_recommends_it(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn api_compacts_file_store_when_health_recommends_it() -> Result<(), Box<dyn std::error::Error>>
+    {
         let path = temp_file_kernel_path("api-file-compact-if-needed-legacy");
         write_legacy_file_store(&path)?;
         let mut db = ContinuityDb::open_file(&path)?;

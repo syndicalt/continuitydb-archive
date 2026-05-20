@@ -90,6 +90,61 @@ fn cli_compact_file_rewrites_legacy_store() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
+fn cli_compact_file_if_needed_skips_canonical_store() -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-compact-if-needed-canonical");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("compact-file")
+        .arg(&path)
+        .arg("--if-needed")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["compacted"].as_bool(), Some(false));
+    assert_eq!(
+        json["after"]["compaction_recommended"].as_bool(),
+        Some(false)
+    );
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_compact_file_if_needed_compacts_legacy_store() -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-compact-if-needed-legacy");
+    write_legacy_store(&path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("compact-file")
+        .arg(&path)
+        .arg("--if-needed")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["compacted"].as_bool(), Some(true));
+    assert_eq!(
+        json["before"]["compaction_recommended"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        json["after"]["compaction_recommended"].as_bool(),
+        Some(false)
+    );
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_compact_file_fails_for_corrupt_store() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-compact-corrupt");
     fs::write(&path, "{not valid json}\n")?;

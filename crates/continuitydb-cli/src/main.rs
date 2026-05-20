@@ -48,6 +48,9 @@ enum Command {
     CompactFile {
         /// Path to the JSONL file-backed store.
         path: PathBuf,
+        /// Skip rewriting when the store is already canonical.
+        #[arg(long = "if-needed")]
+        if_needed: bool,
     },
     /// Inspect file-backed kernel capabilities and optionally enforce a requirement profile.
     InspectKernel {
@@ -124,13 +127,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
-        Some(Command::CompactFile { path }) => {
+        Some(Command::CompactFile { path, if_needed }) => {
             let mut db = open_file_database(&path)?;
-            db.compact_file_store()?;
-            let output = serde_json::json!({
-                "path": path.display().to_string(),
-                "compacted": true,
-            });
+            let output = if if_needed {
+                let summary = db.compact_file_store_if_needed()?;
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "compacted": summary.compacted,
+                    "before": file_health_value(summary.before),
+                    "after": file_health_value(summary.after),
+                })
+            } else {
+                db.compact_file_store()?;
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "compacted": true,
+                })
+            };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::ExportCommits {
@@ -214,7 +227,10 @@ fn file_status_json(
 }
 
 fn file_health_json(db: &ContinuityDb<continuitydb_kernel::FileKernel>) -> serde_json::Value {
-    let health = db.file_store_health();
+    file_health_value(db.file_store_health())
+}
+
+fn file_health_value(health: continuitydb_kernel::FileKernelHealth) -> serde_json::Value {
     serde_json::json!({
         "has_header": health.has_header,
         "legacy_raw_cells": health.legacy_raw_cells,
