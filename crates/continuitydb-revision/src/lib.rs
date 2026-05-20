@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use continuitydb_core::{StateCell, StateCellId, UtilityFeedback};
+use continuitydb_core::{SemanticAnchor, StateCell, StateCellId, UtilityFeedback};
 use serde::{Deserialize, Serialize};
 
 /// Relationship between two StateCell versions.
@@ -60,6 +60,57 @@ pub fn revise_utility_feedback(
     UtilityFeedbackRevision { cell, revision }
 }
 
+/// Deterministic reason two StateCell versions conflict.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CellConflictKind {
+    /// Cells share meaning and valid time but carry incompatible payloads.
+    PayloadMismatch,
+}
+
+/// Deterministic conflict metadata between two StateCell versions.
+pub struct CellConflict {
+    /// Left conflicting cell identifier.
+    pub left: StateCellId,
+    /// Right conflicting cell identifier.
+    pub right: StateCellId,
+    /// Conflict kind.
+    pub kind: CellConflictKind,
+    /// Shared semantic anchor that caused the conflict check to apply.
+    pub shared_anchor: SemanticAnchor,
+    /// Revision links recording the conflict.
+    pub revision: RevisionGraph,
+}
+
+/// Detects the first deterministic conflict between two StateCell versions.
+pub fn detect_cell_conflict(left: &StateCell, right: &StateCell) -> Option<CellConflict> {
+    let shared_anchor = left
+        .anchors
+        .iter()
+        .find(|left_anchor| {
+            right
+                .anchors
+                .iter()
+                .any(|right_anchor| right_anchor == *left_anchor)
+        })?
+        .clone();
+
+    if !left.valid_time.overlaps(&right.valid_time) || left.payload == right.payload {
+        return None;
+    }
+
+    let mut revision = RevisionGraph::default();
+    revision.link(left.id, RevisionLinkKind::ConflictsWith, right.id);
+    revision.link(right.id, RevisionLinkKind::ConflictsWith, left.id);
+
+    Some(CellConflict {
+        left: left.id,
+        right: right.id,
+        kind: CellConflictKind::PayloadMismatch,
+        shared_anchor,
+        revision,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
@@ -69,17 +120,38 @@ mod tests {
         ValidTimeRange,
     };
 
-    use super::{revise_utility_feedback, RevisionGraph, RevisionLinkKind};
+    use super::{
+        detect_cell_conflict, revise_utility_feedback, CellConflictKind, RevisionGraph,
+        RevisionLinkKind,
+    };
+
+    fn timestamp(day: u32) -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
+        Utc.with_ymd_and_hms(2026, 5, day, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp").into())
+    }
 
     fn sample_cell() -> Result<StateCell, Box<dyn std::error::Error>> {
-        let valid_from = Utc
-            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
-            .single()
-            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:feedback",
+            "Feedback revision target.",
+            20,
+            None,
+        )
+    }
+
+    fn sample_cell_with_anchor_payload_and_time(
+        anchor: &str,
+        payload: &str,
+        from_day: u32,
+        to_day: Option<u32>,
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        let valid_from = timestamp(from_day)?;
+        let valid_to = to_day.map(timestamp).transpose()?;
         StateCell::new(
             StateCellId::new(),
-            vec![SemanticAnchor::new("project:continuitydb:feedback")],
-            ValidTimeRange::new(valid_from, None)?,
+            vec![SemanticAnchor::new(anchor)],
+            ValidTimeRange::new(valid_from, valid_to)?,
             Scope::Project("continuitydb".to_string()),
             Answerability::new(vec!["what feedback applies?".to_string()])?,
             vec![Evidence {
@@ -90,7 +162,7 @@ mod tests {
                 confidence: Confidence::new(0.8)?,
                 trust: vec![TrustSignal::DirectObservation],
             }],
-            CellPayload::Text("Feedback revision target.".to_string()),
+            CellPayload::Text(payload.to_string()),
             CellCost::new(5, 0)?,
         )
         .map_err(Into::into)
@@ -145,6 +217,67 @@ mod tests {
                 .targets(revised.cell.id, RevisionLinkKind::Predecessor),
             vec![previous.id]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_detection_identifies_same_anchor_overlapping_payload_mismatch(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let left = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:release-status",
+            "Release is green.",
+            20,
+            Some(22),
+        )?;
+        let right = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:release-status",
+            "Release is blocked.",
+            21,
+            Some(23),
+        )?;
+
+        let conflict = detect_cell_conflict(&left, &right)
+            .ok_or_else(|| std::io::Error::other("expected conflict"))?;
+
+        assert_eq!(conflict.left, left.id);
+        assert_eq!(conflict.right, right.id);
+        assert_eq!(conflict.kind, CellConflictKind::PayloadMismatch);
+        assert_eq!(
+            conflict.shared_anchor.as_str(),
+            "project:continuitydb:release-status"
+        );
+        assert_eq!(
+            conflict
+                .revision
+                .targets(left.id, RevisionLinkKind::ConflictsWith),
+            vec![right.id]
+        );
+        assert_eq!(
+            conflict
+                .revision
+                .targets(right.id, RevisionLinkKind::ConflictsWith),
+            vec![left.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn conflict_detection_ignores_adjacent_valid_time_ranges(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let left = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:release-status",
+            "Release is green.",
+            20,
+            Some(21),
+        )?;
+        let right = sample_cell_with_anchor_payload_and_time(
+            "project:continuitydb:release-status",
+            "Release is blocked.",
+            21,
+            Some(22),
+        )?;
+
+        assert!(detect_cell_conflict(&left, &right).is_none());
         Ok(())
     }
 }

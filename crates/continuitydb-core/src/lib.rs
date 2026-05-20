@@ -234,4 +234,31 @@ mod tests {
         assert!(!range.contains(end));
         Ok(())
     }
+
+    #[test]
+    fn valid_time_overlap_respects_half_open_ranges() -> Result<(), Box<dyn std::error::Error>> {
+        let may_20 = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let may_21 = Utc
+            .with_ymd_and_hms(2026, 5, 21, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let may_22 = Utc
+            .with_ymd_and_hms(2026, 5, 22, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let may_23 = Utc
+            .with_ymd_and_hms(2026, 5, 23, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let current = ValidTimeRange::new(may_20, Some(may_22))?;
+        let overlapping = ValidTimeRange::new(may_21, Some(may_23))?;
+        let adjacent = ValidTimeRange::new(may_22, Some(may_23))?;
+
+        assert!(current.overlaps(&overlapping));
+        assert!(!current.overlaps(&adjacent));
+        Ok(())
+    }
 }

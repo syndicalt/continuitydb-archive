@@ -79,6 +79,10 @@ Storage kernel
 1. Add first-class StateCell dependency references. Implemented in `continuitydb-core` as typed links to target `StateCellId` values with dependency kind and rationale, defaulting to an empty list for new and previously serialized cells.
 2. Add dependency-aware storage lookup. Implemented target and kind filters in `CellLookup` across memory and file kernels.
 
+## Conflict Detection Milestones
+
+1. Add deterministic StateCell conflict detection. Implemented same-anchor, overlapping-valid-time, different-payload detection in `continuitydb-revision`, backed by half-open valid-time overlap semantics in `continuitydb-core`.
+
 ## CLI Milestones
 
 1. Expose deterministic checkout JSON from the CLI. Implemented as `continuitydb demo-checkout`, showing selected cells, audit traces, uncertainty, frontier recommendations, and alternatives.
