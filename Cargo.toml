@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "crates/continuitydb-core",
+    "crates/continuitydb-kernel",
+    "crates/continuitydb-memory",
 ]
 
 [workspace.package]
