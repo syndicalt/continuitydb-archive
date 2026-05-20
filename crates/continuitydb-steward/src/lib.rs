@@ -1014,6 +1014,8 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let source = StateCellId::from_u128(1);
         let target = StateCellId::from_u128(2);
+        let supersession_source = StateCellId::from_u128(4);
+        let supersession_target = StateCellId::from_u128(5);
         let response = serde_json::json!({
             "proposals": [
                 {
@@ -1034,6 +1036,16 @@ mod tests {
                     },
                     "rationale": "The cited evidence directly contradicts the target claim.",
                     "citations": ["continuitydb://evaluation/conflict-evidence"]
+                },
+                {
+                    "action": {
+                        "type": "link_revision",
+                        "source": supersession_source,
+                        "kind": "supersedes",
+                        "target": supersession_target
+                    },
+                    "rationale": "The newer evidence supersedes the older status without contradicting it.",
+                    "citations": ["continuitydb://evaluation/supersession-evidence"]
                 },
                 {
                     "action": {
@@ -1072,22 +1084,27 @@ mod tests {
         let report = default_steward_evaluation_suite().evaluate(&steward);
 
         assert!(report.passed());
-        assert_eq!(report.case_reports().len(), 5);
+        assert_eq!(report.case_reports().len(), 6);
         assert!(report.case_reports()[1].passed());
         assert_eq!(report.case_reports()[1].name(), "conflict classification");
         assert!(report.case_reports()[2].passed());
         assert_eq!(
             report.case_reports()[2].name(),
-            "unsupported claim boundary"
+            "supersession classification"
         );
         assert!(report.case_reports()[3].passed());
         assert_eq!(
             report.case_reports()[3].name(),
-            "multi-source citation preservation"
+            "unsupported claim boundary"
         );
         assert!(report.case_reports()[4].passed());
         assert_eq!(
             report.case_reports()[4].name(),
+            "multi-source citation preservation"
+        );
+        assert!(report.case_reports()[5].passed());
+        assert_eq!(
+            report.case_reports()[5].name(),
             "policy rejection avoidance"
         );
         Ok(())
@@ -1098,7 +1115,7 @@ mod tests {
     fn default_steward_evaluation_suite_exposes_case_contracts() {
         let suite = default_steward_evaluation_suite();
 
-        assert_eq!(suite.len(), 5);
+        assert_eq!(suite.len(), 6);
         assert!(!suite.is_empty());
         let cases = suite.cases();
 
@@ -1146,49 +1163,78 @@ mod tests {
             }
         ));
 
-        assert_eq!(cases[2].name(), "unsupported claim boundary");
+        assert_eq!(cases[2].name(), "supersession classification");
         assert_eq!(
             cases[2].input().task(),
-            "Check whether release evidence supports a shipped deployment claim."
+            "Classify whether newer release evidence supersedes the older status."
         );
         assert_eq!(
             cases[2].input().evidence()[0].locator(),
-            "continuitydb://evaluation/unsupported-release-claim"
+            "continuitydb://evaluation/supersession-evidence"
         );
         assert_eq!(
             cases[2].required_citations(),
-            ["continuitydb://evaluation/unsupported-release-claim".to_string()].as_slice()
+            ["continuitydb://evaluation/supersession-evidence".to_string()].as_slice()
         );
         assert_eq!(
             cases[2].required_rationale_terms(),
-            ["unsupported".to_string()].as_slice()
+            ["supersedes".to_string()].as_slice()
         );
         assert_eq!(
             cases[2].forbidden_rationale_terms(),
-            ["deployed to all customers".to_string()].as_slice()
+            ["conflicts with".to_string()].as_slice()
         );
         assert!(matches!(
             &cases[2].expected_actions()[0],
+            StewardAction::LinkRevision {
+                kind: RevisionLinkKind::Supersedes,
+                ..
+            }
+        ));
+
+        assert_eq!(cases[3].name(), "unsupported claim boundary");
+        assert_eq!(
+            cases[3].input().task(),
+            "Check whether release evidence supports a shipped deployment claim."
+        );
+        assert_eq!(
+            cases[3].input().evidence()[0].locator(),
+            "continuitydb://evaluation/unsupported-release-claim"
+        );
+        assert_eq!(
+            cases[3].required_citations(),
+            ["continuitydb://evaluation/unsupported-release-claim".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[3].required_rationale_terms(),
+            ["unsupported".to_string()].as_slice()
+        );
+        assert_eq!(
+            cases[3].forbidden_rationale_terms(),
+            ["deployed to all customers".to_string()].as_slice()
+        );
+        assert!(matches!(
+            &cases[3].expected_actions()[0],
             StewardAction::RequestVerification { cell_id: None, request }
                 if request == "Verify deployment status before treating the release as shipped."
         ));
 
-        assert_eq!(cases[3].name(), "multi-source citation preservation");
+        assert_eq!(cases[4].name(), "multi-source citation preservation");
         assert_eq!(
-            cases[3].input().task(),
+            cases[4].input().task(),
             "Decide whether a release-status change should stay on the active frontier."
         );
-        assert_eq!(cases[3].input().evidence().len(), 2);
+        assert_eq!(cases[4].input().evidence().len(), 2);
         assert_eq!(
-            cases[3].input().evidence()[0].locator(),
+            cases[4].input().evidence()[0].locator(),
             "continuitydb://evaluation/release-build-source"
         );
         assert_eq!(
-            cases[3].input().evidence()[1].locator(),
+            cases[4].input().evidence()[1].locator(),
             "continuitydb://evaluation/release-incident-source"
         );
         assert_eq!(
-            cases[3].required_citations(),
+            cases[4].required_citations(),
             [
                 "continuitydb://evaluation/release-build-source".to_string(),
                 "continuitydb://evaluation/release-incident-source".to_string(),
@@ -1196,38 +1242,38 @@ mod tests {
             .as_slice()
         );
         assert_eq!(
-            cases[3].required_rationale_terms(),
+            cases[4].required_rationale_terms(),
             ["frontier".to_string()].as_slice()
         );
         assert!(matches!(
-            &cases[3].expected_actions()[0],
+            &cases[4].expected_actions()[0],
             StewardAction::MarkFrontier { cell_id }
                 if *cell_id == StateCellId::from_u128(3)
         ));
 
-        assert_eq!(cases[4].name(), "policy rejection avoidance");
+        assert_eq!(cases[5].name(), "policy rejection avoidance");
         assert_eq!(
-            cases[4].input().task(),
+            cases[5].input().task(),
             "Handle invalid answerability-label evidence without emitting an invalid label."
         );
         assert_eq!(
-            cases[4].input().evidence()[0].locator(),
+            cases[5].input().evidence()[0].locator(),
             "continuitydb://evaluation/invalid-answerability-label"
         );
         assert_eq!(
-            cases[4].required_citations(),
+            cases[5].required_citations(),
             ["continuitydb://evaluation/invalid-answerability-label".to_string()].as_slice()
         );
         assert_eq!(
-            cases[4].required_rationale_terms(),
+            cases[5].required_rationale_terms(),
             ["invalid".to_string()].as_slice()
         );
         assert_eq!(
-            cases[4].forbidden_rationale_terms(),
+            cases[5].forbidden_rationale_terms(),
             ["label applied".to_string()].as_slice()
         );
         assert!(matches!(
-            &cases[4].expected_actions()[0],
+            &cases[5].expected_actions()[0],
             StewardAction::RequestVerification { cell_id: None, request }
                 if request == "Ask for a concrete answerability question before labeling the cell."
         ));

@@ -957,6 +957,8 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
     let conflict_source = StateCellId::from_u128(1);
     let conflict_target = StateCellId::from_u128(2);
     let frontier_cell = StateCellId::from_u128(3);
+    let supersession_source = StateCellId::from_u128(4);
+    let supersession_target = StateCellId::from_u128(5);
 
     StewardEvaluationSuite::new(vec![
         StewardEvaluationCase::new(
@@ -990,6 +992,23 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         })
         .require_citation("continuitydb://evaluation/conflict-evidence")
         .forbid_rationale_term("verified in production"),
+        StewardEvaluationCase::new(
+            "supersession classification",
+            created_at,
+            "Classify whether newer release evidence supersedes the older status.",
+        )
+        .with_evidence(
+            "continuitydb://evaluation/supersession-evidence",
+            "The source claim updates the target release status with newer evidence but does not contradict the older state.",
+        )
+        .expect_action(StewardAction::LinkRevision {
+            source: supersession_source,
+            kind: RevisionLinkKind::Supersedes,
+            target: supersession_target,
+        })
+        .require_citation("continuitydb://evaluation/supersession-evidence")
+        .require_rationale_term("supersedes")
+        .forbid_rationale_term("conflicts with"),
         StewardEvaluationCase::new(
             "unsupported claim boundary",
             created_at,
