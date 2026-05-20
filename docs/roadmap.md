@@ -239,6 +239,7 @@ Storage kernel
 27. Add local-model benchmark contract versioning. Implemented response schema version metadata on benchmark reports, durable baselines, legacy baseline decoding, and CLI benchmark summaries so future contract evolution remains auditable.
 28. Add compatible local-model regression gates. Updated record-and-compare baseline gating to compare only previous baselines with matching candidate identity, response schema version, and runtime manifest, preventing invalid regressions across runtime or contract changes.
 29. Add public compatible local-model baseline lookup. Implemented a feature-gated API that returns the newest stored baseline matching candidate identity, response schema version, and runtime manifest without recording a new benchmark run.
+30. Add local-model evaluation summary metrics. Implemented serializable deterministic evaluation summaries for reports and baselines so embedders can inspect total, passed, failed, and pass-rate metrics without duplicating regression internals.
 
 ## Small Embeddable Model Track
 

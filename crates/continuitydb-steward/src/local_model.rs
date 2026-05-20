@@ -621,14 +621,72 @@ pub struct StewardEvaluationReport {
 impl StewardEvaluationReport {
     /// Returns whether every case passed.
     pub fn passed(&self) -> bool {
-        self.case_reports
-            .iter()
-            .all(StewardEvaluationCaseReport::passed)
+        self.summary().passed()
     }
 
     /// Returns per-case evaluation reports.
     pub fn case_reports(&self) -> &[StewardEvaluationCaseReport] {
         &self.case_reports
+    }
+
+    /// Returns deterministic aggregate evaluation metrics.
+    pub fn summary(&self) -> StewardEvaluationSummary {
+        StewardEvaluationSummary::from_report(self)
+    }
+}
+
+/// Deterministic aggregate metrics for a local Steward model evaluation report.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StewardEvaluationSummary {
+    total_cases: usize,
+    passed_cases: usize,
+    failed_cases: usize,
+}
+
+impl StewardEvaluationSummary {
+    fn from_report(report: &StewardEvaluationReport) -> Self {
+        let total_cases = report.case_reports().len();
+        let passed_cases = report
+            .case_reports()
+            .iter()
+            .filter(|case_report| case_report.passed())
+            .count();
+        let failed_cases = total_cases - passed_cases;
+
+        Self {
+            total_cases,
+            passed_cases,
+            failed_cases,
+        }
+    }
+
+    /// Returns the number of evaluated cases.
+    pub fn total_cases(&self) -> usize {
+        self.total_cases
+    }
+
+    /// Returns the number of passing cases.
+    pub fn passed_cases(&self) -> usize {
+        self.passed_cases
+    }
+
+    /// Returns the number of failing cases.
+    pub fn failed_cases(&self) -> usize {
+        self.failed_cases
+    }
+
+    /// Returns passed cases divided by total cases, or 1.0 for an empty suite.
+    pub fn pass_rate(&self) -> f64 {
+        if self.total_cases == 0 {
+            return 1.0;
+        }
+
+        self.passed_cases as f64 / self.total_cases as f64
+    }
+
+    /// Returns whether no evaluation cases failed.
+    pub fn passed(&self) -> bool {
+        self.failed_cases == 0
     }
 }
 
@@ -853,9 +911,14 @@ impl LocalModelBenchmarkReport {
         &self.evaluation
     }
 
+    /// Returns deterministic aggregate evaluation metrics.
+    pub fn evaluation_summary(&self) -> StewardEvaluationSummary {
+        self.evaluation.summary()
+    }
+
     /// Returns whether every benchmark case passed.
     pub fn passed(&self) -> bool {
-        self.evaluation.passed()
+        self.evaluation_summary().passed()
     }
 }
 
@@ -910,6 +973,11 @@ impl LocalModelBenchmarkBaseline {
         &self.evaluation
     }
 
+    /// Returns deterministic aggregate evaluation metrics.
+    pub fn evaluation_summary(&self) -> StewardEvaluationSummary {
+        self.evaluation.summary()
+    }
+
     /// Returns when this baseline was recorded.
     pub fn recorded_at(&self) -> DateTime<Utc> {
         self.recorded_at
@@ -917,7 +985,7 @@ impl LocalModelBenchmarkBaseline {
 
     /// Returns whether every benchmark case passed.
     pub fn passed(&self) -> bool {
-        self.evaluation.passed()
+        self.evaluation_summary().passed()
     }
 }
 
@@ -940,8 +1008,8 @@ impl LocalModelBenchmarkRegression {
         previous: &LocalModelBenchmarkBaseline,
         current: &LocalModelBenchmarkBaseline,
     ) -> Self {
-        let previous_passed_cases = passed_case_count(previous.evaluation());
-        let current_passed_cases = passed_case_count(current.evaluation());
+        let previous_passed_cases = previous.evaluation_summary().passed_cases();
+        let current_passed_cases = current.evaluation_summary().passed_cases();
         let pass_count_delta = current_passed_cases as isize - previous_passed_cases as isize;
         let regressed = current_passed_cases < previous_passed_cases
             || (previous.passed() && !current.passed());
@@ -1103,14 +1171,6 @@ where
         .filter(|baseline| baseline.response_schema_version() == current.response_schema_version())
         .filter(|baseline| baseline.runtime() == current.runtime())
         .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
-}
-
-fn passed_case_count(evaluation: &StewardEvaluationReport) -> usize {
-    evaluation
-        .case_reports()
-        .iter()
-        .filter(|case| case.passed())
-        .count()
 }
 
 /// Storage contract for append-only local model benchmark baselines.

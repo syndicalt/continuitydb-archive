@@ -34,7 +34,8 @@ pub use local_model::{
     LocalModelRuntimeManifest, LocalModelSteward, LocalModelStewardInput,
     MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
     StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
-    StewardEvaluationReport, StewardEvaluationSuite, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    StewardEvaluationReport, StewardEvaluationSuite, StewardEvaluationSummary,
+    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -53,7 +54,7 @@ mod tests {
         LocalModelBenchmarkGateReport, LocalModelBenchmarkRegression,
         MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
         StewardEvaluationCase, StewardEvaluationFailure, StewardEvaluationSuite,
-        LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+        StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
     };
     use super::{
         BorrowedKernelProposalStore, FileProposalStore, KernelProposalStore, MemoryProposalStore,
@@ -847,6 +848,49 @@ mod tests {
                 },
             ]
         );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn steward_evaluation_summary_counts_passed_and_failed_cases(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let passing_cell = StateCellId::new();
+        let missing_cell = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": passing_cell,
+                },
+                "rationale": "The supplied evidence is stale.",
+                "citations": ["test://frontier"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let suite = StewardEvaluationSuite::new(vec![
+            StewardEvaluationCase::new("passes", created_at(), "find frontier")
+                .with_evidence("test://frontier", "Evidence is stale.")
+                .expect_action(StewardAction::MarkFrontier {
+                    cell_id: passing_cell,
+                })
+                .require_citation("test://frontier"),
+            StewardEvaluationCase::new("fails", created_at(), "find other frontier")
+                .with_evidence("test://missing", "Other evidence is stale.")
+                .expect_action(StewardAction::MarkFrontier {
+                    cell_id: missing_cell,
+                })
+                .require_citation("test://missing"),
+        ]);
+
+        let summary: StewardEvaluationSummary = suite.evaluate(&steward).summary();
+
+        assert_eq!(summary.total_cases(), 2);
+        assert_eq!(summary.passed_cases(), 1);
+        assert_eq!(summary.failed_cases(), 1);
+        assert_eq!(summary.pass_rate(), 0.5);
+        assert!(!summary.passed());
         Ok(())
     }
 
@@ -1666,6 +1710,22 @@ mod tests {
         let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
 
         assert_eq!(latest, None);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_baseline_exposes_evaluation_summary(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = local_model_empty_baseline(small_model_candidates()[0], created_at())?;
+
+        let summary = baseline.evaluation_summary();
+
+        assert_eq!(summary.total_cases(), 0);
+        assert_eq!(summary.passed_cases(), 0);
+        assert_eq!(summary.failed_cases(), 0);
+        assert_eq!(summary.pass_rate(), 1.0);
+        assert!(summary.passed());
         Ok(())
     }
 
