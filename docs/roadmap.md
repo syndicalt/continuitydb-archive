@@ -275,6 +275,7 @@ Storage kernel
 63. Add CLI local-model benchmark report artifacts. Added `benchmark-local-model --report-path` so successful real runs and dry-run preflights can write the same structured JSON printed to stdout into a durable artifact for CI and reproducible local model trials.
 64. Add CLI local-model benchmark response artifacts. Added `benchmark-local-model --response-dir` so real benchmark runs can persist raw per-case model stdout and report captured response artifact metadata for debugging local Steward model failures.
 65. Add durable local-model response fingerprints. Persisted per-case raw response fingerprints and byte counts in benchmark reports and durable baselines so real model trials can be audited without storing raw model stdout in baseline records.
+66. Add CLI local-model response artifact manifests. Added `local-model-responses.manifest.json` inside `benchmark-local-model --response-dir` output so archived raw response directories remain self-describing without separate stdout capture.
 
 ## Small Embeddable Model Track
 

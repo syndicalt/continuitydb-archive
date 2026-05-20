@@ -108,10 +108,18 @@ struct LocalModelResponseArtifact {
 }
 
 #[cfg(feature = "local-model")]
+struct LocalModelResponseArtifactManifest {
+    manifest_path: PathBuf,
+    manifest_fingerprint: String,
+    manifest_bytes: usize,
+}
+
+#[cfg(feature = "local-model")]
 struct LocalModelBenchmarkArtifacts<'a> {
     contract: Option<&'a LocalModelContractArtifacts>,
     prompts: &'a [LocalModelPromptArtifact],
     responses: &'a [LocalModelResponseArtifact],
+    response_manifest: Option<&'a LocalModelResponseArtifactManifest>,
 }
 
 #[cfg(feature = "local-model")]
@@ -770,9 +778,12 @@ fn benchmark_local_model_json(
             candidate,
             &config,
             options.baseline_path,
-            contract_artifacts.as_ref(),
-            &prompt_artifacts,
-            &[],
+            LocalModelBenchmarkArtifacts {
+                contract: contract_artifacts.as_ref(),
+                prompts: &prompt_artifacts,
+                responses: &[],
+                response_manifest: None,
+            },
             LocalModelBenchmarkDryRunGates {
                 baseline_preflight,
                 stability_preflight: options.stability_trials.map(|trials| {
@@ -807,6 +818,14 @@ fn benchmark_local_model_json(
         .map(|response_dir| write_local_model_response_artifacts(response_dir, &responses))
         .transpose()?
         .unwrap_or_default();
+    let response_manifest = if let Some(response_dir) = options.response_dir {
+        Some(write_local_model_response_artifact_manifest(
+            response_dir,
+            &response_artifacts,
+        )?)
+    } else {
+        None
+    };
     let current_baseline = LocalModelBenchmarkBaseline::from_report(report, Utc::now());
     if options.fail_on_failed_cases && !current_baseline.evaluation_summary().passed() {
         if let Some(report_path) = options.failure_report_path {
@@ -819,6 +838,7 @@ fn benchmark_local_model_json(
                     contract: contract_artifacts.as_ref(),
                     prompts: &prompt_artifacts,
                     responses: &response_artifacts,
+                    response_manifest: response_manifest.as_ref(),
                 },
                 stability.as_ref(),
             );
@@ -860,6 +880,7 @@ fn benchmark_local_model_json(
             contract: contract_artifacts.as_ref(),
             prompts: &prompt_artifacts,
             responses: &response_artifacts,
+            response_manifest: response_manifest.as_ref(),
         },
         stability.as_ref(),
     ))
@@ -870,9 +891,7 @@ fn local_model_benchmark_dry_run_json(
     candidate: SmallModelCandidate,
     config: &LocalExecutableRunnerConfig,
     baseline_path: &Path,
-    contract_artifacts: Option<&LocalModelContractArtifacts>,
-    prompt_artifacts: &[LocalModelPromptArtifact],
-    response_artifacts: &[LocalModelResponseArtifact],
+    artifacts: LocalModelBenchmarkArtifacts<'_>,
     gates: LocalModelBenchmarkDryRunGates,
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
@@ -891,10 +910,11 @@ fn local_model_benchmark_dry_run_json(
             .failure_report_path
             .as_ref()
             .map(|path| path.display().to_string()),
-        "contract_artifacts": local_model_contract_artifacts_json(contract_artifacts),
-        "prompt_artifacts": local_model_prompt_artifacts_json(prompt_artifacts),
+        "contract_artifacts": local_model_contract_artifacts_json(artifacts.contract),
+        "prompt_artifacts": local_model_prompt_artifacts_json(artifacts.prompts),
         "response_fingerprints": [],
-        "response_artifacts": local_model_response_artifacts_json(response_artifacts),
+        "response_artifacts": local_model_response_artifacts_json(artifacts.responses),
+        "response_artifact_manifest": local_model_response_artifact_manifest_json(artifacts.response_manifest),
         "runtime": {
             "executable": config.executable().display().to_string(),
             "arguments": config.command_arguments(),
@@ -1157,6 +1177,42 @@ fn local_model_response_artifacts_json(
 }
 
 #[cfg(feature = "local-model")]
+fn write_local_model_response_artifact_manifest(
+    response_dir: &Path,
+    response_artifacts: &[LocalModelResponseArtifact],
+) -> Result<LocalModelResponseArtifactManifest, Box<dyn std::error::Error>> {
+    let manifest_path = response_dir.join("local-model-responses.manifest.json");
+    let manifest = serde_json::json!({
+        "format": "continuitydb.local_model.responses",
+        "format_version": 1,
+        "artifacts": local_model_response_artifacts_json(response_artifacts),
+    });
+    let manifest_text = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, &manifest_text)?;
+
+    Ok(LocalModelResponseArtifactManifest {
+        manifest_path,
+        manifest_fingerprint: local_model_contract_fingerprint(&manifest_text),
+        manifest_bytes: manifest_text.len(),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_response_artifact_manifest_json(
+    response_manifest: Option<&LocalModelResponseArtifactManifest>,
+) -> serde_json::Value {
+    response_manifest
+        .map(|manifest| {
+            serde_json::json!({
+                "manifest_path": manifest.manifest_path.display().to_string(),
+                "manifest_fingerprint": manifest.manifest_fingerprint,
+                "manifest_bytes": manifest.manifest_bytes,
+            })
+        })
+        .unwrap_or(serde_json::Value::Null)
+}
+
+#[cfg(feature = "local-model")]
 fn local_model_candidate(
     candidate_id: &str,
 ) -> Result<SmallModelCandidate, Box<dyn std::error::Error>> {
@@ -1197,6 +1253,7 @@ fn local_model_benchmark_json(
         "contract_artifacts": local_model_contract_artifacts_json(artifacts.contract),
         "prompt_artifacts": local_model_prompt_artifacts_json(artifacts.prompts),
         "response_artifacts": local_model_response_artifacts_json(artifacts.responses),
+        "response_artifact_manifest": local_model_response_artifact_manifest_json(artifacts.response_manifest),
         "runtime": {
             "executable": baseline.runtime().executable(),
             "arguments": baseline.runtime().arguments(),

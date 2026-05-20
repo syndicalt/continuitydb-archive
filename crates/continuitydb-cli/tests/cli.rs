@@ -700,6 +700,36 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     let first_response = fs::read_to_string(first_response_path)?;
     assert!(first_response.contains("Gather additional source evidence."));
     assert!(first_response.contains("continuitydb://evaluation/thin-evidence"));
+    let manifest = &json["response_artifact_manifest"];
+    let manifest_path = manifest["manifest_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing response artifact manifest path"))?;
+    assert!(manifest_path.ends_with("local-model-responses.manifest.json"));
+    assert!(manifest["manifest_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(manifest["manifest_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    let manifest_json: Value = serde_json::from_str(&fs::read_to_string(manifest_path)?)?;
+    assert_eq!(
+        manifest_json["format"].as_str(),
+        Some("continuitydb.local_model.responses")
+    );
+    assert_eq!(manifest_json["format_version"].as_u64(), Some(1));
+    assert_eq!(manifest_json["artifacts"].as_array().map(Vec::len), Some(9));
+    assert_eq!(
+        manifest_json["artifacts"][0]["case_name"].as_str(),
+        artifacts[0]["case_name"].as_str()
+    );
+    assert_eq!(
+        manifest_json["artifacts"][0]["response_path"].as_str(),
+        artifacts[0]["response_path"].as_str()
+    );
+    assert_eq!(
+        manifest_json["artifacts"][0]["response_fingerprint"].as_str(),
+        artifacts[0]["response_fingerprint"].as_str()
+    );
 
     fs::remove_file(executable_path)?;
     fs::remove_file(baseline_path)?;
