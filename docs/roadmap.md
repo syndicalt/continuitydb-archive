@@ -153,12 +153,13 @@ Storage kernel
 8. Add canonical file-store inspection gate. Implemented `continuitydb inspect-kernel --require-canonical` so CI and operators can fail early when a readable file store needs compaction.
 9. Add conditional file-store compaction. Implemented `continuitydb compact-file --if-needed` so operators can compact only when health recommends it.
 10. Add file lookup-plan inspection. Extended `continuitydb inspect-kernel --lookup-plan` to include default file-backed lookup candidate planning metadata for operator diagnostics and future planner regression checks.
-11. Add commit import dry-run validation. Implemented `continuitydb import-commits --dry-run` so operators can validate backup files against a target store before mutation.
-12. Add incremental commit export. Implemented `continuitydb export-commits --after --limit` so operators can page commit backups through the same cursor semantics exposed by the native API.
-13. Report commit import cursors. Extended `continuitydb import-commits` output with `next_after` so operators can checkpoint imported backup pages.
-14. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
-15. Execute saved query files from the CLI. Extended `continuitydb checkout-query` to accept raw typed query JSON, versioned `continuitydb.query` envelopes, and strict text `CHECKOUT` query files through the native query-file API.
-16. Preserve native revision links in backup and copy flows. Extended CLI commit export/import and direct copy behavior to round-trip source-owned native revision-link records through the versioned commit export envelope.
+11. Add query-constrained file lookup-plan inspection. Extended `continuitydb inspect-kernel --lookup-query <CHECKOUT text>` to parse strict text checkout queries into file lookup-plan constraints so operators can inspect indexed candidate planning for real checkout predicates without executing materialization.
+12. Add commit import dry-run validation. Implemented `continuitydb import-commits --dry-run` so operators can validate backup files against a target store before mutation.
+13. Add incremental commit export. Implemented `continuitydb export-commits --after --limit` so operators can page commit backups through the same cursor semantics exposed by the native API.
+14. Report commit import cursors. Extended `continuitydb import-commits` output with `next_after` so operators can checkpoint imported backup pages.
+15. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
+16. Execute saved query files from the CLI. Extended `continuitydb checkout-query` to accept raw typed query JSON, versioned `continuitydb.query` envelopes, and strict text `CHECKOUT` query files through the native query-file API.
+17. Preserve native revision links in backup and copy flows. Extended CLI commit export/import and direct copy behavior to round-trip source-owned native revision-link records through the versioned commit export envelope.
 
 ## Benchmark and Workload Milestones
 

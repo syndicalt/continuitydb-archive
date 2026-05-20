@@ -15,6 +15,7 @@ use continuitydb_kernel::{
     StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
+use continuitydb_query::parse_query_text;
 #[cfg(feature = "local-model")]
 use continuitydb_steward::{
     default_steward_evaluation_suite, local_model_prompt_fingerprint_for_suite,
@@ -230,6 +231,9 @@ enum Command {
         /// Include the default file lookup candidate plan.
         #[arg(long = "lookup-plan")]
         lookup_plan: bool,
+        /// Include the file lookup candidate plan for a strict text CHECKOUT query.
+        #[arg(long = "lookup-query")]
+        lookup_query: Option<String>,
     },
     /// Export all file-backed commit slices to a versioned JSON backup envelope.
     ExportCommits {
@@ -407,6 +411,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             require,
             require_canonical,
             lookup_plan,
+            lookup_query,
         }) => {
             let db = if let Some(profile) = require {
                 open_file_database_with_profile(&store_path, profile)?
@@ -419,8 +424,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let capabilities = db.kernel_capabilities();
             let status = file_status_json(&db)?;
             let health = file_health_json(&db);
-            let lookup_plan =
-                lookup_plan.then(|| file_lookup_plan_json(&db, &CellLookup::default()));
+            let lookup = if lookup_plan {
+                Some(CellLookup::default())
+            } else if let Some(query) = lookup_query.as_deref() {
+                Some(parse_lookup_query(query)?)
+            } else {
+                None
+            };
+            let lookup_plan = lookup.map(|lookup| file_lookup_plan_json(&db, &lookup));
             let required = require.map(profile_name);
             let satisfies = require
                 .map(|profile| db.kernel_satisfies(requirements_for_profile(profile)))
@@ -1784,6 +1795,27 @@ fn file_lookup_plan_json(
         "indexed_constraint_count": plan.indexed_constraint_count,
         "candidate_count": plan.candidate_count,
         "full_scan": plan.full_scan,
+    })
+}
+
+fn parse_lookup_query(input: &str) -> Result<CellLookup, Box<dyn std::error::Error>> {
+    let request = parse_query_text(input)?.compile_checkout()?;
+    Ok(CellLookup {
+        semantic_anchor: request
+            .semantic_anchor
+            .map(|anchor| anchor.as_str().to_string()),
+        scope: request.scope,
+        valid_at: request.valid_at,
+        system_at: request.system_at,
+        commit_id: request.commit_id,
+        activation: request.activation,
+        answerability_question: request.answerability_question,
+        evidence_source: request.evidence_source,
+        dependency_target: request.dependency_target,
+        dependency_kind: request.dependency_kind,
+        minimum_confidence: (request.minimum_confidence.value() > 0.0)
+            .then_some(request.minimum_confidence),
+        ..CellLookup::default()
     })
 }
 
