@@ -23,6 +23,15 @@ pub enum StewardError {
     /// Local model executable failed to produce a usable response.
     #[error("local model executable failed")]
     LocalModelExecutionFailed,
+    /// Frontier subscription fields must be non-empty.
+    #[error("frontier subscription must include signals and citation")]
+    EmptyFrontierSubscription,
+    /// Frontier subscription store I/O failed.
+    #[error("frontier subscription store I/O failed")]
+    FrontierSubscriptionStoreIo,
+    /// Frontier subscription store content could not be decoded.
+    #[error("frontier subscription store content is corrupt")]
+    FrontierSubscriptionStoreCorrupt,
     /// Proposal store I/O failed.
     #[error("proposal store I/O failed")]
     ProposalStoreIo,

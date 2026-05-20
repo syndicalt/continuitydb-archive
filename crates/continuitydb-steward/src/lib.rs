@@ -10,7 +10,11 @@ mod policy;
 mod proposal;
 
 pub use error::StewardError;
-pub use frontier::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
+pub use frontier::{
+    FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription, FrontierSubscriptionId,
+    FrontierSubscriptionStore, FrontierWatchEvent, FrontierWatchSignal,
+    MemoryFrontierSubscriptionStore,
+};
 pub use ledger::{
     FileProposalStore, MemoryProposalStore, ProposalAuditRecord, ProposalLedger,
     ProposalLedgerStore, StoredProposalLedger,
@@ -35,12 +39,16 @@ mod tests {
         StewardEvaluationFailure, StewardEvaluationSuite,
     };
     use super::{
+        FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
+        FrontierSubscriptionId, FrontierSubscriptionStore, FrontierWatchEvent, FrontierWatchSignal,
+        MemoryFrontierSubscriptionStore,
+    };
+    use super::{
         FileProposalStore, MemoryProposalStore, MockSteward, MockStewardInput, MockStewardRule,
         ProposalDecision, ProposalId, ProposalLedger, ProposalLedgerStore, ProposalOutcome,
         ProposalPolicy, StewardAction, StewardError, StewardIdentity, StewardProposal,
         StoredProposalLedger,
     };
-    use super::{FrontierSteward, FrontierWatchEvent, FrontierWatchSignal};
     #[cfg(feature = "local-model")]
     use super::{
         LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelRequest,
@@ -79,6 +87,10 @@ mod tests {
     }
 
     fn temp_proposal_store_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{name}-{:?}.jsonl", ProposalId::new()))
+    }
+
+    fn temp_frontier_subscription_store_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("{name}-{:?}.jsonl", ProposalId::new()))
     }
 
@@ -1023,6 +1035,156 @@ mod tests {
         }
 
         assert_eq!(ledger.records().len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn frontier_subscription_rejects_empty_inputs() {
+        let no_signals = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            StateCellId::new(),
+            Vec::new(),
+            "test://subscription",
+            created_at(),
+        );
+        let no_citation = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            StateCellId::new(),
+            vec![FrontierWatchSignal::StaleEvidence],
+            " ",
+            created_at(),
+        );
+
+        assert!(matches!(
+            no_signals,
+            Err(StewardError::EmptyFrontierSubscription)
+        ));
+        assert!(matches!(
+            no_citation,
+            Err(StewardError::EmptyFrontierSubscription)
+        ));
+    }
+
+    #[test]
+    fn frontier_subscription_matches_same_cell_and_signal() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let cell_id = StateCellId::new();
+        let subscription = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            cell_id,
+            vec![FrontierWatchSignal::StaleEvidence],
+            "test://subscription",
+            created_at(),
+        )?;
+
+        let matched = FrontierWatchEvent::new(
+            cell_id,
+            FrontierWatchSignal::StaleEvidence,
+            "test://stale",
+            created_at(),
+        );
+        let wrong_signal = FrontierWatchEvent::new(
+            cell_id,
+            FrontierWatchSignal::HighImpactUncertainty,
+            "test://uncertain",
+            created_at(),
+        );
+        let wrong_cell = FrontierWatchEvent::new(
+            StateCellId::new(),
+            FrontierWatchSignal::StaleEvidence,
+            "test://stale",
+            created_at(),
+        );
+
+        assert!(subscription.matches_event(&matched));
+        assert!(!subscription.matches_event(&wrong_signal));
+        assert!(!subscription.matches_event(&wrong_cell));
+        Ok(())
+    }
+
+    #[test]
+    fn memory_frontier_subscription_store_lists_and_gets_by_id(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let first = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            StateCellId::new(),
+            vec![FrontierWatchSignal::StaleEvidence],
+            "test://first",
+            created_at(),
+        )?;
+        let second = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            StateCellId::new(),
+            vec![FrontierWatchSignal::HighImpactUncertainty],
+            "test://second",
+            created_at(),
+        )?;
+        let mut store = MemoryFrontierSubscriptionStore::default();
+
+        store.append_subscription(first.clone())?;
+        store.append_subscription(second.clone())?;
+
+        let subscriptions = store.list_subscriptions()?;
+        assert_eq!(subscriptions.len(), 2);
+        assert_eq!(subscriptions[0].id(), first.id());
+        assert_eq!(subscriptions[1].id(), second.id());
+        assert_eq!(
+            store
+                .get_subscription(second.id())?
+                .map(|subscription| subscription.id()),
+            Some(second.id())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_frontier_subscription_store_persists_across_reopen(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_frontier_subscription_store_path("continuitydb-frontier-subscriptions");
+        let subscription = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            StateCellId::new(),
+            vec![
+                FrontierWatchSignal::StaleEvidence,
+                FrontierWatchSignal::HighImpactUncertainty,
+            ],
+            "test://subscription",
+            created_at(),
+        )?;
+
+        {
+            let mut store = FileFrontierSubscriptionStore::open(&path)?;
+            store.append_subscription(subscription.clone())?;
+        }
+
+        let reopened = FileFrontierSubscriptionStore::open(&path)?;
+        let subscriptions = reopened.list_subscriptions()?;
+        assert_eq!(subscriptions.len(), 1);
+        assert_eq!(subscriptions[0], subscription);
+        assert_eq!(
+            reopened
+                .get_subscription(subscription.id())?
+                .map(|stored| stored.id()),
+            Some(subscription.id())
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_frontier_subscription_store_rejects_invalid_jsonl(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_frontier_subscription_store_path("continuitydb-frontier-subscriptions-bad");
+        fs::write(&path, "{not valid json}\n")?;
+        let store = FileFrontierSubscriptionStore::open(&path)?;
+
+        let result = store.list_subscriptions();
+
+        assert!(matches!(
+            result,
+            Err(StewardError::FrontierSubscriptionStoreCorrupt)
+        ));
+        fs::remove_file(path)?;
         Ok(())
     }
 

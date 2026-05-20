@@ -60,7 +60,7 @@ Storage kernel
 4. Build a deterministic mock steward for test-first development. Implemented in `continuitydb-steward`.
 5. Add local model inference behind a feature flag. Implemented as a `local-model` backend boundary and local executable runner in `continuitydb-steward`; model-specific llama.cpp/mistral.rs benchmarking remains future work.
 6. Evaluate small open-source steward models against fixed proposal-quality tests. Implemented as a `local-model` evaluation harness with candidate metadata, deterministic pass/fail reasons, and an executable runner benchmark fixture; real model result baselines remain future work.
-7. Add frontier/watch integration so the Steward can propose refresh and verification work. Implemented as deterministic frontier watch events that emit `RequestVerification` and `MarkFrontier` proposals in `continuitydb-steward`; durable subscriptions remain future work.
+7. Add frontier/watch integration so the Steward can propose refresh and verification work. Implemented as deterministic frontier watch events that emit `RequestVerification` and `MarkFrontier` proposals, plus durable frontier subscription records with in-memory and JSONL file-backed stores in `continuitydb-steward`; richer subscription execution remains future work.
 
 ## Small Embeddable Model Track
 
