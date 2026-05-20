@@ -7,7 +7,7 @@ use continuitydb_core::{
     Citation, Confidence, Evidence, Scope, SemanticAnchor, StateCell, StateCellId, TrustSignal,
     UtilityFeedback, ValidTimeRange,
 };
-use continuitydb_kernel::{KernelError, StorageKernel};
+use continuitydb_kernel::{FileKernelLookupPlan, KernelError, StorageKernel};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -164,6 +164,53 @@ impl From<CheckoutMeasurement> for CheckoutMeasurementSnapshot {
     }
 }
 
+/// Serializable file-kernel lookup-plan detail for one indexed constraint.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadIndexedConstraintPlanSnapshot {
+    /// Stable indexed lookup constraint name.
+    pub name: String,
+    /// Number of StateCell candidates selected by this single index before intersection.
+    pub candidate_count: usize,
+}
+
+/// Serializable file-kernel lookup-plan snapshot for workload artifacts.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadLookupPlanSnapshot {
+    /// Number of indexed lookup constraints present in the request.
+    pub indexed_constraint_count: usize,
+    /// Ordered names of indexed lookup constraints present in the request.
+    pub indexed_constraints: Vec<String>,
+    /// Ordered per-constraint indexed candidate details.
+    pub indexed_constraint_plans: Vec<WorkloadIndexedConstraintPlanSnapshot>,
+    /// Number of StateCell candidates selected before exact predicate filtering.
+    pub candidate_count: usize,
+    /// Whether lookup must inspect all visible StateCells.
+    pub full_scan: bool,
+}
+
+impl From<FileKernelLookupPlan> for WorkloadLookupPlanSnapshot {
+    fn from(plan: FileKernelLookupPlan) -> Self {
+        Self {
+            indexed_constraint_count: plan.indexed_constraint_count,
+            indexed_constraints: plan
+                .indexed_constraints
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            indexed_constraint_plans: plan
+                .indexed_constraint_plans
+                .into_iter()
+                .map(|constraint| WorkloadIndexedConstraintPlanSnapshot {
+                    name: constraint.name.to_string(),
+                    candidate_count: constraint.candidate_count,
+                })
+                .collect(),
+            candidate_count: plan.candidate_count,
+            full_scan: plan.full_scan,
+        }
+    }
+}
+
 /// Serializable workload measurement snapshot for durable baseline records.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WorkloadMeasurementSnapshot {
@@ -175,6 +222,9 @@ pub struct WorkloadMeasurementSnapshot {
     pub checkout_operation: MeasuredOperationSnapshot,
     /// Checkout result counts.
     pub checkout: CheckoutMeasurementSnapshot,
+    /// Optional file-kernel lookup-plan diagnostics for the measured checkout request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookup_plan: Option<WorkloadLookupPlanSnapshot>,
 }
 
 impl WorkloadMeasurementSnapshot {
@@ -185,7 +235,18 @@ impl WorkloadMeasurementSnapshot {
             ingest: measurement.ingest.into(),
             checkout_operation: measurement.checkout_operation.into(),
             checkout: measurement.checkout.into(),
+            lookup_plan: None,
         }
+    }
+
+    /// Converts an in-memory measurement plus optional file lookup plan into a serializable snapshot.
+    pub fn from_measurement_with_lookup_plan(
+        measurement: &WorkloadMeasurement,
+        lookup_plan: Option<FileKernelLookupPlan>,
+    ) -> Self {
+        let mut snapshot = Self::from_measurement(measurement);
+        snapshot.lookup_plan = lookup_plan.map(Into::into);
+        snapshot
     }
 }
 
@@ -1028,6 +1089,43 @@ mod tests {
     }
 
     #[test]
+    fn workload_snapshot_preserves_file_lookup_plan() -> Result<(), Box<dyn std::error::Error>> {
+        let measurement = sample_measurement()?;
+        let snapshot = WorkloadMeasurementSnapshot::from_measurement_with_lookup_plan(
+            &measurement,
+            Some(continuitydb_kernel::FileKernelLookupPlan {
+                indexed_constraint_count: 2,
+                indexed_constraints: vec!["scope", "minimum_confidence"],
+                indexed_constraint_plans: vec![
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "scope",
+                        candidate_count: 8,
+                    },
+                    continuitydb_kernel::FileKernelIndexedConstraintPlan {
+                        name: "minimum_confidence",
+                        candidate_count: 8,
+                    },
+                ],
+                candidate_count: 8,
+                full_scan: false,
+            }),
+        );
+        let lookup_plan = snapshot
+            .lookup_plan
+            .ok_or_else(|| std::io::Error::other("lookup plan was not captured"))?;
+
+        assert_eq!(lookup_plan.indexed_constraint_count, 2);
+        assert_eq!(
+            lookup_plan.indexed_constraints,
+            vec!["scope", "minimum_confidence"]
+        );
+        assert_eq!(lookup_plan.indexed_constraint_plans[0].candidate_count, 8);
+        assert_eq!(lookup_plan.candidate_count, 8);
+        assert!(!lookup_plan.full_scan);
+        Ok(())
+    }
+
+    #[test]
     fn workload_baseline_store_appends_and_lists_in_order() -> Result<(), Box<dyn std::error::Error>>
     {
         let path = temp_baseline_path("continuitydb-workload-baseline-order");
@@ -1293,6 +1391,7 @@ mod tests {
                 frontier_count: 0,
                 selected_token_count: 370,
             },
+            lookup_plan: None,
         }
     }
 

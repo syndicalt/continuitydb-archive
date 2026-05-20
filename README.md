@@ -14,6 +14,7 @@ The first milestone builds:
 - CLI workload measurement for memory and file-backed kernels.
 - CLI file workload lookup-plan diagnostics.
 - JSONL workload measurement baseline recording.
+- Durable file workload lookup-plan baseline snapshots.
 - CLI workload measurement baseline recording.
 - Deterministic workload baseline regression comparison.
 - CLI workload baseline regression comparison and failure gating.

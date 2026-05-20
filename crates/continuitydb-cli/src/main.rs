@@ -1629,7 +1629,10 @@ fn measure_workload_json(
         }
     };
 
-    let snapshot = WorkloadMeasurementSnapshot::from_measurement(&measurement);
+    let snapshot = WorkloadMeasurementSnapshot::from_measurement_with_lookup_plan(
+        &measurement,
+        lookup_plan.clone(),
+    );
     let comparison = workload_baseline_comparison(
         options.baseline_path,
         options.label,
@@ -1652,7 +1655,7 @@ fn measure_workload_json(
             path,
             options.label,
             workload_kernel_name(options.kernel),
-            &measurement,
+            &snapshot,
         )?;
     }
 
@@ -1744,15 +1747,10 @@ fn record_workload_baseline(
     path: &PathBuf,
     label: &str,
     kernel: &str,
-    measurement: &WorkloadMeasurement,
+    snapshot: &WorkloadMeasurementSnapshot,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let recorded_at = Utc::now();
-    let record = WorkloadBaselineRecord::new(
-        recorded_at,
-        label,
-        kernel,
-        WorkloadMeasurementSnapshot::from_measurement(measurement),
-    );
+    let record = WorkloadBaselineRecord::new(recorded_at, label, kernel, snapshot.clone());
     FileWorkloadBaselineStore::new(path).append(&record)?;
     Ok(())
 }

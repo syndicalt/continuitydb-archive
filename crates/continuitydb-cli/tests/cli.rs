@@ -2882,6 +2882,14 @@ fn cli_measure_workload_records_baseline_for_file_kernel() -> Result<(), Box<dyn
         records[0]["snapshot"]["ingest"]["operation_count"].as_u64(),
         Some(8)
     );
+    assert_eq!(
+        records[0]["snapshot"]["lookup_plan"]["indexed_constraints"],
+        serde_json::json!(["scope", "minimum_confidence"])
+    );
+    assert_eq!(
+        records[0]["snapshot"]["lookup_plan"]["candidate_count"].as_u64(),
+        Some(8)
+    );
 
     fs::remove_file(store_path)?;
     fs::remove_file(baseline_path)?;
