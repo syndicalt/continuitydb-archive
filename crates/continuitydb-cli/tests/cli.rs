@@ -3329,6 +3329,33 @@ fn cli_inspect_kernel_reports_file_capabilities() -> Result<(), Box<dyn std::err
 }
 
 #[test]
+fn cli_inspect_kernel_reports_lookup_plan() -> Result<(), Box<dyn std::error::Error>> {
+    let path = temp_store_path("continuitydb-cli-inspect-lookup-plan");
+    write_revision_link_store(&path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("inspect-kernel")
+        .arg(&path)
+        .arg("--lookup-plan")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(
+        json["lookup_plan"]["indexed_constraint_count"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(json["lookup_plan"]["candidate_count"].as_u64(), Some(2));
+    assert_eq!(json["lookup_plan"]["full_scan"].as_bool(), Some(true));
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn cli_inspect_kernel_reports_legacy_health() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_store_path("continuitydb-cli-inspect-legacy-health");
     write_legacy_store(&path)?;

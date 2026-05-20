@@ -11,7 +11,8 @@ use continuitydb_core::{
     Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
 };
 use continuitydb_kernel::{
-    CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements, StorageKernel,
+    CellLookup, CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements,
+    StorageKernel,
 };
 use continuitydb_memory::MemoryKernel;
 #[cfg(feature = "local-model")]
@@ -226,6 +227,9 @@ enum Command {
         /// Require the store to already be in canonical durable file format.
         #[arg(long = "require-canonical")]
         require_canonical: bool,
+        /// Include the default file lookup candidate plan.
+        #[arg(long = "lookup-plan")]
+        lookup_plan: bool,
     },
     /// Export all file-backed commit slices to a versioned JSON backup envelope.
     ExportCommits {
@@ -402,6 +406,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             store_path,
             require,
             require_canonical,
+            lookup_plan,
         }) => {
             let db = if let Some(profile) = require {
                 open_file_database_with_profile(&store_path, profile)?
@@ -414,6 +419,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let capabilities = db.kernel_capabilities();
             let status = file_status_json(&db)?;
             let health = file_health_json(&db);
+            let lookup_plan =
+                lookup_plan.then(|| file_lookup_plan_json(&db, &CellLookup::default()));
             let required = require.map(profile_name);
             let satisfies = require
                 .map(|profile| db.kernel_satisfies(requirements_for_profile(profile)))
@@ -423,6 +430,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "capabilities": capabilities_json(capabilities),
                 "status": status,
                 "health": health,
+                "lookup_plan": lookup_plan,
                 "required": required,
                 "satisfies": satisfies,
             });
@@ -1764,6 +1772,18 @@ fn file_health_value(health: continuitydb_kernel::FileKernelHealth) -> serde_jso
         "checksum_free_records": health.checksum_free_records,
         "canonical_records": health.canonical_records,
         "compaction_recommended": health.compaction_recommended,
+    })
+}
+
+fn file_lookup_plan_json(
+    db: &ContinuityDb<continuitydb_kernel::FileKernel>,
+    lookup: &CellLookup,
+) -> serde_json::Value {
+    let plan = db.file_lookup_plan(lookup);
+    serde_json::json!({
+        "indexed_constraint_count": plan.indexed_constraint_count,
+        "candidate_count": plan.candidate_count,
+        "full_scan": plan.full_scan,
     })
 }
 
