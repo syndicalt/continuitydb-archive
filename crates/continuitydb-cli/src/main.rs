@@ -1382,6 +1382,7 @@ fn local_model_benchmark_json(
         "failed_cases": summary.failed_cases(),
         "total_cases": summary.total_cases(),
         "pass_rate": summary.pass_rate(),
+        "failure_counts": baseline.evaluation().failure_counts(),
         "evaluation": baseline.evaluation(),
         "response_schema_version": baseline.response_schema_version(),
         "evaluation_suite_fingerprint": baseline.evaluation_suite_fingerprint(),

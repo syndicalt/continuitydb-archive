@@ -1037,6 +1037,44 @@ mod tests {
 
     #[cfg(feature = "local-model")]
     #[test]
+    fn steward_evaluation_report_counts_failures_by_stable_code(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "This was verified in production by an operator.",
+                "citations": ["test://other-evidence"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let suite = StewardEvaluationSuite::new(vec![
+            StewardEvaluationCase::new("first", created_at(), "find uncertainty")
+                .with_evidence("test://frontier-one", "The cell has stale evidence.")
+                .expect_action(StewardAction::MarkFrontier { cell_id })
+                .require_citation("test://frontier-one")
+                .forbid_rationale_term("verified in production"),
+            StewardEvaluationCase::new("second", created_at(), "find uncertainty again")
+                .with_evidence("test://frontier-two", "The cell still has stale evidence.")
+                .expect_action(StewardAction::MarkFrontier { cell_id })
+                .require_citation("test://frontier-two"),
+        ]);
+
+        let report = suite.evaluate(&steward);
+        let counts = report.failure_counts();
+
+        assert_eq!(counts.get("missing_citation"), Some(&2));
+        assert_eq!(counts.get("unsupported_rationale_term"), Some(&1));
+        assert_eq!(counts.len(), 2);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
     fn steward_evaluation_reports_policy_rejection() -> Result<(), Box<dyn std::error::Error>> {
         let cell_id = StateCellId::new();
         let response = serde_json::json!({

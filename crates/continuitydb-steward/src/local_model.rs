@@ -5,6 +5,7 @@ use continuitydb_core::{SemanticAnchor, StateCellId};
 use continuitydb_revision::RevisionLinkKind;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     ffi::OsStr,
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Write},
@@ -849,6 +850,19 @@ impl StewardEvaluationReport {
     pub fn summary(&self) -> StewardEvaluationSummary {
         StewardEvaluationSummary::from_report(self)
     }
+
+    /// Returns deterministic counts keyed by stable failure code.
+    pub fn failure_counts(&self) -> BTreeMap<&'static str, usize> {
+        let mut counts = BTreeMap::new();
+        for failure in self
+            .case_reports()
+            .iter()
+            .flat_map(StewardEvaluationCaseReport::failures)
+        {
+            *counts.entry(failure.code()).or_insert(0) += 1;
+        }
+        counts
+    }
 }
 
 /// Deterministic aggregate metrics for a local Steward model evaluation report.
@@ -973,6 +987,22 @@ pub enum StewardEvaluationFailure {
         /// Forbidden term found in rationale text.
         term: String,
     },
+}
+
+impl StewardEvaluationFailure {
+    /// Returns the stable snake-case diagnostic code for this failure.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ModelError => "model_error",
+            Self::ModelExecutionFailed => "model_execution_failed",
+            Self::InvalidModelResponse => "invalid_model_response",
+            Self::MissingExpectedAction { .. } => "missing_expected_action",
+            Self::MissingCitation { .. } => "missing_citation",
+            Self::MissingRationaleTerm { .. } => "missing_rationale_term",
+            Self::PolicyRejected { .. } => "policy_rejected",
+            Self::UnsupportedRationaleTerm { .. } => "unsupported_rationale_term",
+        }
+    }
 }
 
 /// Small embeddable open-source model candidate metadata.

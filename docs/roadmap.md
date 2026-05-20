@@ -285,6 +285,7 @@ Storage kernel
 73. Add CLI local-model instability failure report artifacts. Extended `benchmark-local-model --stability-trials --fail-on-unstable --failure-report-path` so unstable repeated-output checks can write structured benchmark JSON without requiring a full artifact bundle or recording a baseline.
 74. Add typed local-model evaluation failure diagnostics. Split generic model errors into execution-failure and invalid-response failure reasons so benchmark reports distinguish runtime failures from undecodable model output while preserving deterministic evaluation artifacts.
 75. Add stable local-model evaluation failure code serialization. Updated durable Steward evaluation failure JSON to emit snake-case failure codes while accepting legacy Rust variant names from existing benchmark artifacts and baselines.
+76. Add local-model evaluation failure count summaries. Added deterministic aggregate counts keyed by stable failure code to public Steward evaluation reports and CLI benchmark JSON so CI can classify failed local model runs without scanning every case report.
 
 ## Small Embeddable Model Track
 

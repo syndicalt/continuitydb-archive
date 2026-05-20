@@ -1032,6 +1032,14 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
     assert!(report["evaluation"]["case_reports"][1]["failures"]
         .as_array()
         .is_some_and(|failures| !failures.is_empty()));
+    assert_eq!(
+        report["failure_counts"]["missing_expected_action"].as_u64(),
+        Some(8)
+    );
+    assert_eq!(
+        report["failure_counts"]["missing_citation"].as_u64(),
+        Some(9)
+    );
 
     fs::remove_file(executable_path)?;
     fs::remove_file(report_path)?;
