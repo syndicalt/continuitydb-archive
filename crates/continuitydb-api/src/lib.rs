@@ -20,8 +20,9 @@ use continuitydb_revision::{
 };
 #[cfg(feature = "steward")]
 use continuitydb_steward::{
-    BorrowedKernelProposalStore, ConflictResolutionSteward, ProposalAuditRecord, ProposalId,
-    ProposalPolicy, StewardError, StewardProposal, StoredProposalLedger,
+    BorrowedKernelProposalStore, ConflictResolutionSteward, FrontierSubscriptionRunner,
+    FrontierSubscriptionStore, FrontierWatchEvent, ProposalAuditRecord, ProposalId, ProposalPolicy,
+    StewardError, StewardProposal, StoredProposalLedger,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::Path};
@@ -127,6 +128,15 @@ pub struct StewardConflictAudit {
     /// Deterministic conflict-resolution scan for the requested cells.
     pub scan: ConflictResolutionScan,
     /// Steward proposals emitted from the scan.
+    pub proposals: Vec<StewardProposal>,
+    /// Policy-evaluated proposal audit records appended to the backing kernel.
+    pub records: Vec<ProposalAuditRecord>,
+}
+
+/// Result of subscribed frontier/watch stewardship recorded through the native API.
+#[cfg(feature = "steward")]
+pub struct StewardFrontierAudit {
+    /// Steward proposals emitted from subscribed frontier watch events.
     pub proposals: Vec<StewardProposal>,
     /// Policy-evaluated proposal audit records appended to the backing kernel.
     pub records: Vec<ProposalAuditRecord>,
@@ -512,6 +522,33 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(ledger.record_by_id(proposal_id)?)
     }
 
+    /// Runs subscribed frontier/watch stewardship and records proposal audit StateCells.
+    #[cfg(feature = "steward")]
+    pub fn audit_frontier_watch_with_steward<S>(
+        &mut self,
+        runner: &FrontierSubscriptionRunner<S>,
+        events: Vec<FrontierWatchEvent>,
+        policy: &ProposalPolicy,
+        decided_at: DateTime<Utc>,
+    ) -> Result<StewardFrontierAudit, ContinuityError>
+    where
+        S: FrontierSubscriptionStore,
+    {
+        let proposals = runner.propose_subscribed(events, decided_at)?;
+        let mut records = Vec::with_capacity(proposals.len());
+        let store = BorrowedKernelProposalStore::new(&mut self.kernel);
+        let mut ledger = StoredProposalLedger::new(store);
+
+        for proposal in proposals.iter().cloned() {
+            let decision = policy.evaluate(&proposal, decided_at);
+            let record = ProposalAuditRecord::new(proposal.clone(), decision.clone())?;
+            ledger.record(proposal, decision)?;
+            records.push(record);
+        }
+
+        Ok(StewardFrontierAudit { proposals, records })
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -852,8 +889,10 @@ mod tests {
     use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "steward")]
     use continuitydb_steward::{
-        ConflictResolutionSteward, ProposalId, ProposalOutcome, ProposalPolicy, StewardAction,
-        StewardIdentity, StewardProposal,
+        ConflictResolutionSteward, FrontierSteward, FrontierSubscription, FrontierSubscriptionId,
+        FrontierSubscriptionRunner, FrontierSubscriptionStore, FrontierWatchEvent,
+        FrontierWatchSignal, MemoryFrontierSubscriptionStore, ProposalId, ProposalOutcome,
+        ProposalPolicy, StewardAction, StewardIdentity, StewardProposal,
     };
     use std::{fs, path::Path};
 
@@ -941,6 +980,29 @@ mod tests {
             "0.1.0",
             "deterministic-policy",
         )?))
+    }
+
+    #[cfg(feature = "steward")]
+    fn test_frontier_runner(
+        cell_id: StateCellId,
+        signal: FrontierWatchSignal,
+    ) -> Result<
+        FrontierSubscriptionRunner<MemoryFrontierSubscriptionStore>,
+        Box<dyn std::error::Error>,
+    > {
+        let subscription = FrontierSubscription::new(
+            FrontierSubscriptionId::new(),
+            cell_id,
+            vec![signal],
+            "test://frontier-subscription",
+            test_steward_time()?,
+        )?;
+        let mut store = MemoryFrontierSubscriptionStore::default();
+        store.append_subscription(subscription)?;
+        Ok(FrontierSubscriptionRunner::new(
+            FrontierSteward::new(test_steward_identity()?),
+            store,
+        ))
     }
 
     #[cfg(feature = "steward")]
@@ -3316,6 +3378,120 @@ WHERE scope = project("continuitydb")
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
         assert!(db.steward_proposal_records()?.is_empty());
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_audits_subscribed_frontier_watch_with_steward() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell_id = StateCellId::new();
+        let runner = test_frontier_runner(cell_id, FrontierWatchSignal::StaleEvidence)?;
+        let event = FrontierWatchEvent::new(
+            cell_id,
+            FrontierWatchSignal::StaleEvidence,
+            "test://frontier-stale",
+            test_steward_time()?,
+        );
+
+        let audit = db.audit_frontier_watch_with_steward(
+            &runner,
+            vec![event],
+            &ProposalPolicy::strict(),
+            test_steward_time()?,
+        )?;
+
+        assert_eq!(audit.proposals.len(), 1);
+        assert_eq!(audit.records.len(), 1);
+        assert_eq!(audit.records[0].proposal().id(), audit.proposals[0].id());
+        assert_eq!(
+            audit.records[0].decision().outcome(),
+            ProposalOutcome::Accepted
+        );
+        assert_eq!(
+            audit.proposals[0].action(),
+            &StewardAction::RequestVerification {
+                cell_id: Some(cell_id),
+                request: "Refresh stale evidence for frontier cell.".to_string(),
+            }
+        );
+        assert_eq!(db.steward_proposal_records()?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_frontier_watch_audit_ignores_unsubscribed_and_benign_events(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell_id = StateCellId::new();
+        let runner = test_frontier_runner(cell_id, FrontierWatchSignal::StaleEvidence)?;
+        let events = vec![
+            FrontierWatchEvent::new(
+                StateCellId::new(),
+                FrontierWatchSignal::StaleEvidence,
+                "test://frontier-other-cell",
+                test_steward_time()?,
+            ),
+            FrontierWatchEvent::new(
+                cell_id,
+                FrontierWatchSignal::Benign,
+                "test://frontier-benign",
+                test_steward_time()?,
+            ),
+        ];
+
+        let audit = db.audit_frontier_watch_with_steward(
+            &runner,
+            events,
+            &ProposalPolicy::strict(),
+            test_steward_time()?,
+        )?;
+
+        assert!(audit.proposals.is_empty());
+        assert!(audit.records.is_empty());
+        assert!(db.steward_proposal_records()?.is_empty());
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_frontier_watch_audit_deduplicates_multiple_matching_subscriptions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell_id = StateCellId::new();
+        let mut store = MemoryFrontierSubscriptionStore::default();
+        for citation in [
+            "test://frontier-subscription-1",
+            "test://frontier-subscription-2",
+        ] {
+            store.append_subscription(FrontierSubscription::new(
+                FrontierSubscriptionId::new(),
+                cell_id,
+                vec![FrontierWatchSignal::HighImpactUncertainty],
+                citation,
+                test_steward_time()?,
+            )?)?;
+        }
+        let runner =
+            FrontierSubscriptionRunner::new(FrontierSteward::new(test_steward_identity()?), store);
+
+        let audit = db.audit_frontier_watch_with_steward(
+            &runner,
+            vec![FrontierWatchEvent::new(
+                cell_id,
+                FrontierWatchSignal::HighImpactUncertainty,
+                "test://frontier-uncertain",
+                test_steward_time()?,
+            )],
+            &ProposalPolicy::strict(),
+            test_steward_time()?,
+        )?;
+
+        assert_eq!(audit.proposals.len(), 1);
+        assert_eq!(audit.records.len(), 1);
+        assert_eq!(db.steward_proposal_records()?.len(), 1);
         Ok(())
     }
 }

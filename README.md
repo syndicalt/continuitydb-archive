@@ -38,6 +38,7 @@ The first milestone builds:
 - StorageKernel-backed proposal audit store adapter.
 - Native feature-gated Steward proposal audit API.
 - Native feature-gated Steward conflict-resolution audit API.
+- Native feature-gated Steward frontier/watch audit API.
 - Deterministic mock Steward for test-first development.
 - Feature-gated local model Steward boundary.
 - Local executable Steward model runner.

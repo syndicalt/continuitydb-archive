@@ -19,8 +19,8 @@
 
 ## Task 1: RED Tests
 
-- [ ] Add feature-gated test imports in `crates/continuitydb-api/src/lib.rs` for `FrontierSteward`, `FrontierSubscription`, `FrontierSubscriptionId`, `FrontierSubscriptionRunner`, `FrontierWatchEvent`, `FrontierWatchSignal`, and `MemoryFrontierSubscriptionStore`.
-- [ ] Add helper `test_frontier_runner(cell_id: StateCellId, signal: FrontierWatchSignal) -> Result<FrontierSubscriptionRunner<MemoryFrontierSubscriptionStore>, Box<dyn std::error::Error>>`:
+- [x] Add feature-gated test imports in `crates/continuitydb-api/src/lib.rs` for `FrontierSteward`, `FrontierSubscription`, `FrontierSubscriptionId`, `FrontierSubscriptionRunner`, `FrontierWatchEvent`, `FrontierWatchSignal`, and `MemoryFrontierSubscriptionStore`.
+- [x] Add helper `test_frontier_runner(cell_id: StateCellId, signal: FrontierWatchSignal) -> Result<FrontierSubscriptionRunner<MemoryFrontierSubscriptionStore>, Box<dyn std::error::Error>>`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -45,7 +45,7 @@ fn test_frontier_runner(
 }
 ```
 
-- [ ] Add test `api_audits_subscribed_frontier_watch_with_steward`:
+- [x] Add test `api_audits_subscribed_frontier_watch_with_steward`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -85,7 +85,7 @@ fn api_audits_subscribed_frontier_watch_with_steward(
 }
 ```
 
-- [ ] Add test `api_frontier_watch_audit_ignores_unsubscribed_and_benign_events`:
+- [x] Add test `api_frontier_watch_audit_ignores_unsubscribed_and_benign_events`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -124,7 +124,7 @@ fn api_frontier_watch_audit_ignores_unsubscribed_and_benign_events(
 }
 ```
 
-- [ ] Add test `api_frontier_watch_audit_deduplicates_multiple_matching_subscriptions`:
+- [x] Add test `api_frontier_watch_audit_deduplicates_multiple_matching_subscriptions`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -167,12 +167,12 @@ fn api_frontier_watch_audit_deduplicates_multiple_matching_subscriptions(
 }
 ```
 
-- [ ] Run `cargo test -p continuitydb-api frontier_watch --features steward`.
-- [ ] Expected: FAIL because `StewardFrontierAudit` and `ContinuityDb::audit_frontier_watch_with_steward` do not exist.
+- [x] Run `cargo test -p continuitydb-api frontier_watch --features steward`.
+- [x] Expected: FAIL because `StewardFrontierAudit` and `ContinuityDb::audit_frontier_watch_with_steward` do not exist.
 
 ## Task 2: Implementation
 
-- [ ] Add production imports behind `#[cfg(feature = "steward")]`:
+- [x] Add production imports behind `#[cfg(feature = "steward")]`:
 
 ```rust
 use continuitydb_steward::{
@@ -182,7 +182,7 @@ use continuitydb_steward::{
 };
 ```
 
-- [ ] Add the result type after `StewardConflictAudit`:
+- [x] Add the result type after `StewardConflictAudit`:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -192,7 +192,7 @@ pub struct StewardFrontierAudit {
 }
 ```
 
-- [ ] Add method in `impl<K: StorageKernel> ContinuityDb<K>` near the Steward audit APIs:
+- [x] Add method in `impl<K: StorageKernel> ContinuityDb<K>` near the Steward audit APIs:
 
 ```rust
 #[cfg(feature = "steward")]
@@ -222,15 +222,15 @@ where
 }
 ```
 
-- [ ] Run `cargo test -p continuitydb-api frontier_watch --features steward`.
-- [ ] Run `cargo test -p continuitydb-api --features steward`.
+- [x] Run `cargo test -p continuitydb-api frontier_watch --features steward`.
+- [x] Run `cargo test -p continuitydb-api --features steward`.
 
 ## Task 3: Docs, Gate, Commit
 
-- [ ] Add README current scope bullet: `Native feature-gated Steward frontier/watch audit API.`
-- [ ] Add Native API roadmap item after current #27: implemented `audit_frontier_watch_with_steward`.
-- [ ] Add Steward roadmap item after current #13: native API frontier/watch stewardship can emit and audit subscribed proposals.
-- [ ] Run:
+- [x] Add README current scope bullet: `Native feature-gated Steward frontier/watch audit API.`
+- [x] Add Native API roadmap item after current #27: implemented `audit_frontier_watch_with_steward`.
+- [x] Add Steward roadmap item after current #13: native API frontier/watch stewardship can emit and audit subscribed proposals.
+- [x] Run:
 
 ```bash
 cargo fmt --all -- --check

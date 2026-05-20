@@ -173,6 +173,7 @@ Storage kernel
 25. Add native direct commit copy. Implemented `copy_commits_from` so embedders can replay cursor-selected commit pages between open databases without JSON file envelopes.
 26. Add native Steward proposal audit operations. Implemented optional `steward` feature methods on `ContinuityDb<K>` for policy-evaluated proposal audit recording, listing, and lookup through the backing `StorageKernel`.
 27. Add native Steward conflict-resolution audit operations. Implemented optional `steward` feature method `audit_conflict_resolutions_with_steward` so embedders can analyze stored conflicts, emit deterministic Steward proposals, and record policy-evaluated proposal audits through the backing `StorageKernel`.
+28. Add native Steward frontier/watch audit operations. Implemented optional `steward` feature method `audit_frontier_watch_with_steward` so embedders can run subscribed frontier watch events, emit deterministic Steward proposals, and record policy-evaluated proposal audits through the backing `StorageKernel`.
 
 ## Steward Milestones
 
@@ -189,6 +190,7 @@ Storage kernel
 11. Add kernel-backed conflict-resolution audit. Implemented `ConflictResolutionSteward::propose_and_record_to_kernel` so deterministic conflict-resolution proposal audits can be persisted as StateCells through any `StorageKernel`.
 12. Add borrowed kernel proposal audit adapter. Implemented `BorrowedKernelProposalStore` so embedders can record Steward proposal audits through an existing `ContinuityDb`-owned kernel without moving ownership.
 13. Add native API conflict-resolution stewardship. Implemented `ContinuityDb::audit_conflict_resolutions_with_steward` so stored conflict sets can become audited Steward proposal decisions without leaving the embeddable database API.
+14. Add native API frontier/watch stewardship. Implemented `ContinuityDb::audit_frontier_watch_with_steward` so subscribed frontier watch events can become audited Steward proposal decisions without leaving the embeddable database API.
 
 ## Small Embeddable Model Track
 
