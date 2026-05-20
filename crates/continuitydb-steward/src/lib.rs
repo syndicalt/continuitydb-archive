@@ -29,11 +29,11 @@ pub use local_model::{
     FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
-    LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest, LocalModelSteward,
-    LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile,
-    SmallModelCandidate, StewardEvaluationCase, StewardEvaluationCaseReport,
-    StewardEvaluationFailure, StewardEvaluationReport, StewardEvaluationSuite,
-    LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
+    LocalModelRuntimeManifest, LocalModelSteward, LocalModelStewardInput,
+    MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
+    StewardEvaluationCase, StewardEvaluationCaseReport, StewardEvaluationFailure,
+    StewardEvaluationReport, StewardEvaluationSuite, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -1120,6 +1120,78 @@ mod tests {
             .command_arguments()
             .iter()
             .any(|argument| argument == "--json-output"));
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_report_preserves_runtime_manifest(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("llama-cli")
+                .with_model_path("/models/qwen.gguf")
+                .with_argument("--temp")
+                .with_argument("0"),
+        );
+        let benchmark = LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            runner,
+            StewardEvaluationSuite::new(Vec::new()),
+        );
+
+        let report = benchmark.run(steward()?);
+
+        assert_eq!(report.runtime().executable(), "llama-cli");
+        assert_eq!(
+            report.runtime().arguments(),
+            &[
+                "--model".to_string(),
+                "/models/qwen.gguf".to_string(),
+                "--temp".to_string(),
+                "0".to_string(),
+            ]
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_baseline_preserves_runtime_manifest(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let runner = LocalExecutableRunner::new(
+            LocalExecutableRunnerConfig::new("mistralrs-cli")
+                .with_model_path("/models/qwen.gguf")
+                .with_argument("--json-output"),
+        );
+        let benchmark = LocalModelBenchmark::new(
+            small_model_candidates()[0],
+            runner,
+            StewardEvaluationSuite::new(Vec::new()),
+        );
+        let report = benchmark.run(steward()?);
+        let expected_runtime = report.runtime().clone();
+
+        let baseline = LocalModelBenchmarkBaseline::from_report(report, created_at());
+
+        assert_eq!(baseline.runtime(), &expected_runtime);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_benchmark_baseline_decodes_legacy_json_without_runtime_manifest(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let encoded = serde_json::json!({
+            "candidate_model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "candidate_role": "default-feasibility",
+            "evaluation": { "case_reports": [] },
+            "recorded_at": created_at(),
+        });
+
+        let baseline: LocalModelBenchmarkBaseline = serde_json::from_value(encoded)?;
+
+        assert_eq!(baseline.runtime().executable(), "");
+        assert!(baseline.runtime().arguments().is_empty());
+        Ok(())
     }
 
     #[cfg(feature = "local-model")]

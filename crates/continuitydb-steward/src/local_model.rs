@@ -729,6 +729,32 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
     ]
 }
 
+/// Reproducible local model executable invocation metadata.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LocalModelRuntimeManifest {
+    executable: String,
+    arguments: Vec<String>,
+}
+
+impl LocalModelRuntimeManifest {
+    fn from_runner_config(config: &LocalExecutableRunnerConfig) -> Self {
+        Self {
+            executable: config.executable().to_string_lossy().to_string(),
+            arguments: config.command_arguments(),
+        }
+    }
+
+    /// Returns the executable path used for the local model run.
+    pub fn executable(&self) -> &str {
+        &self.executable
+    }
+
+    /// Returns the deterministic executable arguments used for the local model run.
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+}
+
 /// Executable local model benchmark fixture for a fixed Steward evaluation suite.
 #[derive(Clone, Debug)]
 pub struct LocalModelBenchmark {
@@ -766,6 +792,7 @@ impl LocalModelBenchmark {
         let steward = LocalModelSteward::new(identity, self.runner.clone());
         LocalModelBenchmarkReport {
             candidate: self.candidate,
+            runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
             evaluation: self.suite.evaluate(&steward),
         }
     }
@@ -775,6 +802,7 @@ impl LocalModelBenchmark {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalModelBenchmarkReport {
     candidate: SmallModelCandidate,
+    runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
 }
 
@@ -782,6 +810,11 @@ impl LocalModelBenchmarkReport {
     /// Returns the evaluated model candidate metadata.
     pub fn candidate(&self) -> SmallModelCandidate {
         self.candidate
+    }
+
+    /// Returns the runtime manifest for the evaluated local model invocation.
+    pub fn runtime(&self) -> &LocalModelRuntimeManifest {
+        &self.runtime
     }
 
     /// Returns the proposal-quality evaluation report.
@@ -800,6 +833,8 @@ impl LocalModelBenchmarkReport {
 pub struct LocalModelBenchmarkBaseline {
     candidate_model_id: String,
     candidate_role: String,
+    #[serde(default)]
+    runtime: LocalModelRuntimeManifest,
     evaluation: StewardEvaluationReport,
     recorded_at: DateTime<Utc>,
 }
@@ -810,6 +845,7 @@ impl LocalModelBenchmarkBaseline {
         Self {
             candidate_model_id: report.candidate.model_id().to_string(),
             candidate_role: report.candidate.role().to_string(),
+            runtime: report.runtime,
             evaluation: report.evaluation,
             recorded_at,
         }
@@ -823,6 +859,11 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the evaluated model role.
     pub fn candidate_role(&self) -> &str {
         &self.candidate_role
+    }
+
+    /// Returns the runtime manifest that produced this baseline.
+    pub fn runtime(&self) -> &LocalModelRuntimeManifest {
+        &self.runtime
     }
 
     /// Returns the recorded evaluation report.

@@ -233,6 +233,7 @@ Storage kernel
 21. Add unified accepted proposal application. Implemented deterministic dispatch from a policy-evaluated proposal audit record to the correct action-specific application path so embedders no longer need to duplicate Steward action matching.
 22. Add native conflict-resolution application workflow. Implemented a composed native API path that records conflict-resolution proposal audits and applies accepted `LinkRevision` proposals as native revision-link records through the typed dispatcher.
 23. Add native frontier/watch application workflow. Implemented a composed native API path that records subscribed frontier/watch proposal audits and applies accepted `RequestVerification` and `MarkFrontier` proposals through the typed dispatcher.
+24. Add local model runtime manifests. Implemented `LocalModelRuntimeManifest` so benchmark reports and durable baselines preserve the executable path and deterministic arguments used for a local model evaluation, while legacy baseline JSON remains readable.
 
 ## Small Embeddable Model Track
 

@@ -69,6 +69,7 @@ The first milestone builds:
 - Fixed Steward proposal-quality evaluation harness.
 - Executable local model benchmark fixture.
 - Durable local model benchmark baseline store.
+- Reproducible local model benchmark runtime manifests.
 - Deterministic frontier/watch Steward proposal integration.
 - Durable frontier/watch subscription stores.
 - Deterministic frontier subscription runner.
