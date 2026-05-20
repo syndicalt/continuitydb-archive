@@ -14,6 +14,7 @@ The first milestone builds:
 - Basic revision links.
 - Deterministic checkout.
 - Typed Continuity Query AST compiling checkout semantics into native requests.
+- First strict text parser for `CHECKOUT` queries.
 - Portable typed query serialization for bindings and future query files.
 - Versioned JSON envelopes for portable typed query files.
 - Read-only typed query AST introspection for embedders and bindings.

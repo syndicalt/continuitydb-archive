@@ -102,6 +102,7 @@ Storage kernel
 4. Execute serialized typed query files from the CLI. Implemented `continuitydb checkout-query <store-path> <query-path>` so saved `ContinuityQuery` JSON can materialize file-backed checkout slices through the native typed API before text query syntax exists.
 5. Add a versioned typed query JSON envelope. Implemented `QueryEnvelope`, `encode_query_json`, and `decode_query_json` in `continuitydb-query` so saved query files and bindings can validate format and version before executing raw typed query content.
 6. Add read-only typed query AST introspection. Implemented `CheckoutQuery` accessors for task, requirements, return shape, and optimization so embedders and bindings can inspect decoded query files without exposing internal fields.
+7. Add first strict text parser for checkout queries. Implemented `parse_query_text` for a minimal `CHECKOUT "task" ANSWER "question"` syntax with deterministic `WHERE` constraints for scope, minimum confidence, token budget, and evidence source.
 
 ## Utility Feedback Milestones
 
