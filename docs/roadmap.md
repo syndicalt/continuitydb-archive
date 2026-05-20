@@ -254,6 +254,7 @@ Storage kernel
 42. Add small-model candidate runtime metadata. Extended the local Steward candidate registry with recommended runtime, artifact format, temperature, grammar requirement, and operational notes, and exposed the metadata through CLI candidate JSON.
 43. Add small-model benchmark argument templates. Added candidate-recommended runner configuration helpers and exposed deterministic benchmark argument vectors through CLI candidate JSON.
 44. Add CLI local-model benchmark candidate defaults. Added `benchmark-local-model --candidate-defaults` so benchmark runs and dry-runs can materialize candidate-recommended runner arguments before operator-supplied extra arguments.
+45. Add CLI local-model benchmark grammar path support. Added `benchmark-local-model --grammar-path` so dry-runs and benchmark runs can pass generated GBNF grammar artifacts as first-class runtime arguments.
 
 ## Small Embeddable Model Track
 

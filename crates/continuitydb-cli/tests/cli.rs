@@ -426,6 +426,54 @@ fn cli_benchmark_local_model_dry_run_uses_candidate_defaults(
 
 #[cfg(feature = "local-model")]
 #[test]
+fn cli_benchmark_local_model_dry_run_includes_grammar_path(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path = temp_store_path("continuitydb-cli-local-model-grammar-baseline");
+    let grammar_path = temp_store_path("continuitydb-cli-local-model-response-grammar");
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("benchmark-local-model")
+        .arg("--dry-run")
+        .arg("--candidate-defaults")
+        .arg("--candidate")
+        .arg("Qwen/Qwen2.5-0.5B-Instruct")
+        .arg("--executable")
+        .arg("/missing/local-model-runner")
+        .arg("--model-path")
+        .arg("/models/qwen.gguf")
+        .arg("--grammar-path")
+        .arg(&grammar_path)
+        .arg("--arg")
+        .arg("--threads")
+        .arg("--arg")
+        .arg("2")
+        .arg("--baseline-path")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+
+    assert_eq!(json["runtime"]["arguments"][6].as_str(), Some("--prompt"));
+    assert_eq!(json["runtime"]["arguments"][7].as_str(), Some("-"));
+    assert_eq!(
+        json["runtime"]["arguments"][8].as_str(),
+        Some("--grammar-file")
+    );
+    assert_eq!(
+        json["runtime"]["arguments"][9].as_str(),
+        Some(grammar_path.display().to_string().as_str())
+    );
+    assert_eq!(json["runtime"]["arguments"][10].as_str(), Some("--threads"));
+    assert_eq!(json["runtime"]["arguments"][11].as_str(), Some("2"));
+    assert!(!baseline_path.exists());
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
 fn cli_local_model_evaluation_suite_outputs_case_contracts(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::cargo_bin("continuitydb")?

@@ -66,6 +66,7 @@ struct LocalModelBenchmarkOptions<'a> {
     model_path: &'a Path,
     arguments: &'a [String],
     candidate_defaults: bool,
+    grammar_path: Option<&'a Path>,
     baseline_path: &'a Path,
     dry_run: bool,
     compare_baseline: bool,
@@ -215,6 +216,9 @@ enum Command {
         /// Use the selected candidate's recommended benchmark arguments before extra --arg values.
         #[arg(long = "candidate-defaults")]
         candidate_defaults: bool,
+        /// GBNF grammar path passed to the executable as `--grammar-file <path>`.
+        #[arg(long = "grammar-path")]
+        grammar_path: Option<PathBuf>,
         /// JSONL path to append a benchmark baseline record.
         #[arg(long = "baseline-path")]
         baseline_path: PathBuf,
@@ -415,6 +419,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model_path,
             arguments,
             candidate_defaults,
+            grammar_path,
             baseline_path,
             dry_run,
             compare_baseline,
@@ -426,6 +431,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 model_path: &model_path,
                 arguments: &arguments,
                 candidate_defaults,
+                grammar_path: grammar_path.as_deref(),
                 baseline_path: &baseline_path,
                 dry_run,
                 compare_baseline: compare_baseline || fail_on_regression,
@@ -615,6 +621,11 @@ fn benchmark_local_model_json(
         LocalExecutableRunnerConfig::new(options.executable.to_path_buf())
             .with_model_path(options.model_path.to_path_buf())
     };
+    if let Some(grammar_path) = options.grammar_path {
+        config = config
+            .with_argument("--grammar-file")
+            .with_argument(grammar_path);
+    }
     for argument in options.arguments {
         config = config.with_argument(argument);
     }
