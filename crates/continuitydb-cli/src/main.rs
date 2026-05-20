@@ -5,8 +5,8 @@ use clap::{Parser, Subcommand};
 use continuitydb_api::{ContinuityDb, ContinuityError};
 use continuitydb_checkout::{checkout, CheckoutRequest};
 use continuitydb_core::{
-    ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
-    SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+    ActivationState, Answerability, CellCost, CellPayload, Citation, CommitId, Confidence,
+    Evidence, Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
 };
 use continuitydb_kernel::{
     CommitManifestLookup, KernelCapabilities, KernelDurability, KernelRequirements, StorageKernel,
@@ -69,6 +69,12 @@ enum Command {
         store_path: PathBuf,
         /// Path to write the versioned JSON commit export envelope.
         output_path: PathBuf,
+        /// Exclusive commit cursor to start after.
+        #[arg(long = "after")]
+        after: Option<CommitId>,
+        /// Maximum number of commits to export.
+        #[arg(long = "limit")]
+        limit: Option<usize>,
     },
     /// Import a versioned JSON commit backup envelope into a file-backed store.
     ImportCommits {
@@ -152,10 +158,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::ExportCommits {
             store_path,
             output_path,
+            after,
+            limit,
         }) => {
             let db = open_file_database(&store_path)?;
             let summary =
-                db.export_commits_json_file(CommitManifestLookup::default(), &output_path)?;
+                db.export_commits_json_file(CommitManifestLookup { after, limit }, &output_path)?;
             let output = serde_json::json!({
                 "path": store_path.display().to_string(),
                 "output": output_path.display().to_string(),

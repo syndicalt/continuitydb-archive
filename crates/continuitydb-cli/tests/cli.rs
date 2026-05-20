@@ -411,6 +411,118 @@ fn cli_exports_and_imports_commit_backup() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn cli_export_commits_limit_outputs_first_page_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-export-limit-source");
+    let backup_path = temp_store_path("continuitydb-cli-export-limit-backup");
+    let commits = write_two_commit_store(&source_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("export-commits")
+        .arg(&source_path)
+        .arg(&backup_path)
+        .arg("--limit")
+        .arg("1")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let batch = ContinuityDb::<FileKernel>::decode_commit_export_json(&fs::read(&backup_path)?)?;
+
+    assert_eq!(json["exported_commits"].as_u64(), Some(1));
+    assert_eq!(
+        json["next_after"].as_str(),
+        Some(commits[0].to_string().as_str())
+    );
+    assert_eq!(batch.slices.len(), 1);
+    assert_eq!(batch.slices[0].manifest.commit_id, commits[0]);
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(backup_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_export_commits_after_cursor_outputs_next_page() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-export-after-source");
+    let backup_path = temp_store_path("continuitydb-cli-export-after-backup");
+    let commits = write_two_commit_store(&source_path)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("export-commits")
+        .arg(&source_path)
+        .arg(&backup_path)
+        .arg("--after")
+        .arg(commits[0].to_string())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    let batch = ContinuityDb::<FileKernel>::decode_commit_export_json(&fs::read(&backup_path)?)?;
+
+    assert_eq!(json["exported_commits"].as_u64(), Some(1));
+    assert_eq!(
+        json["next_after"].as_str(),
+        Some(commits[1].to_string().as_str())
+    );
+    assert_eq!(batch.slices.len(), 1);
+    assert_eq!(batch.slices[0].manifest.commit_id, commits[1]);
+
+    fs::remove_file(source_path)?;
+    fs::remove_file(backup_path)?;
+    Ok(())
+}
+
+#[test]
+fn cli_export_commits_fails_for_unknown_after_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-export-after-unknown-source");
+    let backup_path = temp_store_path("continuitydb-cli-export-after-unknown-backup");
+    write_committed_store(
+        &source_path,
+        "project:continuitydb:cli-export-after-unknown",
+    )?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("export-commits")
+        .arg(&source_path)
+        .arg(&backup_path)
+        .arg("--after")
+        .arg(CommitId::new().to_string())
+        .assert()
+        .failure();
+
+    fs::remove_file(source_path)?;
+    let _ = fs::remove_file(backup_path);
+    Ok(())
+}
+
+#[test]
+fn cli_export_commits_rejects_invalid_after_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = temp_store_path("continuitydb-cli-export-after-invalid-source");
+    let backup_path = temp_store_path("continuitydb-cli-export-after-invalid-backup");
+    write_committed_store(
+        &source_path,
+        "project:continuitydb:cli-export-after-invalid",
+    )?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("export-commits")
+        .arg(&source_path)
+        .arg(&backup_path)
+        .arg("--after")
+        .arg("not-a-uuid")
+        .assert()
+        .failure();
+
+    fs::remove_file(source_path)?;
+    let _ = fs::remove_file(backup_path);
+    Ok(())
+}
+
+#[test]
 fn cli_import_commits_dry_run_validates_without_mutation() -> Result<(), Box<dyn std::error::Error>>
 {
     let source_path = temp_store_path("continuitydb-cli-dry-run-source");
@@ -502,6 +614,31 @@ fn write_committed_store(path: &PathBuf, anchor: &str) -> Result<(), Box<dyn std
     let mut db = ContinuityDb::new(FileKernel::open(path)?);
     db.ingest_cells_at_with_commit_id(vec![test_cell(anchor)?], committed_at, commit_id)?;
     Ok(())
+}
+
+fn write_two_commit_store(path: &PathBuf) -> Result<Vec<CommitId>, Box<dyn std::error::Error>> {
+    let first_time = Utc
+        .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let second_time = Utc
+        .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+    let first_commit = CommitId::new();
+    let second_commit = CommitId::new();
+    let mut db = ContinuityDb::new(FileKernel::open(path)?);
+    db.ingest_cells_at_with_commit_id(
+        vec![test_cell("project:continuitydb:cli-export-page-first")?],
+        first_time,
+        first_commit,
+    )?;
+    db.ingest_cells_at_with_commit_id(
+        vec![test_cell("project:continuitydb:cli-export-page-second")?],
+        second_time,
+        second_commit,
+    )?;
+    Ok(vec![first_commit, second_commit])
 }
 
 fn write_legacy_store(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
