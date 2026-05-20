@@ -23,11 +23,12 @@ pub use ledger::{
 };
 #[cfg(feature = "local-model")]
 pub use local_model::{
-    default_steward_evaluation_suite, latest_local_model_benchmark_baseline,
-    local_model_response_gbnf_grammar, local_model_response_json_schema,
-    record_local_model_benchmark_baseline, record_local_model_benchmark_baseline_with_regression,
-    small_model_candidates, FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile,
-    LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
+    default_steward_evaluation_suite, latest_compatible_local_model_benchmark_baseline,
+    latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
+    local_model_response_json_schema, record_local_model_benchmark_baseline,
+    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
+    FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
+    LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
     LocalModelBenchmarkRegression, LocalModelBenchmarkReport, LocalModelRequest,
     LocalModelRuntimeManifest, LocalModelSteward, LocalModelStewardInput,
@@ -43,9 +44,9 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 mod tests {
     #[cfg(feature = "local-model")]
     use super::{
-        default_steward_evaluation_suite, latest_local_model_benchmark_baseline,
-        local_model_response_gbnf_grammar, local_model_response_json_schema,
-        record_local_model_benchmark_baseline,
+        default_steward_evaluation_suite, latest_compatible_local_model_benchmark_baseline,
+        latest_local_model_benchmark_baseline, local_model_response_gbnf_grammar,
+        local_model_response_json_schema, record_local_model_benchmark_baseline,
         record_local_model_benchmark_baseline_with_regression, small_model_candidates,
         FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
         LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
@@ -165,6 +166,25 @@ mod tests {
             LocalModelBenchmark::new(
                 candidate,
                 LocalExecutableRunner::new(LocalExecutableRunnerConfig::new("sh")),
+                StewardEvaluationSuite::new(Vec::new()),
+            )
+            .run(steward()?),
+            recorded_at,
+        ))
+    }
+
+    #[cfg(feature = "local-model")]
+    fn local_model_runtime_baseline(
+        candidate: SmallModelCandidate,
+        recorded_at: chrono::DateTime<Utc>,
+        runtime_argument: &str,
+    ) -> Result<LocalModelBenchmarkBaseline, StewardError> {
+        Ok(LocalModelBenchmarkBaseline::from_report(
+            LocalModelBenchmark::new(
+                candidate,
+                LocalExecutableRunner::new(
+                    LocalExecutableRunnerConfig::new("sh").with_argument(runtime_argument),
+                ),
                 StewardEvaluationSuite::new(Vec::new()),
             )
             .run(steward()?),
@@ -1586,6 +1606,64 @@ mod tests {
         )?)?;
 
         let latest = latest_local_model_benchmark_baseline(&store, small_model_candidates()[0])?;
+
+        assert_eq!(latest, None);
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn latest_compatible_local_model_baseline_matches_runtime_and_schema(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let old_compatible = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 1, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let incompatible_runtime = local_model_runtime_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 3, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+            "--different-runtime",
+        )?;
+        let new_compatible = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 2, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let current = local_model_empty_baseline(
+            small_model_candidates()[0],
+            Utc.with_ymd_and_hms(2026, 5, 20, 4, 0, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        )?;
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(old_compatible)?;
+        store.append_baseline(incompatible_runtime)?;
+        store.append_baseline(new_compatible.clone())?;
+
+        let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
+
+        assert_eq!(latest, Some(new_compatible));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn latest_compatible_local_model_baseline_returns_none_without_compatible_runtime(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut store = MemoryLocalModelBenchmarkBaselineStore::default();
+        store.append_baseline(local_model_runtime_baseline(
+            small_model_candidates()[0],
+            created_at(),
+            "--different-runtime",
+        )?)?;
+        let current = local_model_empty_baseline(small_model_candidates()[0], created_at())?;
+
+        let latest = latest_compatible_local_model_benchmark_baseline(&store, &current)?;
 
         assert_eq!(latest, None);
         Ok(())

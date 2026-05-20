@@ -1087,7 +1087,8 @@ where
         .max_by_key(LocalModelBenchmarkBaseline::recorded_at))
 }
 
-fn latest_compatible_local_model_benchmark_baseline<S>(
+/// Returns the newest stored benchmark baseline compatible with the supplied current baseline.
+pub fn latest_compatible_local_model_benchmark_baseline<S>(
     store: &S,
     current: &LocalModelBenchmarkBaseline,
 ) -> Result<Option<LocalModelBenchmarkBaseline>, StewardError>

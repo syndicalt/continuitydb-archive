@@ -238,6 +238,7 @@ Storage kernel
 26. Add CLI local-model contract export. Implemented a feature-gated `local-model-contract` command that writes the Steward response JSON Schema and GBNF grammar to operator-selected files for grammar-constrained local model runs.
 27. Add local-model benchmark contract versioning. Implemented response schema version metadata on benchmark reports, durable baselines, legacy baseline decoding, and CLI benchmark summaries so future contract evolution remains auditable.
 28. Add compatible local-model regression gates. Updated record-and-compare baseline gating to compare only previous baselines with matching candidate identity, response schema version, and runtime manifest, preventing invalid regressions across runtime or contract changes.
+29. Add public compatible local-model baseline lookup. Implemented a feature-gated API that returns the newest stored baseline matching candidate identity, response schema version, and runtime manifest without recording a new benchmark run.
 
 ## Small Embeddable Model Track
 
