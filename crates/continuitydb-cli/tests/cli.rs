@@ -420,6 +420,74 @@ fn cli_replay_workload_replays_artifact_bundle() -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+#[test]
+fn cli_replay_workload_compares_archived_report() -> Result<(), Box<dyn std::error::Error>> {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-replay-workload-compare-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    Command::cargo_bin("continuitydb")?
+        .arg("measure-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--cells")
+        .arg("8")
+        .arg("--token-budget")
+        .arg("400")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .success();
+    let report_path = artifact_dir.join("workload-report.json");
+    let mut report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    report["checkout"]["selected_count"] = Value::from(2);
+    fs::write(&report_path, serde_json::to_string_pretty(&report)?)?;
+
+    let output = Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--compare-report")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    assert_eq!(json["replay_comparison"]["passed"].as_bool(), Some(false));
+    assert_eq!(
+        json["replay_comparison"]["mismatches"][0]["CheckoutSelectedCountChanged"]["previous"]
+            .as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        json["replay_comparison"]["mismatches"][0]["CheckoutSelectedCountChanged"]["current"]
+            .as_u64(),
+        Some(3)
+    );
+
+    Command::cargo_bin("continuitydb")?
+        .arg("replay-workload")
+        .arg("--kernel")
+        .arg("memory")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--compare-report")
+        .arg("--fail-on-mismatch")
+        .assert()
+        .failure()
+        .stderr(contains("workload replay mismatch detected"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_benchmark_local_model_records_baseline() -> Result<(), Box<dyn std::error::Error>> {

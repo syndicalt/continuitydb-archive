@@ -245,6 +245,12 @@ enum Command {
         /// Path to the JSONL file-backed store when replaying the file kernel.
         #[arg(long = "store-path")]
         store_path: Option<PathBuf>,
+        /// Compare replay counts against workload-report.json in the artifact directory.
+        #[arg(long = "compare-report")]
+        compare_report: bool,
+        /// Exit non-zero when --compare-report detects mismatched deterministic counts.
+        #[arg(long = "fail-on-mismatch")]
+        fail_on_mismatch: bool,
     },
     /// Compact a JSONL file-backed store into the canonical durable record format.
     CompactFile {
@@ -455,8 +461,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             kernel,
             artifact_dir,
             store_path,
+            compare_report,
+            fail_on_mismatch,
         }) => {
-            let output = replay_workload_json(kernel, &artifact_dir, store_path.as_ref())?;
+            let output = replay_workload_json(
+                kernel,
+                &artifact_dir,
+                store_path.as_ref(),
+                compare_report || fail_on_mismatch,
+                fail_on_mismatch,
+            )?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Some(Command::InspectKernel {
@@ -1921,6 +1935,8 @@ fn replay_workload_json(
     kernel: WorkloadKernelProfile,
     artifact_dir: &Path,
     store_path: Option<&PathBuf>,
+    compare_report: bool,
+    fail_on_mismatch: bool,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let cells_path = artifact_dir.join("workload-cells.json");
     let checkout_request_path = artifact_dir.join("checkout-request.json");
@@ -1951,7 +1967,7 @@ fn replay_workload_json(
         }
     };
 
-    Ok(serde_json::json!({
+    let mut output = serde_json::json!({
         "kernel": workload_kernel_name(kernel),
         "artifact_dir": artifact_dir.display().to_string(),
         "store_path": store_path.map(|path| path.display().to_string()),
@@ -1985,7 +2001,134 @@ fn replay_workload_json(
             "frontier_count": measurement.checkout.frontier_count,
             "selected_token_count": measurement.checkout.selected_token_count,
         },
+    });
+
+    if compare_report {
+        let comparison = replay_report_comparison(artifact_dir, &measurement)?;
+        let passed = comparison["passed"].as_bool().unwrap_or(false);
+        output["replay_comparison"] = comparison;
+        if fail_on_mismatch && !passed {
+            return Err(std::io::Error::other("workload replay mismatch detected").into());
+        }
+    } else {
+        output["replay_comparison"] = serde_json::Value::Null;
+    }
+
+    Ok(output)
+}
+
+fn replay_report_comparison(
+    artifact_dir: &Path,
+    measurement: &WorkloadMeasurement,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let report_path = artifact_dir.join("workload-report.json");
+    let report: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&report_path)?)?;
+    let mut mismatches = Vec::new();
+
+    push_u64_mismatch(
+        &mut mismatches,
+        "WorkloadCellCountChanged",
+        json_u64(&report["workload"], "cell_count")?,
+        measurement.workload_summary.cell_count,
+    );
+    push_u64_mismatch(
+        &mut mismatches,
+        "WorkloadFrontierCountChanged",
+        json_u64(&report["workload"], "frontier_count")?,
+        measurement.workload_summary.frontier_count,
+    );
+    push_u64_mismatch(
+        &mut mismatches,
+        "WorkloadDependencyCountChanged",
+        json_u64(&report["workload"], "dependency_count")?,
+        measurement.workload_summary.dependency_count,
+    );
+    push_i64_mismatch(
+        &mut mismatches,
+        "WorkloadTokenCostChanged",
+        json_i64(&report["workload"], "total_token_cost")?,
+        measurement.workload_summary.total_token_cost,
+    );
+    push_u64_mismatch(
+        &mut mismatches,
+        "CheckoutMatchedCountChanged",
+        json_u64(&report["checkout"], "matched_count")?,
+        measurement.checkout.matched_count,
+    );
+    push_u64_mismatch(
+        &mut mismatches,
+        "CheckoutSelectedCountChanged",
+        json_u64(&report["checkout"], "selected_count")?,
+        measurement.checkout.selected_count,
+    );
+    push_u64_mismatch(
+        &mut mismatches,
+        "CheckoutAlternativeCountChanged",
+        json_u64(&report["checkout"], "alternative_count")?,
+        measurement.checkout.alternative_count,
+    );
+    push_u64_mismatch(
+        &mut mismatches,
+        "CheckoutFrontierCountChanged",
+        json_u64(&report["checkout"], "frontier_count")?,
+        measurement.checkout.frontier_count,
+    );
+    push_i64_mismatch(
+        &mut mismatches,
+        "CheckoutSelectedTokenCountChanged",
+        json_i64(&report["checkout"], "selected_token_count")?,
+        measurement.checkout.selected_token_count,
+    );
+
+    Ok(serde_json::json!({
+        "passed": mismatches.is_empty(),
+        "report_path": report_path.display().to_string(),
+        "mismatches": mismatches,
     }))
+}
+
+fn push_u64_mismatch(
+    mismatches: &mut Vec<serde_json::Value>,
+    kind: &str,
+    previous: u64,
+    current: usize,
+) {
+    if previous != current as u64 {
+        mismatches.push(serde_json::json!({
+            kind: {
+                "previous": previous,
+                "current": current,
+            }
+        }));
+    }
+}
+
+fn push_i64_mismatch(
+    mismatches: &mut Vec<serde_json::Value>,
+    kind: &str,
+    previous: i64,
+    current: i64,
+) {
+    if previous != current {
+        mismatches.push(serde_json::json!({
+            kind: {
+                "previous": previous,
+                "current": current,
+            }
+        }));
+    }
+}
+
+fn json_u64(value: &serde_json::Value, key: &str) -> Result<u64, Box<dyn std::error::Error>> {
+    value[key]
+        .as_u64()
+        .ok_or_else(|| std::io::Error::other(format!("missing replay comparison {key}")).into())
+}
+
+fn json_i64(value: &serde_json::Value, key: &str) -> Result<i64, Box<dyn std::error::Error>> {
+    value[key]
+        .as_i64()
+        .ok_or_else(|| std::io::Error::other(format!("missing replay comparison {key}")).into())
 }
 
 fn workload_from_cells_artifact(
