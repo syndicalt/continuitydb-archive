@@ -226,6 +226,25 @@ mod tests {
     }
 
     #[test]
+    fn commit_id_displays_and_parses_uuid_text() -> Result<(), Box<dyn std::error::Error>> {
+        let commit_id = CommitId::new();
+        let text = commit_id.to_string();
+
+        let parsed: CommitId = text.parse()?;
+
+        assert_eq!(parsed, commit_id);
+        assert_eq!(text.len(), 36);
+        Ok(())
+    }
+
+    #[test]
+    fn commit_id_rejects_invalid_uuid_text() {
+        let result = "not-a-uuid".parse::<CommitId>();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn state_cell_deserializes_missing_commit_id_as_nil() -> Result<(), Box<dyn std::error::Error>>
     {
         let cell = sample_state_cell("project:continuitydb:legacy-commit-id")?;

@@ -1,6 +1,7 @@
 //! StateCell domain model.
 
 use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
 use uuid::Uuid;
 
 use crate::{Confidence, CoreError, Evidence, SystemTimeRange, ValidTimeRange};
@@ -46,6 +47,20 @@ impl CommitId {
 impl Default for CommitId {
     fn default() -> Self {
         Self::nil()
+    }
+}
+
+impl fmt::Display for CommitId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for CommitId {
+    type Err = uuid::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(value).map(Self)
     }
 }
 
