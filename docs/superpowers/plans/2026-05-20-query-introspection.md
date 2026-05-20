@@ -146,7 +146,7 @@ git commit -m "feat: add query ast accessors"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/superpowers/plans/2026-05-20-query-introspection.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add this current-scope bullet near the existing query bullets:
 
@@ -154,7 +154,7 @@ Add this current-scope bullet near the existing query bullets:
 - Read-only typed query AST introspection for embedders and bindings.
 ```
 
-- [ ] **Step 2: Update roadmap**
+- [x] **Step 2: Update roadmap**
 
 Add this Query Language milestone after the query envelope milestone:
 
@@ -162,7 +162,7 @@ Add this Query Language milestone after the query envelope milestone:
 6. Add read-only typed query AST introspection. Implemented `CheckoutQuery` accessors for task, requirements, return shape, and optimization so embedders and bindings can inspect decoded query files without exposing internal fields.
 ```
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -176,7 +176,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add README.md docs/roadmap.md docs/superpowers/plans/2026-05-20-query-introspection.md

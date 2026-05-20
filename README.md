@@ -16,6 +16,7 @@ The first milestone builds:
 - Typed Continuity Query AST compiling checkout semantics into native requests.
 - Portable typed query serialization for bindings and future query files.
 - Versioned JSON envelopes for portable typed query files.
+- Read-only typed query AST introspection for embedders and bindings.
 - Native typed query execution through the embeddable API.
 - CLI execution for serialized typed query files.
 - CLI execution for versioned typed query envelopes.
