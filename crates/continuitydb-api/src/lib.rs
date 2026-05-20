@@ -36,6 +36,15 @@ pub struct ContinuityDb<K> {
     kernel: K,
 }
 
+/// Materialized cells for one database commit boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommitSlice {
+    /// Commit manifest that defines the boundary and cell order.
+    pub manifest: CommitManifest,
+    /// StateCells written by the commit, in manifest order.
+    pub cells: Vec<StateCell>,
+}
+
 impl<K> ContinuityDb<K> {
     /// Creates a database wrapper over an existing storage kernel.
     pub fn new(kernel: K) -> Self {
@@ -166,6 +175,20 @@ impl<K: StorageKernel> ContinuityDb<K> {
             .commit_manifest(commit_id)?
             .ok_or(ContinuityError::Kernel(KernelError::CommitNotFound))?;
         self.lookup_cells_in_order(manifest.cell_ids)
+    }
+
+    /// Returns commit manifests and their StateCells matching deterministic listing constraints.
+    pub fn commit_slices(
+        &self,
+        lookup: CommitManifestLookup,
+    ) -> Result<Vec<CommitSlice>, ContinuityError> {
+        self.commit_manifests_matching(lookup)?
+            .into_iter()
+            .map(|manifest| {
+                let cells = self.lookup_cells_in_order(manifest.cell_ids.clone())?;
+                Ok(CommitSlice { manifest, cells })
+            })
+            .collect()
     }
 
     /// Records utility feedback as an append-only successor StateCell.
@@ -574,6 +597,85 @@ mod tests {
             result,
             Err(ContinuityError::Kernel(KernelError::CommitNotFound))
         ));
+    }
+
+    #[test]
+    fn api_returns_commit_slices_after_cursor_with_limit() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let first_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let second_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 30, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let third_time = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let first_commit = CommitId::new();
+        let second_commit = CommitId::new();
+        let third_commit = CommitId::new();
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let first = sample_cell("project:continuitydb:slice-first", 0.91, 12)?;
+        let second_a = sample_cell("project:continuitydb:slice-second-a", 0.83, 15)?;
+        let second_b = sample_cell("project:continuitydb:slice-second-b", 0.82, 16)?;
+        let third = sample_cell("project:continuitydb:slice-third", 0.77, 18)?;
+        let expected_second_ids = vec![second_a.id, second_b.id];
+
+        db.ingest_cells_at_with_commit_id(vec![first], first_time, first_commit)?;
+        db.ingest_cells_at_with_commit_id(vec![second_a, second_b], second_time, second_commit)?;
+        db.ingest_cells_at_with_commit_id(vec![third], third_time, third_commit)?;
+
+        let slices = db.commit_slices(CommitManifestLookup {
+            after: Some(first_commit),
+            limit: Some(1),
+        })?;
+
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].manifest.commit_id, second_commit);
+        assert_eq!(slices[0].manifest.committed_at, second_time);
+        assert_eq!(slices[0].manifest.cell_ids, expected_second_ids);
+        assert_eq!(
+            slices[0]
+                .cells
+                .iter()
+                .map(|cell| cell.id)
+                .collect::<Vec<_>>(),
+            expected_second_ids
+        );
+        assert!(slices[0]
+            .cells
+            .iter()
+            .all(|cell| cell.commit_id == second_commit));
+        Ok(())
+    }
+
+    #[test]
+    fn api_commit_slices_reports_unknown_cursor() {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let result = db.commit_slices(CommitManifestLookup {
+            after: Some(CommitId::new()),
+            limit: Some(10),
+        });
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::Kernel(KernelError::CommitNotFound))
+        ));
+    }
+
+    #[test]
+    fn api_commit_slices_returns_empty_for_empty_database() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let db = ContinuityDb::new(MemoryKernel::default());
+
+        let slices = db.commit_slices(CommitManifestLookup::default())?;
+
+        assert!(slices.is_empty());
+        Ok(())
     }
 
     #[test]

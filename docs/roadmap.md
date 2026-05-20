@@ -109,6 +109,7 @@ Storage kernel
 3. Add typed read-only conflict analysis operations. Implemented `ContinuityDb::detect_conflict` and `recommend_conflict_resolution` so applications can inspect deterministic StateCell conflicts and non-mutating resolution recommendations through the native API.
 4. Add typed read-only batch conflict analysis operations. Implemented `ContinuityDb::detect_conflicts` and `recommend_conflict_resolutions` so applications can analyze deterministic conflict frontiers across ordered stored cell sets through the native API.
 5. Add ordered commit cell materialization. Implemented `ContinuityDb::commit_cells` so callers can hydrate the StateCells written by one commit in manifest order, with unknown commits reported as `CommitNotFound`.
+6. Add cursor-based commit slice materialization. Implemented `CommitSlice` and `ContinuityDb::commit_slices` so callers can materialize cursor-selected commit manifests with their ordered StateCells for audit, backup, sync, and replay flows.
 
 ## Steward Milestones
 

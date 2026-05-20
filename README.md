@@ -36,6 +36,7 @@ The first milestone builds:
 - Commit manifest timeline listing.
 - Cursor-based commit manifest listing for incremental audit and sync reads.
 - Native commit cell materialization API.
+- Native commit slice materialization API for cursor-selected commit replay.
 - Native typed operation API for ingest, checkout, and audit.
 - Native typed utility feedback revision API.
 - Native read-only conflict analysis API.
