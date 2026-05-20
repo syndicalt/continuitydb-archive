@@ -2918,6 +2918,99 @@ fn cli_validate_local_model_bundle_rejects_response_artifact_manifest_fingerprin
 
 #[cfg(all(feature = "local-model", unix))]
 #[test]
+fn cli_validate_local_model_bundle_rejects_response_manifest_case_name_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-manifest-case-runner");
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-manifest-case-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-manifest-case-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let mut response_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&response_manifest_path)?)?;
+    response_manifest["artifacts"][0]["case_name"] = Value::from("tampered-case-name");
+    fs::write(
+        &response_manifest_path,
+        serde_json::to_string_pretty(&response_manifest)?,
+    )?;
+    refresh_local_model_response_manifest_metadata(&artifact_dir)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model response artifact manifest content mismatch",
+        ));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
+fn cli_validate_local_model_bundle_rejects_response_manifest_capture_state_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable_path =
+        temp_store_path("continuitydb-cli-local-model-validate-response-manifest-captured-runner");
+    let baseline_path = temp_store_path(
+        "continuitydb-cli-local-model-validate-response-manifest-captured-baseline",
+    );
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-response-manifest-captured-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_real_local_model_bundle(&artifact_dir, &baseline_path, &executable_path)?;
+
+    let response_manifest_path = artifact_dir
+        .join("responses")
+        .join("local-model-responses.manifest.json");
+    let mut response_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&response_manifest_path)?)?;
+    response_manifest["artifacts"][0]["captured"] = Value::from(false);
+    fs::write(
+        &response_manifest_path,
+        serde_json::to_string_pretty(&response_manifest)?,
+    )?;
+    refresh_local_model_response_manifest_metadata(&artifact_dir)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model response artifact manifest content mismatch",
+        ));
+
+    fs::remove_file(executable_path)?;
+    fs::remove_file(baseline_path)?;
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "local-model", unix))]
+#[test]
 fn cli_validate_local_model_bundle_rejects_tampered_response_artifact(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable_path =

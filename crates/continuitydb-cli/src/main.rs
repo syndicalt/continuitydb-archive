@@ -1632,7 +1632,7 @@ fn validate_local_model_bundle_manifest(
     let changed_case_report =
         validate_local_model_changed_case_report_manifest(artifact_dir, &manifest, &report)?;
     let response_artifact_manifest =
-        validate_local_model_response_artifact_manifest(artifact_dir, &manifest)?;
+        validate_local_model_response_artifact_manifest(artifact_dir, &manifest, &report)?;
 
     Ok(LocalModelBundleValidation {
         manifest: LocalModelBundleManifest {
@@ -1654,6 +1654,7 @@ fn validate_local_model_bundle_manifest(
 fn validate_local_model_response_artifact_manifest(
     artifact_dir: &Path,
     manifest: &serde_json::Value,
+    benchmark_report: &serde_json::Value,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if manifest["response_artifact_manifest"].is_null() {
         return Ok(serde_json::Value::Null);
@@ -1695,12 +1696,31 @@ fn validate_local_model_response_artifact_manifest(
     }
     let response_manifest: serde_json::Value = serde_json::from_str(&manifest_text)?;
     validate_local_model_response_artifact_files(artifact_dir, &response_manifest)?;
+    validate_local_model_response_artifact_manifest_content(&response_manifest, benchmark_report)?;
 
     Ok(serde_json::json!({
         "manifest_path": manifest_path.display().to_string(),
         "manifest_fingerprint": current_response_fingerprint,
         "manifest_bytes": manifest_text.len(),
     }))
+}
+
+#[cfg(feature = "local-model")]
+fn validate_local_model_response_artifact_manifest_content(
+    response_manifest: &serde_json::Value,
+    benchmark_report: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if response_manifest["format"].as_str() != Some("continuitydb.local_model.responses")
+        || response_manifest["format_version"].as_u64() != Some(1)
+        || response_manifest["artifacts"] != benchmark_report["response_artifacts"]
+    {
+        return Err(std::io::Error::other(
+            "local model response artifact manifest content mismatch",
+        )
+        .into());
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "local-model")]
