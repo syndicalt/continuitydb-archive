@@ -174,6 +174,7 @@ Storage kernel
 26. Add native Steward proposal audit operations. Implemented optional `steward` feature methods on `ContinuityDb<K>` for policy-evaluated proposal audit recording, listing, and lookup through the backing `StorageKernel`.
 27. Add native Steward conflict-resolution audit operations. Implemented optional `steward` feature method `audit_conflict_resolutions_with_steward` so embedders can analyze stored conflicts, emit deterministic Steward proposals, and record policy-evaluated proposal audits through the backing `StorageKernel`.
 28. Add native Steward frontier/watch audit operations. Implemented optional `steward` feature method `audit_frontier_watch_with_steward` so embedders can run subscribed frontier watch events, emit deterministic Steward proposals, and record policy-evaluated proposal audits through the backing `StorageKernel`.
+29. Add native accepted Steward `MarkFrontier` application. Implemented optional `steward` feature method `apply_accepted_mark_frontier_proposal_at` so embedders can deterministically apply accepted frontier proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
 
 ## Steward Milestones
 
@@ -191,6 +192,7 @@ Storage kernel
 12. Add borrowed kernel proposal audit adapter. Implemented `BorrowedKernelProposalStore` so embedders can record Steward proposal audits through an existing `ContinuityDb`-owned kernel without moving ownership.
 13. Add native API conflict-resolution stewardship. Implemented `ContinuityDb::audit_conflict_resolutions_with_steward` so stored conflict sets can become audited Steward proposal decisions without leaving the embeddable database API.
 14. Add native API frontier/watch stewardship. Implemented `ContinuityDb::audit_frontier_watch_with_steward` so subscribed frontier watch events can become audited Steward proposal decisions without leaving the embeddable database API.
+15. Add accepted `MarkFrontier` proposal application. Implemented the first deterministic proposal-to-state mutation path: accepted frontier proposals append successor StateCells with `Frontier` activation through the native API, while models remain proposal-only.
 
 ## Small Embeddable Model Track
 

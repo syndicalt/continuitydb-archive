@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use continuitydb_checkout::{
     audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
 };
+#[cfg(feature = "steward")]
+use continuitydb_core::ActivationState;
 use continuitydb_core::{CommitId, CommitManifest, StateCell, StateCellId, UtilityFeedback};
 use continuitydb_kernel::{
     CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelStatus,
@@ -13,6 +15,8 @@ use continuitydb_query::{
     decode_query_json, parse_query_text, CheckoutQuery, ContinuityQuery, QueryEnvelopeError,
     QueryError, QueryTextError,
 };
+#[cfg(feature = "steward")]
+use continuitydb_revision::revise_activation_state;
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
@@ -21,8 +25,9 @@ use continuitydb_revision::{
 #[cfg(feature = "steward")]
 use continuitydb_steward::{
     BorrowedKernelProposalStore, ConflictResolutionSteward, FrontierSubscriptionRunner,
-    FrontierSubscriptionStore, FrontierWatchEvent, ProposalAuditRecord, ProposalId, ProposalPolicy,
-    StewardError, StewardProposal, StoredProposalLedger,
+    FrontierSubscriptionStore, FrontierWatchEvent, ProposalAuditRecord, ProposalId,
+    ProposalOutcome, ProposalPolicy, StewardAction, StewardError, StewardProposal,
+    StoredProposalLedger,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::Path};
@@ -55,6 +60,10 @@ pub enum ContinuityError {
     #[cfg(feature = "steward")]
     #[error(transparent)]
     Steward(#[from] StewardError),
+    /// Accepted Steward proposal action is not supported by this application API.
+    #[cfg(feature = "steward")]
+    #[error("steward proposal action is not supported by this application API")]
+    UnsupportedStewardProposalAction,
     /// Raw typed query JSON could not be decoded.
     #[error("query JSON is invalid")]
     QueryJson,
@@ -549,6 +558,29 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(StewardFrontierAudit { proposals, records })
     }
 
+    /// Applies an accepted MarkFrontier Steward proposal as an append-only successor StateCell.
+    #[cfg(feature = "steward")]
+    pub fn apply_accepted_mark_frontier_proposal_at(
+        &mut self,
+        record: &ProposalAuditRecord,
+        committed_at: DateTime<Utc>,
+    ) -> Result<Option<StateCellId>, ContinuityError> {
+        if record.decision().outcome() == ProposalOutcome::Rejected {
+            return Ok(None);
+        }
+
+        let cell_id = match record.proposal().action() {
+            StewardAction::MarkFrontier { cell_id } => *cell_id,
+            _ => return Err(ContinuityError::UnsupportedStewardProposalAction),
+        };
+
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_activation_state(&previous, ActivationState::Frontier);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        Ok(Some(successor_id))
+    }
+
     /// Records utility feedback as an append-only successor StateCell.
     pub fn record_utility_feedback(
         &mut self,
@@ -870,6 +902,8 @@ impl ContinuityDb<FileKernel> {
 mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_checkout::CheckoutRequest;
+    #[cfg(feature = "steward")]
+    use continuitydb_core::ActivationState;
     use continuitydb_core::{
         Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence, Scope,
         SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
@@ -3492,6 +3526,156 @@ WHERE scope = project("continuitydb")
         assert_eq!(audit.proposals.len(), 1);
         assert_eq!(audit.records.len(), 1);
         assert_eq!(db.steward_proposal_records()?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_mark_frontier_application_appends_successor() -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = test_steward_time()?;
+        let apply_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:apply-frontier", 0.91, 12)?,
+            initial_commit,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: original_id,
+            },
+            "Stale evidence should move this cell to frontier monitoring.",
+            vec!["test://frontier-apply".to_string()],
+            initial_commit,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), initial_commit)?;
+
+        let successor_id = db
+            .apply_accepted_mark_frontier_proposal_at(&record, apply_commit)?
+            .ok_or_else(|| std::io::Error::other("expected successor"))?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.activation, ActivationState::Active);
+        assert_eq!(successor.activation, ActivationState::Frontier);
+        assert_eq!(successor.system_time.from(), apply_commit);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_mark_frontier_application_ignores_rejected_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:rejected-frontier", 0.91, 12)?,
+            committed_at,
+        )?;
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: original_id,
+            },
+            "Policy rejected this frontier application.",
+            vec!["test://frontier-rejected".to_string()],
+            committed_at,
+        )?;
+        let decision = continuitydb_steward::ProposalDecision::new(
+            proposal.id(),
+            ProposalOutcome::Rejected,
+            vec!["policy:test-rejected".to_string()],
+            committed_at,
+        );
+        let record = continuitydb_steward::ProposalAuditRecord::new(proposal, decision)?;
+
+        let applied = db.apply_accepted_mark_frontier_proposal_at(&record, committed_at)?;
+
+        assert_eq!(applied, None);
+        assert_eq!(db.kernel().lookup_cells(CellLookup::default())?.len(), 1);
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_mark_frontier_application_rejects_unsupported_accepted_action(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::LinkRevision {
+                source: StateCellId::new(),
+                kind: RevisionLinkKind::Supersedes,
+                target: StateCellId::new(),
+            },
+            "Supersession application is not implemented in this slice.",
+            vec!["test://unsupported-apply".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_mark_frontier_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::UnsupportedStewardProposalAction)
+        ));
+        Ok(())
+    }
+
+    #[cfg(feature = "steward")]
+    #[test]
+    fn api_mark_frontier_application_reports_missing_cell() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let committed_at = test_steward_time()?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let missing_id = StateCellId::new();
+        let proposal = StewardProposal::new(
+            ProposalId::new(),
+            test_steward_identity()?,
+            StewardAction::MarkFrontier {
+                cell_id: missing_id,
+            },
+            "Missing target should be reported before application.",
+            vec!["test://frontier-missing".to_string()],
+            committed_at,
+        )?;
+        let record =
+            db.record_steward_proposal(proposal, &ProposalPolicy::strict(), committed_at)?;
+
+        let result = db.apply_accepted_mark_frontier_proposal_at(&record, committed_at);
+
+        assert!(matches!(
+            result,
+            Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
+        ));
         Ok(())
     }
 }

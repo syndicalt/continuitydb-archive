@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use continuitydb_core::{SemanticAnchor, StateCell, StateCellId, UtilityFeedback};
+use continuitydb_core::{ActivationState, SemanticAnchor, StateCell, StateCellId, UtilityFeedback};
 use serde::{Deserialize, Serialize};
 
 /// Relationship between two StateCell versions.
@@ -58,6 +58,30 @@ pub fn revise_utility_feedback(
     revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
 
     UtilityFeedbackRevision { cell, revision }
+}
+
+/// Result of applying an activation-state change as an append-only StateCell revision.
+pub struct ActivationStateRevision {
+    /// New StateCell version carrying the revised activation state.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with updated activation state.
+pub fn revise_activation_state(
+    previous: &StateCell,
+    activation: ActivationState,
+) -> ActivationStateRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.activation = activation;
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    ActivationStateRevision { cell, revision }
 }
 
 /// Deterministic reason two StateCell versions conflict.
@@ -302,15 +326,15 @@ fn max_evidence_confidence(cell: &StateCell) -> f32 {
 mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        Answerability, CellCost, CellPayload, Citation, Confidence, Evidence, Scope,
-        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
+        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
+        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
         ValidTimeRange,
     };
 
     use super::{
         detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
-        revise_utility_feedback, scan_cell_conflicts, CellConflictKind, ConflictResolutionKind,
-        RevisionGraph, RevisionLinkKind,
+        revise_activation_state, revise_utility_feedback, scan_cell_conflicts, CellConflictKind,
+        ConflictResolutionKind, RevisionGraph, RevisionLinkKind,
     };
 
     fn timestamp(day: u32) -> Result<chrono::DateTime<Utc>, Box<dyn std::error::Error>> {
@@ -403,6 +427,31 @@ mod tests {
         assert_eq!(revised.cell.anchors, previous.anchors);
         assert_eq!(revised.cell.valid_time, previous.valid_time);
         assert_eq!(revised.cell.scope, previous.scope);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn activation_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+
+        let revised = revise_activation_state(&previous, ActivationState::Frontier);
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.activation, ActivationState::Active);
+        assert_eq!(revised.cell.activation, ActivationState::Frontier);
         assert_eq!(
             revised
                 .revision
