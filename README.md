@@ -164,6 +164,7 @@ The first milestone builds:
 - CLI local model dry-run baseline compatibility preflight.
 - CLI local model contract fingerprints.
 - Durable local model contract fingerprints.
+- Durable local model contract byte metadata.
 - Durable local model prompt fingerprints.
 - Durable local model response fingerprints.
 - CLI local model benchmark response artifact directory.

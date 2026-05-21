@@ -2348,6 +2348,8 @@ fn local_model_benchmark_json(
         "evaluation_suite_fingerprint": baseline.evaluation_suite_fingerprint(),
         "schema_fingerprint": baseline.schema_fingerprint(),
         "grammar_fingerprint": baseline.grammar_fingerprint(),
+        "schema_bytes": baseline.schema_bytes(),
+        "grammar_bytes": baseline.grammar_bytes(),
         "prompt_fingerprint": baseline.prompt_fingerprint(),
         "response_fingerprints": baseline.response_fingerprints(),
         "contract_artifacts": local_model_contract_artifacts_json(artifacts.contract),

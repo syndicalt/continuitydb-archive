@@ -1359,12 +1359,16 @@ impl LocalModelBenchmark {
         evaluation: StewardEvaluationReport,
         responses: &[StewardEvaluationCaseResponse],
     ) -> LocalModelBenchmarkReport {
+        let schema = local_model_response_json_schema();
+        let grammar = local_model_response_gbnf_grammar();
         LocalModelBenchmarkReport {
             candidate: self.candidate,
             response_schema_version: LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
             evaluation_suite_fingerprint: self.suite.fingerprint(),
-            schema_fingerprint: fingerprint_text(local_model_response_json_schema()),
-            grammar_fingerprint: fingerprint_text(local_model_response_gbnf_grammar()),
+            schema_fingerprint: fingerprint_text(schema),
+            grammar_fingerprint: fingerprint_text(grammar),
+            schema_bytes: schema.len(),
+            grammar_bytes: grammar.len(),
             prompt_fingerprint: prompt_fingerprint_for_suite(&self.suite),
             runtime: LocalModelRuntimeManifest::from_runner_config(self.runner.config()),
             response_fingerprints: responses
@@ -1533,6 +1537,8 @@ pub struct LocalModelBenchmarkReport {
     evaluation_suite_fingerprint: String,
     schema_fingerprint: String,
     grammar_fingerprint: String,
+    schema_bytes: usize,
+    grammar_bytes: usize,
     prompt_fingerprint: String,
     runtime: LocalModelRuntimeManifest,
     response_fingerprints: Vec<LocalModelResponseFingerprint>,
@@ -1563,6 +1569,16 @@ impl LocalModelBenchmarkReport {
     /// Returns the deterministic fingerprint for the response GBNF grammar text.
     pub fn grammar_fingerprint(&self) -> &str {
         &self.grammar_fingerprint
+    }
+
+    /// Returns the byte count for the response JSON Schema text.
+    pub fn schema_bytes(&self) -> usize {
+        self.schema_bytes
+    }
+
+    /// Returns the byte count for the response GBNF grammar text.
+    pub fn grammar_bytes(&self) -> usize {
+        self.grammar_bytes
     }
 
     /// Returns the deterministic fingerprint for the rendered prompt contract.
@@ -1610,6 +1626,10 @@ pub struct LocalModelBenchmarkBaseline {
     #[serde(default)]
     grammar_fingerprint: String,
     #[serde(default)]
+    schema_bytes: usize,
+    #[serde(default)]
+    grammar_bytes: usize,
+    #[serde(default)]
     prompt_fingerprint: String,
     #[serde(default)]
     runtime: LocalModelRuntimeManifest,
@@ -1629,6 +1649,8 @@ impl LocalModelBenchmarkBaseline {
             evaluation_suite_fingerprint: report.evaluation_suite_fingerprint,
             schema_fingerprint: report.schema_fingerprint,
             grammar_fingerprint: report.grammar_fingerprint,
+            schema_bytes: report.schema_bytes,
+            grammar_bytes: report.grammar_bytes,
             prompt_fingerprint: report.prompt_fingerprint,
             runtime: report.runtime,
             response_fingerprints: report.response_fingerprints,
@@ -1665,6 +1687,16 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the deterministic fingerprint for the response GBNF grammar text.
     pub fn grammar_fingerprint(&self) -> &str {
         &self.grammar_fingerprint
+    }
+
+    /// Returns the byte count for the response JSON Schema text.
+    pub fn schema_bytes(&self) -> usize {
+        self.schema_bytes
+    }
+
+    /// Returns the byte count for the response GBNF grammar text.
+    pub fn grammar_bytes(&self) -> usize {
+        self.grammar_bytes
     }
 
     /// Returns the deterministic fingerprint for the rendered prompt contract.

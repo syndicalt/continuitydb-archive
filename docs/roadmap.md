@@ -374,6 +374,7 @@ Storage kernel
 110. Add CLI local-model contract artifact byte metadata. Extended local-model contract artifact metadata with durable `schema_bytes` and `grammar_bytes` fields in benchmark reports and bundle manifests, and taught `validate-local-model-bundle` to reject archived contract byte-count mismatches before accepting Steward benchmark bundles.
 111. Add CLI local-model contract export byte metadata. Extended standalone `local-model-contract` JSON with `schema_bytes` and `grammar_bytes` so direct contract exports expose the same path, fingerprint, and size evidence as benchmark contract artifacts.
 112. Add CLI local-model dry-run contract byte metadata. Extended `benchmark-local-model --dry-run` preflight JSON with top-level `schema_bytes` and `grammar_bytes` so dry-run contract evidence matches exported and archived contract metadata without writing files.
+113. Add durable local-model contract byte metadata. Persisted response schema and GBNF grammar byte counts in executable local-model benchmark baselines and real benchmark JSON so durable baseline records carry the same contract size evidence as dry-run, export, and artifact paths.
 
 ## Small Embeddable Model Track
 
