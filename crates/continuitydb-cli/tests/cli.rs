@@ -3276,6 +3276,42 @@ fn cli_validate_local_model_bundle_rejects_report_fingerprint_mismatch(
     Ok(())
 }
 
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_validate_local_model_bundle_rejects_tampered_prompt_artifact(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-prompt-tampered-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-prompt-tampered-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let prompt_path = report["prompt_artifacts"][0]["prompt_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing prompt path"))?;
+    let original_prompt = fs::read_to_string(prompt_path)?;
+    fs::write(prompt_path, "x".repeat(original_prompt.len()))?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains("local model prompt artifact fingerprint mismatch"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_validate_local_model_bundle_accepts_changed_case_report_metadata(

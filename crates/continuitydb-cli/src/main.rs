@@ -163,6 +163,7 @@ struct LocalModelBundleValidation {
     manifest: LocalModelBundleManifest,
     benchmark_report: serde_json::Value,
     changed_case_report: serde_json::Value,
+    prompt_artifacts: serde_json::Value,
     response_artifacts: serde_json::Value,
     response_artifact_manifest: serde_json::Value,
 }
@@ -786,6 +787,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "manifest": local_model_bundle_manifest_json(Some(&validation.manifest)),
                 "benchmark_report": validation.benchmark_report,
                 "changed_case_report": validation.changed_case_report,
+                "prompt_artifacts": validation.prompt_artifacts,
                 "response_artifacts": validation.response_artifacts,
                 "response_artifact_manifest": validation.response_artifact_manifest,
             });
@@ -1849,6 +1851,7 @@ fn validate_local_model_bundle_manifest(
     }
     let changed_case_report =
         validate_local_model_changed_case_report_manifest(artifact_dir, &manifest, &report)?;
+    let prompt_artifacts = validate_local_model_prompt_artifacts(artifact_dir, &manifest, &report)?;
     let response_artifact_manifest =
         validate_local_model_response_artifact_manifest(artifact_dir, &manifest, &report)?;
     let response_artifacts = report["response_artifacts"].clone();
@@ -1865,9 +1868,54 @@ fn validate_local_model_bundle_manifest(
             "report_bytes": manifest_report_payload_text.len(),
         }),
         changed_case_report,
+        prompt_artifacts,
         response_artifacts,
         response_artifact_manifest,
     })
+}
+
+#[cfg(feature = "local-model")]
+fn validate_local_model_prompt_artifacts(
+    artifact_dir: &Path,
+    manifest: &serde_json::Value,
+    benchmark_report: &serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if manifest["prompt_artifacts"].is_null() {
+        return Ok(serde_json::Value::Null);
+    }
+    if manifest["prompt_artifacts"] != benchmark_report["prompt_artifacts"] {
+        return Err(std::io::Error::other("local model prompt artifact content mismatch").into());
+    }
+
+    let prompt_dir = artifact_dir.join("prompts");
+    let artifacts = benchmark_report["prompt_artifacts"]
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("local model prompt artifacts missing artifacts"))?;
+    for artifact in artifacts {
+        let prompt_path_text = required_json_string(artifact, "prompt_path")?;
+        let prompt_path = Path::new(prompt_path_text);
+        if prompt_path.strip_prefix(&prompt_dir).is_err() {
+            return Err(std::io::Error::other("local model prompt artifact path mismatch").into());
+        }
+        let prompt_text = std::fs::read_to_string(prompt_path)?;
+
+        let prompt_bytes = required_json_u64(artifact, "prompt_bytes")?;
+        if prompt_bytes != prompt_text.len() as u64 {
+            return Err(
+                std::io::Error::other("local model prompt artifact byte count mismatch").into(),
+            );
+        }
+
+        let prompt_fingerprint = required_json_string(artifact, "prompt_fingerprint")?;
+        let current_prompt_fingerprint = local_model_contract_fingerprint(&prompt_text);
+        if prompt_fingerprint != current_prompt_fingerprint {
+            return Err(
+                std::io::Error::other("local model prompt artifact fingerprint mismatch").into(),
+            );
+        }
+    }
+
+    Ok(benchmark_report["prompt_artifacts"].clone())
 }
 
 #[cfg(feature = "local-model")]

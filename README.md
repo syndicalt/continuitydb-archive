@@ -155,6 +155,7 @@ The first milestone builds:
 - CLI local model candidate requirement enforcement.
 - CLI local model benchmark contract artifact directory.
 - CLI local model benchmark prompt artifact directory.
+- CLI local model prompt artifact metadata validation.
 - CLI local model benchmark dry-run preflight output.
 - CLI local model dry-run baseline compatibility preflight.
 - CLI local model contract fingerprints.
