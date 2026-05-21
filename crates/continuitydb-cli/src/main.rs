@@ -163,6 +163,7 @@ struct LocalModelBundleValidation {
     manifest: LocalModelBundleManifest,
     benchmark_report: serde_json::Value,
     changed_case_report: serde_json::Value,
+    contract_artifacts: serde_json::Value,
     prompt_artifacts: serde_json::Value,
     response_artifacts: serde_json::Value,
     response_artifact_manifest: serde_json::Value,
@@ -787,6 +788,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "manifest": local_model_bundle_manifest_json(Some(&validation.manifest)),
                 "benchmark_report": validation.benchmark_report,
                 "changed_case_report": validation.changed_case_report,
+                "contract_artifacts": validation.contract_artifacts,
                 "prompt_artifacts": validation.prompt_artifacts,
                 "response_artifacts": validation.response_artifacts,
                 "response_artifact_manifest": validation.response_artifact_manifest,
@@ -1851,6 +1853,8 @@ fn validate_local_model_bundle_manifest(
     }
     let changed_case_report =
         validate_local_model_changed_case_report_manifest(artifact_dir, &manifest, &report)?;
+    let contract_artifacts =
+        validate_local_model_contract_artifacts(artifact_dir, &manifest, &report)?;
     let prompt_artifacts = validate_local_model_prompt_artifacts(artifact_dir, &manifest, &report)?;
     let response_artifact_manifest =
         validate_local_model_response_artifact_manifest(artifact_dir, &manifest, &report)?;
@@ -1868,10 +1872,62 @@ fn validate_local_model_bundle_manifest(
             "report_bytes": manifest_report_payload_text.len(),
         }),
         changed_case_report,
+        contract_artifacts,
         prompt_artifacts,
         response_artifacts,
         response_artifact_manifest,
     })
+}
+
+#[cfg(feature = "local-model")]
+fn validate_local_model_contract_artifacts(
+    artifact_dir: &Path,
+    manifest: &serde_json::Value,
+    benchmark_report: &serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if manifest["contract_artifacts"].is_null() {
+        return Ok(serde_json::Value::Null);
+    }
+    if manifest["contract_artifacts"] != benchmark_report["contract_artifacts"] {
+        return Err(std::io::Error::other("local model contract artifact content mismatch").into());
+    }
+
+    let contract_dir = artifact_dir.join("contracts");
+    let contract_artifacts = &benchmark_report["contract_artifacts"];
+
+    let schema_path_text = required_json_string(contract_artifacts, "schema_path")?;
+    let schema_path = Path::new(schema_path_text);
+    if schema_path.strip_prefix(&contract_dir).is_err() {
+        return Err(
+            std::io::Error::other("local model contract artifact schema path mismatch").into(),
+        );
+    }
+    let schema_text = std::fs::read_to_string(schema_path)?;
+    let schema_fingerprint = required_json_string(contract_artifacts, "schema_fingerprint")?;
+    if schema_fingerprint != local_model_contract_fingerprint(&schema_text) {
+        return Err(std::io::Error::other(
+            "local model contract artifact schema fingerprint mismatch",
+        )
+        .into());
+    }
+
+    let grammar_path_text = required_json_string(contract_artifacts, "grammar_path")?;
+    let grammar_path = Path::new(grammar_path_text);
+    if grammar_path.strip_prefix(&contract_dir).is_err() {
+        return Err(
+            std::io::Error::other("local model contract artifact grammar path mismatch").into(),
+        );
+    }
+    let grammar_text = std::fs::read_to_string(grammar_path)?;
+    let grammar_fingerprint = required_json_string(contract_artifacts, "grammar_fingerprint")?;
+    if grammar_fingerprint != local_model_contract_fingerprint(&grammar_text) {
+        return Err(std::io::Error::other(
+            "local model contract artifact grammar fingerprint mismatch",
+        )
+        .into());
+    }
+
+    Ok(contract_artifacts.clone())
 }
 
 #[cfg(feature = "local-model")]

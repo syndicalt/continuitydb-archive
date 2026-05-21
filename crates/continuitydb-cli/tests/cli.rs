@@ -2846,6 +2846,7 @@ fn cli_validate_local_model_bundle_accepts_report_metadata(
     let json: Value = serde_json::from_slice(&output)?;
     let report_path = artifact_dir.join("benchmark-report.json");
     let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
 
     assert_eq!(
         json["artifact_dir"].as_str(),
@@ -2871,6 +2872,7 @@ fn cli_validate_local_model_bundle_accepts_report_metadata(
     assert!(json["benchmark_report"]["report_bytes"]
         .as_u64()
         .is_some_and(|bytes| bytes > 0));
+    assert_eq!(json["contract_artifacts"], report["contract_artifacts"]);
 
     fs::remove_dir_all(artifact_dir)?;
     Ok(())
@@ -3307,6 +3309,43 @@ fn cli_validate_local_model_bundle_rejects_tampered_prompt_artifact(
         .assert()
         .failure()
         .stderr(contains("local model prompt artifact fingerprint mismatch"));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_validate_local_model_bundle_rejects_tampered_contract_artifact(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-contract-tampered-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-contract-tampered-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let schema_path = report["contract_artifacts"]["schema_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing schema path"))?;
+    fs::write(schema_path, "{\"tampered\":true}\n")?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model contract artifact schema fingerprint mismatch",
+        ));
 
     fs::remove_dir_all(artifact_dir)?;
     Ok(())
