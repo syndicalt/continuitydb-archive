@@ -1895,6 +1895,14 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         Some(true)
     );
     assert!(json["baseline_preflight"]["previous_recorded_at"].is_string());
+    assert_eq!(
+        json["baseline_preflight"]["previous_schema_bytes"].as_u64(),
+        json["schema_bytes"].as_u64()
+    );
+    assert_eq!(
+        json["baseline_preflight"]["previous_grammar_bytes"].as_u64(),
+        json["grammar_bytes"].as_u64()
+    );
     assert_eq!(fs::read_to_string(&baseline_path)?, before);
 
     fs::remove_file(executable_path)?;
@@ -5656,6 +5664,8 @@ fn cli_benchmark_local_model_dry_run_compare_reports_missing_baseline_without_cr
         Some(false)
     );
     assert!(json["baseline_preflight"]["previous_recorded_at"].is_null());
+    assert!(json["baseline_preflight"]["previous_schema_bytes"].is_null());
+    assert!(json["baseline_preflight"]["previous_grammar_bytes"].is_null());
     assert!(!baseline_path.exists());
 
     Ok(())

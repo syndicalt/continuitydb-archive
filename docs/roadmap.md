@@ -375,6 +375,7 @@ Storage kernel
 111. Add CLI local-model contract export byte metadata. Extended standalone `local-model-contract` JSON with `schema_bytes` and `grammar_bytes` so direct contract exports expose the same path, fingerprint, and size evidence as benchmark contract artifacts.
 112. Add CLI local-model dry-run contract byte metadata. Extended `benchmark-local-model --dry-run` preflight JSON with top-level `schema_bytes` and `grammar_bytes` so dry-run contract evidence matches exported and archived contract metadata without writing files.
 113. Add durable local-model contract byte metadata. Persisted response schema and GBNF grammar byte counts in executable local-model benchmark baselines and real benchmark JSON so durable baseline records carry the same contract size evidence as dry-run, export, and artifact paths.
+114. Add CLI local-model dry-run baseline byte evidence. Extended `benchmark-local-model --dry-run --compare-baseline` preflight JSON with the matched baseline's persisted `previous_schema_bytes` and `previous_grammar_bytes`, or nulls when no compatible baseline exists, so CI can inspect contract size evidence without executing a model.
 
 ## Small Embeddable Model Track
 

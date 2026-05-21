@@ -1420,6 +1420,8 @@ fn local_model_baseline_preflight_json(
         "compared": true,
         "compatible_baseline_found": latest.is_some(),
         "previous_recorded_at": latest.as_ref().map(LocalModelBenchmarkBaseline::recorded_at),
+        "previous_schema_bytes": latest.as_ref().map(LocalModelBenchmarkBaseline::schema_bytes),
+        "previous_grammar_bytes": latest.as_ref().map(LocalModelBenchmarkBaseline::grammar_bytes),
     }))
 }
 
