@@ -1674,6 +1674,7 @@ fn write_local_model_bundle_validation_failure_report(
     let manifest = local_model_validation_failure_manifest_json(artifact_dir);
     let benchmark_report = local_model_validation_failure_report_json(artifact_dir);
     let changed_case_report = local_model_validation_failure_changed_case_report_json(artifact_dir);
+    let contract_artifacts = local_model_validation_failure_contract_artifacts_json(artifact_dir);
     let response_artifact_manifest =
         local_model_validation_failure_response_artifact_manifest_json(artifact_dir);
     let response_artifacts = local_model_validation_failure_response_artifacts_json(artifact_dir);
@@ -1684,6 +1685,7 @@ fn write_local_model_bundle_validation_failure_report(
         "manifest": manifest,
         "benchmark_report": benchmark_report,
         "changed_case_report": changed_case_report,
+        "contract_artifacts": contract_artifacts,
         "response_artifact_manifest": response_artifact_manifest,
         "response_artifacts": response_artifacts,
         "failure": {
@@ -1740,6 +1742,45 @@ fn local_model_validation_failure_changed_case_report_json(
         "report_path": report_path.display().to_string(),
         "report_fingerprint": local_model_contract_fingerprint(&report_text),
         "report_bytes": report_text.len(),
+    })
+}
+
+#[cfg(feature = "local-model")]
+fn local_model_validation_failure_contract_artifacts_json(
+    artifact_dir: &Path,
+) -> serde_json::Value {
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let Ok(report_text) = std::fs::read_to_string(&report_path) else {
+        return serde_json::Value::Null;
+    };
+    let Ok(report) = serde_json::from_str::<serde_json::Value>(&report_text) else {
+        return serde_json::Value::Null;
+    };
+    let contract_artifacts = &report["contract_artifacts"];
+    if contract_artifacts.is_null() {
+        return serde_json::Value::Null;
+    }
+
+    let Some(schema_path) = contract_artifacts["schema_path"].as_str() else {
+        return serde_json::Value::Null;
+    };
+    let Some(grammar_path) = contract_artifacts["grammar_path"].as_str() else {
+        return serde_json::Value::Null;
+    };
+    let Ok(schema_text) = std::fs::read_to_string(schema_path) else {
+        return serde_json::Value::Null;
+    };
+    let Ok(grammar_text) = std::fs::read_to_string(grammar_path) else {
+        return serde_json::Value::Null;
+    };
+
+    serde_json::json!({
+        "schema_path": schema_path,
+        "schema_fingerprint": local_model_contract_fingerprint(&schema_text),
+        "schema_bytes": schema_text.len(),
+        "grammar_path": grammar_path,
+        "grammar_fingerprint": local_model_contract_fingerprint(&grammar_text),
+        "grammar_bytes": grammar_text.len(),
     })
 }
 

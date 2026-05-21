@@ -179,6 +179,7 @@ The first milestone builds:
 - CLI local model bundle validation manifest failure metadata.
 - CLI local model bundle validation report failure metadata.
 - CLI local model bundle validation changed-case failure metadata.
+- CLI local model bundle validation contract artifact failure metadata.
 - CLI local model bundle validation response manifest failure metadata.
 - CLI local model bundle validation response artifact failure metadata.
 - CLI local model changed-case report bundle artifacts.

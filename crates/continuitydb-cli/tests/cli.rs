@@ -3004,6 +3004,81 @@ fn cli_validate_local_model_bundle_failure_report_path_records_validation_failur
     Ok(())
 }
 
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_validate_local_model_bundle_failure_report_records_contract_artifact_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-contract-failure-baseline");
+    let failure_report_path =
+        temp_store_path("continuitydb-cli-local-model-validate-contract-failure-report")
+            .with_extension("json");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-contract-failure-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+    if failure_report_path.exists() {
+        fs::remove_file(&failure_report_path)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    let schema_path = report["contract_artifacts"]["schema_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing schema path"))?;
+    let grammar_path = report["contract_artifacts"]["grammar_path"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing grammar path"))?;
+    let grammar_text = fs::read_to_string(grammar_path)?;
+    let tampered_schema = "{\"tampered\":true}\n";
+    fs::write(schema_path, tampered_schema)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .arg("--failure-report-path")
+        .arg(&failure_report_path)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model contract artifact schema fingerprint mismatch",
+        ));
+
+    let failure_report: Value = serde_json::from_str(&fs::read_to_string(&failure_report_path)?)?;
+    assert_eq!(
+        failure_report["contract_artifacts"]["schema_path"].as_str(),
+        Some(schema_path)
+    );
+    assert!(failure_report["contract_artifacts"]["schema_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_eq!(
+        failure_report["contract_artifacts"]["schema_bytes"].as_u64(),
+        Some(tampered_schema.len() as u64)
+    );
+    assert_eq!(
+        failure_report["contract_artifacts"]["grammar_path"].as_str(),
+        Some(grammar_path)
+    );
+    assert!(failure_report["contract_artifacts"]["grammar_fingerprint"]
+        .as_str()
+        .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_eq!(
+        failure_report["contract_artifacts"]["grammar_bytes"].as_u64(),
+        Some(grammar_text.len() as u64)
+    );
+
+    fs::remove_dir_all(artifact_dir)?;
+    fs::remove_file(failure_report_path)?;
+    Ok(())
+}
+
 #[cfg(all(feature = "local-model", unix))]
 #[test]
 fn cli_validate_local_model_bundle_failure_report_records_changed_case_metadata(
