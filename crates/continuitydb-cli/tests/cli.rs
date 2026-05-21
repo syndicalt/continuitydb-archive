@@ -1942,6 +1942,10 @@ fn cli_benchmark_local_model_dry_run_outputs_preflight_without_baseline(
     assert!(json["grammar_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert!(json["schema_bytes"].as_u64().is_some_and(|bytes| bytes > 0));
+    assert!(json["grammar_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
     assert!(json["prompt_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));

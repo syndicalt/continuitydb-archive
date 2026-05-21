@@ -1252,6 +1252,8 @@ fn local_model_benchmark_dry_run_json(
         "evaluation_suite_fingerprint": default_steward_evaluation_suite().fingerprint(),
         "schema_fingerprint": local_model_contract_fingerprint(local_model_response_json_schema()),
         "grammar_fingerprint": local_model_contract_fingerprint(local_model_response_gbnf_grammar()),
+        "schema_bytes": local_model_response_json_schema().len(),
+        "grammar_bytes": local_model_response_gbnf_grammar().len(),
         "prompt_fingerprint": local_model_prompt_fingerprint_for_suite(&default_steward_evaluation_suite()),
         "fail_on_failed_cases": gates.fail_on_failed_cases,
         "failure_report_path": gates
