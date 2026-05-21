@@ -125,6 +125,8 @@ struct LocalModelContractArtifacts {
     grammar_path: PathBuf,
     schema_fingerprint: String,
     grammar_fingerprint: String,
+    schema_bytes: usize,
+    grammar_bytes: usize,
 }
 
 #[cfg(feature = "local-model")]
@@ -1439,6 +1441,8 @@ fn write_local_model_contract_artifacts(
         grammar_path,
         schema_fingerprint: local_model_contract_fingerprint(schema),
         grammar_fingerprint: local_model_contract_fingerprint(grammar),
+        schema_bytes: schema.len(),
+        grammar_bytes: grammar.len(),
     })
 }
 
@@ -1453,6 +1457,8 @@ fn local_model_contract_artifacts_json(
                 "grammar_path": artifacts.grammar_path.display().to_string(),
                 "schema_fingerprint": artifacts.schema_fingerprint,
                 "grammar_fingerprint": artifacts.grammar_fingerprint,
+                "schema_bytes": artifacts.schema_bytes,
+                "grammar_bytes": artifacts.grammar_bytes,
             })
         })
         .unwrap_or(serde_json::Value::Null)
@@ -1944,6 +1950,13 @@ fn validate_local_model_contract_artifacts(
         );
     }
     let schema_text = std::fs::read_to_string(schema_path)?;
+    let schema_bytes = required_json_u64(contract_artifacts, "schema_bytes")?;
+    if schema_bytes != schema_text.len() as u64 {
+        return Err(std::io::Error::other(
+            "local model contract artifact schema byte count mismatch",
+        )
+        .into());
+    }
     let schema_fingerprint = required_json_string(contract_artifacts, "schema_fingerprint")?;
     if schema_fingerprint != local_model_contract_fingerprint(&schema_text) {
         return Err(std::io::Error::other(
@@ -1960,6 +1973,13 @@ fn validate_local_model_contract_artifacts(
         );
     }
     let grammar_text = std::fs::read_to_string(grammar_path)?;
+    let grammar_bytes = required_json_u64(contract_artifacts, "grammar_bytes")?;
+    if grammar_bytes != grammar_text.len() as u64 {
+        return Err(std::io::Error::other(
+            "local model contract artifact grammar byte count mismatch",
+        )
+        .into());
+    }
     let grammar_fingerprint = required_json_string(contract_artifacts, "grammar_fingerprint")?;
     if grammar_fingerprint != local_model_contract_fingerprint(&grammar_text) {
         return Err(std::io::Error::other(

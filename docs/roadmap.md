@@ -371,6 +371,7 @@ Storage kernel
 107. Add CLI local-model prompt artifact metadata validation. Extended `validate-local-model-bundle` to verify archived prompt artifact paths, byte counts, and fingerprints against `benchmark-report.json` and `local-model-benchmark.manifest.json`, rejecting tampered prompt corpora before Steward benchmark bundles are treated as reproducible.
 108. Add CLI local-model contract artifact metadata validation. Extended `validate-local-model-bundle` to verify archived response schema and grammar artifact paths and fingerprints against `benchmark-report.json` and `local-model-benchmark.manifest.json`, rejecting tampered local-model contracts before Steward benchmark bundles are treated as reproducible.
 109. Add CLI local-model bundle validation contract artifact failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort response schema and grammar path, fingerprint, and byte-count evidence so rejected Steward benchmark bundles identify current contract bytes involved in archive validation failures.
+110. Add CLI local-model contract artifact byte metadata. Extended local-model contract artifact metadata with durable `schema_bytes` and `grammar_bytes` fields in benchmark reports and bundle manifests, and taught `validate-local-model-bundle` to reject archived contract byte-count mismatches before accepting Steward benchmark bundles.
 
 ## Small Embeddable Model Track
 

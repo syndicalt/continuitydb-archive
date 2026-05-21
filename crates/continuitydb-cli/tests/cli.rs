@@ -3034,9 +3034,10 @@ fn cli_validate_local_model_bundle_failure_report_records_contract_artifact_meta
     let grammar_path = report["contract_artifacts"]["grammar_path"]
         .as_str()
         .ok_or_else(|| std::io::Error::other("missing grammar path"))?;
+    let schema_text = fs::read_to_string(schema_path)?;
     let grammar_text = fs::read_to_string(grammar_path)?;
-    let tampered_schema = "{\"tampered\":true}\n";
-    fs::write(schema_path, tampered_schema)?;
+    let tampered_schema = "x".repeat(schema_text.len());
+    fs::write(schema_path, &tampered_schema)?;
 
     Command::cargo_bin("continuitydb")?
         .arg("validate-local-model-bundle")
@@ -3410,7 +3411,8 @@ fn cli_validate_local_model_bundle_rejects_tampered_contract_artifact(
     let schema_path = report["contract_artifacts"]["schema_path"]
         .as_str()
         .ok_or_else(|| std::io::Error::other("missing schema path"))?;
-    fs::write(schema_path, "{\"tampered\":true}\n")?;
+    let schema_text = fs::read_to_string(schema_path)?;
+    fs::write(schema_path, "x".repeat(schema_text.len()))?;
 
     Command::cargo_bin("continuitydb")?
         .arg("validate-local-model-bundle")
@@ -3420,6 +3422,52 @@ fn cli_validate_local_model_bundle_rejects_tampered_contract_artifact(
         .failure()
         .stderr(contains(
             "local model contract artifact schema fingerprint mismatch",
+        ));
+
+    fs::remove_dir_all(artifact_dir)?;
+    Ok(())
+}
+
+#[cfg(feature = "local-model")]
+#[test]
+fn cli_validate_local_model_bundle_rejects_contract_artifact_byte_count_mismatch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let baseline_path =
+        temp_store_path("continuitydb-cli-local-model-validate-contract-bytes-baseline");
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "continuitydb-cli-local-model-validate-contract-bytes-dir-{}",
+        std::process::id()
+    ));
+    if artifact_dir.exists() {
+        fs::remove_dir_all(&artifact_dir)?;
+    }
+
+    write_dry_run_local_model_bundle(&artifact_dir, &baseline_path)?;
+
+    let report_path = artifact_dir.join("benchmark-report.json");
+    let mut report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    report["contract_artifacts"]["schema_bytes"] = Value::from(1);
+    fs::write(&report_path, serde_json::to_string_pretty(&report)?)?;
+
+    let manifest_path = artifact_dir.join("local-model-benchmark.manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    manifest["contract_artifacts"] = report["contract_artifacts"].clone();
+    let mut canonical_report = report.clone();
+    canonical_report["bundle_manifest"] = Value::Null;
+    let canonical_report_text = serde_json::to_string_pretty(&canonical_report)?;
+    manifest["benchmark_report_bytes"] = Value::from(canonical_report_text.len());
+    manifest["benchmark_report_fingerprint"] =
+        Value::from(test_fnv1a64_fingerprint(&canonical_report_text));
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Command::cargo_bin("continuitydb")?
+        .arg("validate-local-model-bundle")
+        .arg("--artifact-dir")
+        .arg(&artifact_dir)
+        .assert()
+        .failure()
+        .stderr(contains(
+            "local model contract artifact schema byte count mismatch",
         ));
 
     fs::remove_dir_all(artifact_dir)?;
@@ -5777,6 +5825,14 @@ fn cli_benchmark_local_model_contract_dir_writes_artifacts_and_supplies_grammar(
     assert!(json["contract_artifacts"]["grammar_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_eq!(
+        json["contract_artifacts"]["schema_bytes"].as_u64(),
+        Some(fs::read_to_string(&schema_path)?.len() as u64)
+    );
+    assert_eq!(
+        json["contract_artifacts"]["grammar_bytes"].as_u64(),
+        Some(fs::read_to_string(&grammar_path)?.len() as u64)
+    );
     assert_eq!(
         json["runtime"]["arguments"][8].as_str(),
         Some("--grammar-file")
