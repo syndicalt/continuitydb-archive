@@ -103,6 +103,7 @@ The first milestone builds:
 - Local executable Steward model runner.
 - Stable local model Steward response schema and grammar contract.
 - Feature-gated CLI local model response schema and grammar export.
+- CLI local model contract export byte metadata.
 - Deterministic llama.cpp and mistral.rs runtime profiles.
 - Fixed Steward proposal-quality evaluation harness.
 - Executable local model benchmark fixture.

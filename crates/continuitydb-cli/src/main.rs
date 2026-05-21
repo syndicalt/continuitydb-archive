@@ -965,6 +965,8 @@ fn write_local_model_contract_json(
         "grammar_path": grammar_path.display().to_string(),
         "schema_fingerprint": local_model_contract_fingerprint(schema),
         "grammar_fingerprint": local_model_contract_fingerprint(grammar),
+        "schema_bytes": schema.len(),
+        "grammar_bytes": grammar.len(),
     }))
 }
 

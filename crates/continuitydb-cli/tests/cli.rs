@@ -6379,6 +6379,11 @@ fn cli_local_model_contract_writes_schema_and_grammar() -> Result<(), Box<dyn st
     assert!(json["grammar_fingerprint"]
         .as_str()
         .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:")));
+    assert_eq!(
+        json["schema_bytes"].as_u64(),
+        Some(fs::read_to_string(&schema_path)?.len() as u64)
+    );
+    assert_eq!(json["grammar_bytes"].as_u64(), Some(grammar.len() as u64));
     assert!(grammar.contains("root ::= response"));
     assert!(grammar.contains("request-verification-action"));
 
