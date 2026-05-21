@@ -1903,6 +1903,34 @@ printf '%s\n' '{"proposals":[{"action":{"type":"request_verification","cell_id":
         json["baseline_preflight"]["previous_grammar_bytes"].as_u64(),
         json["grammar_bytes"].as_u64()
     );
+    assert_eq!(
+        json["baseline_preflight"]["previous_response_schema_version"].as_u64(),
+        json["response_schema_version"].as_u64()
+    );
+    assert_eq!(
+        json["baseline_preflight"]["previous_evaluation_suite_fingerprint"].as_str(),
+        json["evaluation_suite_fingerprint"].as_str()
+    );
+    assert_eq!(
+        json["baseline_preflight"]["previous_schema_fingerprint"].as_str(),
+        json["schema_fingerprint"].as_str()
+    );
+    assert_eq!(
+        json["baseline_preflight"]["previous_grammar_fingerprint"].as_str(),
+        json["grammar_fingerprint"].as_str()
+    );
+    assert_eq!(
+        json["baseline_preflight"]["previous_prompt_fingerprint"].as_str(),
+        json["prompt_fingerprint"].as_str()
+    );
+    assert_eq!(
+        json["baseline_preflight"]["previous_runtime"]["executable"].as_str(),
+        json["runtime"]["executable"].as_str()
+    );
+    assert_eq!(
+        json["baseline_preflight"]["previous_runtime"]["arguments"],
+        json["runtime"]["arguments"]
+    );
     assert_eq!(fs::read_to_string(&baseline_path)?, before);
 
     fs::remove_file(executable_path)?;
@@ -5666,6 +5694,12 @@ fn cli_benchmark_local_model_dry_run_compare_reports_missing_baseline_without_cr
     assert!(json["baseline_preflight"]["previous_recorded_at"].is_null());
     assert!(json["baseline_preflight"]["previous_schema_bytes"].is_null());
     assert!(json["baseline_preflight"]["previous_grammar_bytes"].is_null());
+    assert!(json["baseline_preflight"]["previous_response_schema_version"].is_null());
+    assert!(json["baseline_preflight"]["previous_evaluation_suite_fingerprint"].is_null());
+    assert!(json["baseline_preflight"]["previous_schema_fingerprint"].is_null());
+    assert!(json["baseline_preflight"]["previous_grammar_fingerprint"].is_null());
+    assert!(json["baseline_preflight"]["previous_prompt_fingerprint"].is_null());
+    assert!(json["baseline_preflight"]["previous_runtime"].is_null());
     assert!(!baseline_path.exists());
 
     Ok(())

@@ -1415,6 +1415,12 @@ fn local_model_baseline_preflight_json(
     } else {
         None
     };
+    let previous_runtime = latest.as_ref().map(|baseline| {
+        serde_json::json!({
+            "executable": baseline.runtime().executable(),
+            "arguments": baseline.runtime().arguments(),
+        })
+    });
 
     Ok(serde_json::json!({
         "compared": true,
@@ -1422,6 +1428,22 @@ fn local_model_baseline_preflight_json(
         "previous_recorded_at": latest.as_ref().map(LocalModelBenchmarkBaseline::recorded_at),
         "previous_schema_bytes": latest.as_ref().map(LocalModelBenchmarkBaseline::schema_bytes),
         "previous_grammar_bytes": latest.as_ref().map(LocalModelBenchmarkBaseline::grammar_bytes),
+        "previous_response_schema_version": latest
+            .as_ref()
+            .map(LocalModelBenchmarkBaseline::response_schema_version),
+        "previous_evaluation_suite_fingerprint": latest
+            .as_ref()
+            .map(LocalModelBenchmarkBaseline::evaluation_suite_fingerprint),
+        "previous_schema_fingerprint": latest
+            .as_ref()
+            .map(LocalModelBenchmarkBaseline::schema_fingerprint),
+        "previous_grammar_fingerprint": latest
+            .as_ref()
+            .map(LocalModelBenchmarkBaseline::grammar_fingerprint),
+        "previous_prompt_fingerprint": latest
+            .as_ref()
+            .map(LocalModelBenchmarkBaseline::prompt_fingerprint),
+        "previous_runtime": previous_runtime,
     }))
 }
 
