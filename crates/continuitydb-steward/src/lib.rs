@@ -1,6 +1,7 @@
 //! Deterministic Steward proposal substrate.
 
 mod conflict;
+mod context_compiler;
 mod error;
 mod frontier;
 mod ledger;
@@ -11,6 +12,11 @@ mod policy;
 mod proposal;
 
 pub use conflict::ConflictResolutionSteward;
+pub use context_compiler::{
+    ContextCompilerCandidateTrajectoryMemory, ContextCompilerOrchestrator,
+    ContextCompilerOrchestratorInput, ContextCompilerProposalDraft, ContextCompilerProposalSource,
+    StaticContextCompilerProposalSource,
+};
 pub use error::StewardError;
 pub use frontier::{
     FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription, FrontierSubscriptionId,
@@ -24,20 +30,25 @@ pub use ledger::{
 #[cfg(feature = "local-model")]
 pub use local_model::{
     default_steward_evaluation_suite, latest_compatible_local_model_benchmark_baseline,
-    latest_local_model_benchmark_baseline, local_model_prompt_fingerprint_for_suite,
+    latest_local_model_benchmark_baseline, local_model_context_compiler_response_gbnf_grammar,
+    local_model_context_compiler_response_json_schema, local_model_prompt_fingerprint_for_suite,
     local_model_prompt_for_input, local_model_response_gbnf_grammar,
     local_model_response_json_schema, record_local_model_benchmark_baseline,
-    record_local_model_benchmark_baseline_with_regression, small_model_candidates,
+    record_local_model_benchmark_baseline_with_regression, required_steward_acceptance_criteria,
+    small_model_candidates, small_model_ci_candidates, small_model_default_ci_candidate,
+    small_model_default_quality_gate_candidate, small_model_quality_gate_candidates,
     FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalExecutableRunner,
     LocalExecutableRunnerConfig, LocalModelBackend, LocalModelBenchmark,
     LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore, LocalModelBenchmarkCaseSummary,
     LocalModelBenchmarkGateReport, LocalModelBenchmarkRegression, LocalModelBenchmarkReport,
-    LocalModelRequest, LocalModelResponseFingerprint, LocalModelRuntimeManifest,
-    LocalModelStabilityCaseReport, LocalModelStabilityReport, LocalModelSteward,
-    LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile,
-    SmallModelCandidate, StewardEvaluationCase, StewardEvaluationCaseReport,
+    LocalModelContextCompilerProposalSource, LocalModelRequest, LocalModelResponseFingerprint,
+    LocalModelRuntimeManifest, LocalModelStabilityCaseReport, LocalModelStabilityReport,
+    LocalModelSteward, LocalModelStewardInput, MemoryLocalModelBenchmarkBaselineStore,
+    MistralRsRuntimeProfile, SmallModelCandidate, StewardAcceptanceCoverage,
+    StewardAcceptanceCriterion, StewardEvaluationCase, StewardEvaluationCaseReport,
     StewardEvaluationCaseResponse, StewardEvaluationFailure, StewardEvaluationReport,
-    StewardEvaluationSuite, StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+    StewardEvaluationSuite, StewardEvaluationSummary,
+    LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_SCHEMA_VERSION, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
 };
 pub use mock::{MockSteward, MockStewardInput, MockStewardRule};
 pub use policy::{ProposalDecision, ProposalOutcome, ProposalPolicy};
@@ -46,24 +57,32 @@ pub use proposal::{ProposalId, StewardAction, StewardIdentity, StewardProposal};
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "local-model")]
+    use super::ContextCompilerProposalSource;
+    #[cfg(feature = "local-model")]
     use super::{
         default_steward_evaluation_suite, latest_compatible_local_model_benchmark_baseline,
-        latest_local_model_benchmark_baseline, local_model_prompt_for_input,
+        latest_local_model_benchmark_baseline, local_model_context_compiler_response_gbnf_grammar,
+        local_model_context_compiler_response_json_schema, local_model_prompt_for_input,
         local_model_response_gbnf_grammar, local_model_response_json_schema,
         record_local_model_benchmark_baseline,
-        record_local_model_benchmark_baseline_with_regression, small_model_candidates,
-        FileLocalModelBenchmarkBaselineStore, LlamaCppRuntimeProfile, LocalModelBenchmark,
-        LocalModelBenchmarkBaseline, LocalModelBenchmarkBaselineStore,
-        LocalModelBenchmarkGateReport, LocalModelBenchmarkRegression,
-        MemoryLocalModelBenchmarkBaselineStore, MistralRsRuntimeProfile, SmallModelCandidate,
+        record_local_model_benchmark_baseline_with_regression,
+        required_steward_acceptance_criteria, small_model_candidates,
+        small_model_default_quality_gate_candidate, FileLocalModelBenchmarkBaselineStore,
+        LlamaCppRuntimeProfile, LocalModelBenchmark, LocalModelBenchmarkBaseline,
+        LocalModelBenchmarkBaselineStore, LocalModelBenchmarkGateReport,
+        LocalModelBenchmarkRegression, MemoryLocalModelBenchmarkBaselineStore,
+        MistralRsRuntimeProfile, SmallModelCandidate, StewardAcceptanceCriterion,
         StewardEvaluationCase, StewardEvaluationFailure, StewardEvaluationSuite,
-        StewardEvaluationSummary, LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
+        StewardEvaluationSummary, LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_SCHEMA_VERSION,
+        LOCAL_MODEL_RESPONSE_SCHEMA_VERSION,
     };
     use super::{
-        BorrowedKernelProposalStore, FileProposalStore, KernelProposalStore, MemoryProposalStore,
+        BorrowedKernelProposalStore, ContextCompilerOrchestrator, ContextCompilerOrchestratorInput,
+        ContextCompilerProposalDraft, FileProposalStore, KernelProposalStore, MemoryProposalStore,
         MockSteward, MockStewardInput, MockStewardRule, ProposalDecision, ProposalId,
-        ProposalLedger, ProposalLedgerStore, ProposalOutcome, ProposalPolicy, StewardAction,
-        StewardError, StewardIdentity, StewardProposal, StoredProposalLedger,
+        ProposalLedger, ProposalLedgerStore, ProposalOutcome, ProposalPolicy,
+        StaticContextCompilerProposalSource, StewardAction, StewardError, StewardIdentity,
+        StewardProposal, StoredProposalLedger,
     };
     use super::{
         FileFrontierSubscriptionStore, FrontierSteward, FrontierSubscription,
@@ -72,11 +91,16 @@ mod tests {
     };
     #[cfg(feature = "local-model")]
     use super::{
-        LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend, LocalModelRequest,
-        LocalModelSteward, LocalModelStewardInput,
+        LocalExecutableRunner, LocalExecutableRunnerConfig, LocalModelBackend,
+        LocalModelContextCompilerProposalSource, LocalModelRequest, LocalModelSteward,
+        LocalModelStewardInput,
     };
     use chrono::{TimeZone, Utc};
-    use continuitydb_core::{SemanticAnchor, StateCellId};
+    use continuitydb_core::{
+        Answerability, CellCost, CellPayload, Citation, Confidence, ContextAbstractionLevel,
+        ContextCompilerProposalLine, ContextPacketStrategy, Evidence, Scope, SemanticAnchor,
+        SourceId, StateCell, StateCellId, TrajectoryMemory, TrustSignal, ValidTimeRange,
+    };
     use continuitydb_revision::RevisionLinkKind;
     #[cfg(feature = "local-model")]
     use std::cell::RefCell;
@@ -115,6 +139,41 @@ mod tests {
 
     fn temp_frontier_subscription_store_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("{name}-{:?}.jsonl", ProposalId::new()))
+    }
+
+    fn sample_state_cell_with_evidence_locators(
+        anchor: &str,
+        locators: &[&str],
+    ) -> Result<StateCell, Box<dyn std::error::Error>> {
+        let valid_from = Utc
+            .with_ymd_and_hms(2026, 5, 20, 0, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let evidence = locators
+            .iter()
+            .map(|locator| {
+                Ok(Evidence {
+                    source: SourceId::new("test"),
+                    citation: Citation {
+                        locator: (*locator).to_string(),
+                    },
+                    confidence: Confidence::new(0.9)?,
+                    trust: vec![TrustSignal::DirectObservation],
+                })
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+
+        StateCell::new(
+            StateCellId::new(),
+            vec![SemanticAnchor::new(anchor)],
+            ValidTimeRange::new(valid_from, None)?,
+            Scope::Project("continuitydb".to_string()),
+            Answerability::new(vec!["what should the agent know?".to_string()])?,
+            evidence,
+            CellPayload::Text(anchor.to_string()),
+            CellCost::new(8, 0)?,
+        )
+        .map_err(Into::into)
     }
 
     #[cfg(feature = "local-model")]
@@ -795,6 +854,504 @@ mod tests {
             StewardAction::RequestVerification { cell_id, request }
                 if *cell_id == Some(target) && request == "Refresh the target evidence."
         ));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_context_compiler_source_decodes_packet_shape_drafts(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "context_compiler_proposals": [{
+                "target_cell_id": cell_id,
+                "strategy": "falsification_brief",
+                "abstraction_level": "falsification",
+                "reason_tags": ["task-intent-action"],
+                "evidence_locators": ["test://release/upload"],
+                "proposed_lines": [{
+                    "text": "Check the retained upload failure before retrying.",
+                    "citations": ["test://release/upload"],
+                    "token_count": 7
+                }]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let source = LocalModelContextCompilerProposalSource::new(steward, created_at());
+        let orchestrator = ContextCompilerOrchestrator::new(source);
+
+        let proposals = orchestrator.propose(
+            ContextCompilerOrchestratorInput::new(
+                "what should I do next without repeating the upload failure?",
+                vec![cell_id],
+            )
+            .with_candidate_evidence_locators(cell_id, vec!["test://release/upload".to_string()]),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].target_cell_id, cell_id);
+        assert_eq!(
+            proposals[0].strategy,
+            ContextPacketStrategy::FalsificationBrief
+        );
+        assert_eq!(
+            proposals[0].abstraction_level,
+            ContextAbstractionLevel::Falsification
+        );
+        assert_eq!(
+            proposals[0].reason_tags,
+            vec!["task-intent-action".to_string()]
+        );
+        assert_eq!(proposals[0].proposed_lines.len(), 1);
+        assert_eq!(
+            proposals[0].proposed_lines[0].text,
+            "Check the retained upload failure before retrying."
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_context_compiler_source_supplies_candidate_evidence_locators(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "context_compiler_proposals": []
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let source = LocalModelContextCompilerProposalSource::new(steward, created_at());
+
+        let _ = source.propose_context_compiler_drafts(
+            &ContextCompilerOrchestratorInput::new("shape retry context", vec![cell_id])
+                .with_candidate_evidence_locators(
+                    cell_id,
+                    vec!["test://release/upload".to_string()],
+                ),
+        )?;
+
+        let requests = source.steward().backend().requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0]
+            .evidence()
+            .iter()
+            .any(|evidence| evidence.locator() == "test://release/upload"));
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_rejects_proposed_line_without_candidate_evidence(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let draft = ContextCompilerProposalDraft::new(
+            cell_id,
+            ContextPacketStrategy::FalsificationBrief,
+            vec!["model-assisted-falsification".to_string()],
+            vec!["artifact://compiler/proposal".to_string()],
+        )
+        .with_proposed_lines(vec![ContextCompilerProposalLine::new(
+            "Unsupported line must not become an accepted proposal.",
+            vec!["test://unsupported".to_string()],
+            7,
+        )?]);
+        let orchestrator =
+            ContextCompilerOrchestrator::new(StaticContextCompilerProposalSource::new(vec![draft]));
+
+        let result = orchestrator.propose(
+            ContextCompilerOrchestratorInput::new("shape retry context", vec![cell_id])
+                .with_candidate_evidence_locators(cell_id, vec!["test://allowed".to_string()]),
+        );
+
+        assert_eq!(result, Err(StewardError::InvalidContextCompilerProposal));
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_rejects_unsupported_proposal_evidence(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let draft = ContextCompilerProposalDraft::new(
+            cell_id,
+            ContextPacketStrategy::FalsificationBrief,
+            vec!["model-assisted-falsification".to_string()],
+            vec!["test://unsupported-shape-evidence".to_string()],
+        );
+        let orchestrator =
+            ContextCompilerOrchestrator::new(StaticContextCompilerProposalSource::new(vec![draft]));
+
+        let result = orchestrator.propose(
+            ContextCompilerOrchestratorInput::new("shape retry context", vec![cell_id])
+                .with_candidate_evidence_locators(cell_id, vec!["test://allowed".to_string()]),
+        );
+
+        assert_eq!(result, Err(StewardError::InvalidContextCompilerProposal));
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_input_from_state_cells_preserves_ids_and_evidence(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let first = sample_state_cell_with_evidence_locators(
+            "project:continuitydb:compiler-input-first",
+            &["test://first-a", "test://first-b"],
+        )?;
+        let second = sample_state_cell_with_evidence_locators(
+            "project:continuitydb:compiler-input-second",
+            &["test://second-a"],
+        )?;
+
+        let input = ContextCompilerOrchestratorInput::from_state_cells(
+            "shape retry context",
+            &[first.clone(), second.clone()],
+        );
+
+        assert_eq!(input.candidate_cell_ids(), &[first.id, second.id]);
+        assert_eq!(
+            input.candidate_evidence_locators(first.id),
+            &["test://first-a".to_string(), "test://first-b".to_string()]
+        );
+        assert_eq!(
+            input.candidate_evidence_locators(second.id),
+            &["test://second-a".to_string()]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_input_merges_repeated_candidate_evidence_locators(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+
+        let input = ContextCompilerOrchestratorInput::new("shape retry context", vec![cell_id])
+            .with_candidate_evidence_locators(
+                cell_id,
+                vec!["test://first".to_string(), "test://shared".to_string()],
+            )
+            .with_candidate_evidence_locators(
+                cell_id,
+                vec!["test://second".to_string(), "test://shared".to_string()],
+            );
+
+        assert_eq!(
+            input.candidate_evidence_locators(cell_id),
+            &[
+                "test://first".to_string(),
+                "test://shared".to_string(),
+                "test://second".to_string()
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_input_filters_blank_candidate_evidence_locators(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+
+        let input = ContextCompilerOrchestratorInput::new("shape retry context", vec![cell_id])
+            .with_candidate_evidence_locators(
+                cell_id,
+                vec![
+                    "".to_string(),
+                    "   ".to_string(),
+                    "test://usable".to_string(),
+                ],
+            )
+            .with_candidate_evidence_locators(
+                cell_id,
+                vec!["\t".to_string(), "test://second".to_string()],
+            );
+
+        assert_eq!(
+            input.candidate_evidence_locators(cell_id),
+            &["test://usable".to_string(), "test://second".to_string()]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_input_deduplicates_candidate_cell_ids(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+
+        let input = ContextCompilerOrchestratorInput::new(
+            "shape retry context",
+            vec![cell_id, cell_id, cell_id],
+        );
+
+        assert_eq!(input.candidate_cell_ids(), &[cell_id]);
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_input_ignores_non_candidate_evidence_locators(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let selected_cell_id = StateCellId::new();
+        let outside_cell_id = StateCellId::new();
+
+        let input =
+            ContextCompilerOrchestratorInput::new("shape retry context", vec![selected_cell_id])
+                .with_candidate_evidence_locators(
+                    outside_cell_id,
+                    vec!["test://outside".to_string()],
+                );
+
+        assert!(input
+            .candidate_evidence_locators(outside_cell_id)
+            .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_accepts_proposed_lines_from_state_cell_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell = sample_state_cell_with_evidence_locators(
+            "project:continuitydb:compiler-input-accepted-line",
+            &["test://accepted-line"],
+        )?;
+        let draft = ContextCompilerProposalDraft::new(
+            cell.id,
+            ContextPacketStrategy::FalsificationBrief,
+            vec!["model-assisted-falsification".to_string()],
+            vec!["test://accepted-line".to_string()],
+        )
+        .with_proposed_lines(vec![ContextCompilerProposalLine::new(
+            "Use the retained failure evidence before retrying.",
+            vec!["test://accepted-line".to_string()],
+            7,
+        )?]);
+        let orchestrator =
+            ContextCompilerOrchestrator::new(StaticContextCompilerProposalSource::new(vec![draft]));
+
+        let proposals = orchestrator.propose(
+            ContextCompilerOrchestratorInput::from_state_cells("shape retry context", &[cell]),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].proposed_lines.len(), 1);
+        assert_eq!(
+            proposals[0].proposed_lines[0].text,
+            "Use the retained failure evidence before retrying."
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_input_from_state_cells_includes_trajectory_trace(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut cell = sample_state_cell_with_evidence_locators(
+            "project:continuitydb:compiler-input-trajectory-trace",
+            &["test://supporting-evidence"],
+        )?;
+        cell.set_trajectory_memory(TrajectoryMemory::new(
+            "retry upload against assumed release target",
+            "built and retained the release asset bundle",
+            "GitHub upload returned 404 for the target release",
+            "artifact://rollout/release-upload-404",
+            0.88,
+            "verify the release target before retrying asset upload",
+            vec!["task is retrying release asset upload".to_string()],
+            vec!["release target has been independently verified".to_string()],
+            ContextPacketStrategy::FalsificationBrief,
+        )?);
+
+        let input = ContextCompilerOrchestratorInput::from_state_cells(
+            "reuse rollout lesson",
+            &[cell.clone()],
+        );
+
+        assert_eq!(
+            input.candidate_evidence_locators(cell.id),
+            &[
+                "test://supporting-evidence".to_string(),
+                "artifact://rollout/release-upload-404".to_string()
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_accepts_proposed_lines_citing_trajectory_trace(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut cell = sample_state_cell_with_evidence_locators(
+            "project:continuitydb:compiler-trajectory-line",
+            &["test://supporting-evidence"],
+        )?;
+        cell.set_trajectory_memory(TrajectoryMemory::new(
+            "retry upload against assumed release target",
+            "built and retained the release asset bundle",
+            "GitHub upload returned 404 for the target release",
+            "artifact://rollout/release-upload-404",
+            0.88,
+            "verify the release target before retrying asset upload",
+            vec!["task is retrying release asset upload".to_string()],
+            vec!["release target has been independently verified".to_string()],
+            ContextPacketStrategy::FalsificationBrief,
+        )?);
+        let draft = ContextCompilerProposalDraft::new(
+            cell.id,
+            ContextPacketStrategy::FalsificationBrief,
+            vec!["trajectory-memory-reuse".to_string()],
+            vec!["artifact://rollout/release-upload-404".to_string()],
+        )
+        .with_proposed_lines(vec![ContextCompilerProposalLine::new(
+            "Prior rollout lesson: verify the release target before retrying upload.",
+            vec!["artifact://rollout/release-upload-404".to_string()],
+            9,
+        )?]);
+        let orchestrator =
+            ContextCompilerOrchestrator::new(StaticContextCompilerProposalSource::new(vec![draft]));
+
+        let proposals = orchestrator.propose(
+            ContextCompilerOrchestratorInput::from_state_cells("reuse rollout lesson", &[cell]),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].proposed_lines.len(), 1);
+        assert_eq!(
+            proposals[0].proposed_lines[0].citations,
+            &["artifact://rollout/release-upload-404".to_string()]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_input_from_state_cells_preserves_trajectory_memory_contract(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut cell = sample_state_cell_with_evidence_locators(
+            "project:continuitydb:compiler-input-trajectory-contract",
+            &["test://supporting-evidence"],
+        )?;
+        cell.set_trajectory_memory(TrajectoryMemory::new(
+            "retry upload against assumed release target",
+            "built and retained the release asset bundle",
+            "GitHub upload returned 404 for the target release",
+            "artifact://rollout/release-upload-404",
+            0.88,
+            "verify the release target before retrying asset upload",
+            vec!["task is retrying release asset upload".to_string()],
+            vec!["release target has been independently verified".to_string()],
+            ContextPacketStrategy::FalsificationBrief,
+        )?);
+
+        let input =
+            ContextCompilerOrchestratorInput::from_state_cells("reuse rollout lesson", &[cell]);
+        let trajectory_memory = input
+            .candidate_trajectory_memory(input.candidate_cell_ids()[0])
+            .ok_or_else(|| std::io::Error::other("missing trajectory memory"))?;
+
+        assert_eq!(
+            trajectory_memory.hypothesis_tried(),
+            "retry upload against assumed release target"
+        );
+        assert_eq!(
+            trajectory_memory.progress_made(),
+            "built and retained the release asset bundle"
+        );
+        assert_eq!(
+            trajectory_memory.failure_mode(),
+            "GitHub upload returned 404 for the target release"
+        );
+        assert_eq!(
+            trajectory_memory.trace_locator(),
+            "artifact://rollout/release-upload-404"
+        );
+        assert_eq!(trajectory_memory.confidence().value(), 0.88);
+        assert_eq!(
+            trajectory_memory.reusable_lesson(),
+            "verify the release target before retrying asset upload"
+        );
+        assert_eq!(
+            trajectory_memory.applicability_conditions(),
+            &["task is retrying release asset upload".to_string()]
+        );
+        assert_eq!(
+            trajectory_memory.invalidation_conditions(),
+            &["release target has been independently verified".to_string()]
+        );
+        assert_eq!(
+            trajectory_memory.checkout_strategy(),
+            ContextPacketStrategy::FalsificationBrief
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_context_compiler_source_supplies_trajectory_memory_contract(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut cell = sample_state_cell_with_evidence_locators(
+            "project:continuitydb:compiler-local-model-trajectory-contract",
+            &["test://supporting-evidence"],
+        )?;
+        cell.set_trajectory_memory(TrajectoryMemory::new(
+            "retry upload against assumed release target",
+            "built and retained the release asset bundle",
+            "GitHub upload returned 404 for the target release",
+            "artifact://rollout/release-upload-404",
+            0.88,
+            "verify the release target before retrying asset upload",
+            vec!["task is retrying release asset upload".to_string()],
+            vec!["release target has been independently verified".to_string()],
+            ContextPacketStrategy::FalsificationBrief,
+        )?);
+        let response = serde_json::json!({
+            "context_compiler_proposals": []
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let source = LocalModelContextCompilerProposalSource::new(steward, created_at());
+
+        let _ = source.propose_context_compiler_drafts(
+            &ContextCompilerOrchestratorInput::from_state_cells("reuse rollout lesson", &[cell]),
+        )?;
+
+        let requests = source.steward().backend().requests.borrow();
+        assert_eq!(requests.len(), 1);
+        let trajectory_evidence = requests[0]
+            .evidence()
+            .iter()
+            .find(|evidence| evidence.locator() == "artifact://rollout/release-upload-404")
+            .ok_or_else(|| std::io::Error::other("missing trajectory evidence"))?;
+        assert!(trajectory_evidence
+            .text()
+            .contains("verify the release target before retrying asset upload"));
+        assert!(trajectory_evidence
+            .text()
+            .contains("task is retrying release asset upload"));
+        assert!(trajectory_evidence
+            .text()
+            .contains("release target has been independently verified"));
+        assert!(trajectory_evidence.text().contains("confidence 0.880"));
+        assert!(trajectory_evidence.text().contains("falsification_brief"));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_context_compiler_source_rejects_action_response_shape(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let response = serde_json::json!({
+            "proposals": [{
+                "action": {
+                    "type": "mark_frontier",
+                    "cell_id": cell_id,
+                },
+                "rationale": "The cell is stale.",
+                "citations": ["test://stale"]
+            }]
+        })
+        .to_string();
+        let steward = LocalModelSteward::new(steward()?, StaticLocalModelBackend::new(response));
+        let source = LocalModelContextCompilerProposalSource::new(steward, created_at());
+
+        let result = source.propose_context_compiler_drafts(
+            &ContextCompilerOrchestratorInput::new("shape context", vec![cell_id]),
+        );
+
+        assert_eq!(result, Err(StewardError::InvalidModelResponse));
         Ok(())
     }
 
@@ -1550,6 +2107,26 @@ mod tests {
             StewardAction::RequestVerification { cell_id: None, request }
                 if request == "Ask for a concrete answerability question before labeling the cell."
         ));
+
+        let coverage = suite.acceptance_coverage();
+        assert!(coverage.complete());
+        assert_eq!(coverage.missing(), []);
+        assert_eq!(coverage.covered(), required_steward_acceptance_criteria());
+        assert!(cases[0]
+            .acceptance_criteria()
+            .contains(&StewardAcceptanceCriterion::ExplicitUncertaintyForInsufficientEvidence));
+        assert!(cases[1]
+            .acceptance_criteria()
+            .contains(&StewardAcceptanceCriterion::ConflictVersusSupersessionClassification));
+        assert!(cases[2]
+            .acceptance_criteria()
+            .contains(&StewardAcceptanceCriterion::ConflictVersusSupersessionClassification));
+        assert!(cases[3]
+            .acceptance_criteria()
+            .contains(&StewardAcceptanceCriterion::UnsupportedClaimAvoidance));
+        assert!(cases[8]
+            .acceptance_criteria()
+            .contains(&StewardAcceptanceCriterion::DeterministicPolicyRejectionAvoidance));
     }
 
     #[cfg(feature = "local-model")]
@@ -1576,9 +2153,21 @@ mod tests {
             cell_id: StateCellId::from_u128(7),
         })
         .require_citation("test://different")]);
+        let changed_acceptance = StewardEvaluationSuite::new(vec![StewardEvaluationCase::new(
+            "frontier",
+            created_at(),
+            "mark frontier",
+        )
+        .with_evidence("test://frontier", "Evidence is stale.")
+        .expect_action(StewardAction::MarkFrontier {
+            cell_id: StateCellId::from_u128(7),
+        })
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
+        .require_citation("test://frontier")]);
 
         assert_eq!(base.fingerprint(), same.fingerprint());
         assert_ne!(base.fingerprint(), changed.fingerprint());
+        assert_ne!(base.fingerprint(), changed_acceptance.fingerprint());
         assert!(base.fingerprint().starts_with("fnv1a64:"));
     }
 
@@ -1679,11 +2268,55 @@ mod tests {
         let candidates = small_model_candidates();
 
         assert_eq!(candidates[0].model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
+        assert_eq!(
+            small_model_default_quality_gate_candidate().map(|candidate| candidate.model_id()),
+            Some("Qwen/Qwen2.5-0.5B-Instruct")
+        );
+        assert_eq!(
+            crate::small_model_default_ci_candidate().map(|candidate| candidate.model_id()),
+            Some("Qwen/Qwen2.5-0.5B-Instruct")
+        );
+        let gate_candidates = crate::small_model_quality_gate_candidates();
+        assert_eq!(
+            gate_candidates
+                .iter()
+                .map(SmallModelCandidate::model_id)
+                .collect::<Vec<_>>(),
+            vec!["Qwen/Qwen2.5-0.5B-Instruct", "Qwen/Qwen3-0.6B"]
+        );
+        let ci_candidates = crate::small_model_ci_candidates();
+        assert_eq!(
+            ci_candidates
+                .iter()
+                .map(SmallModelCandidate::model_id)
+                .collect::<Vec<_>>(),
+            vec!["Qwen/Qwen2.5-0.5B-Instruct", "Qwen/Qwen3-0.6B"]
+        );
         assert_eq!(candidates[0].role(), "default-feasibility");
+        assert_eq!(candidates[0].evaluation_priority(), 1);
+        assert_eq!(candidates[0].evaluation_tier(), "default");
+        assert!(candidates[0].ci_suitable());
+        assert!(candidates[0].quality_gate_eligible());
+        assert!(candidates[0].default_quality_gate_candidate());
+        assert_eq!(
+            candidates[0].evaluation_use(),
+            "first real Steward proposal experiments"
+        );
+        assert!(candidates[1].quality_gate_eligible());
+        assert!(!candidates[1].default_quality_gate_candidate());
+        assert!(!candidates[2].quality_gate_eligible());
         assert!(candidates.iter().any(|candidate| {
             candidate.model_id() == "HuggingFaceTB/SmolLM2-360M-Instruct"
                 && candidate.role() == "ultra-small-experimental"
+                && candidate.evaluation_use()
+                    == "measure the lower bound for constrained proposal quality"
         }));
+        assert_eq!(candidates[3].role(), "smoke-test-only");
+        assert_eq!(candidates[3].evaluation_priority(), 4);
+        assert_eq!(candidates[3].evaluation_tier(), "smoke-test");
+        assert!(!candidates[3].ci_suitable());
+        assert!(!candidates[3].quality_gate_eligible());
+        assert!(!candidates[3].default_quality_gate_candidate());
     }
 
     #[cfg(feature = "local-model")]
@@ -1693,13 +2326,42 @@ mod tests {
 
         assert!(candidates.iter().all(|candidate| {
             !candidate.recommended_runtime().is_empty()
+                && candidate
+                    .compatible_runtimes()
+                    .contains(&candidate.recommended_runtime())
                 && !candidate.artifact_format().is_empty()
                 && candidate.requires_grammar()
                 && !candidate.notes().is_empty()
         }));
         assert_eq!(candidates[0].recommended_runtime(), "llama.cpp");
+        assert_eq!(
+            candidates[0].compatible_runtimes(),
+            &["llama.cpp", "mistral.rs"]
+        );
         assert_eq!(candidates[0].artifact_format(), "GGUF");
         assert_eq!(candidates[0].recommended_temperature(), 0.0);
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn small_model_candidates_expose_model_card_metadata() {
+        let candidates = small_model_candidates();
+
+        assert!(candidates.iter().all(|candidate| {
+            !candidate.license().is_empty()
+                && candidate.parameter_count_millions() > 0
+                && candidate.context_window_tokens() > 0
+                && candidate
+                    .model_card_url()
+                    .starts_with("https://huggingface.co/")
+        }));
+        assert_eq!(candidates[0].license(), "Apache-2.0");
+        assert_eq!(candidates[0].parameter_count_millions(), 490);
+        assert_eq!(candidates[0].context_window_tokens(), 32_768);
+        assert_eq!(
+            candidates[0].model_card_url(),
+            "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct"
+        );
     }
 
     #[cfg(feature = "local-model")]
@@ -1707,6 +2369,14 @@ mod tests {
     fn small_model_candidate_builds_recommended_runner_config() {
         let config =
             small_model_candidates()[0].recommended_runner_config("llama-cli", "/models/qwen.gguf");
+        let grammar_config = small_model_candidates()[0]
+            .recommended_runner_config_with_grammar_file(
+                "llama-cli",
+                "/models/qwen.gguf",
+                "schemas/steward-response.gbnf",
+            );
+        let mistral_config = small_model_candidates()[0]
+            .recommended_mistral_runner_config("mistralrs-cli", "/models/qwen.gguf");
 
         assert_eq!(config.executable(), std::path::Path::new("llama-cli"));
         assert_eq!(
@@ -1715,11 +2385,39 @@ mod tests {
                 "--model".to_string(),
                 "/models/qwen.gguf".to_string(),
                 "--ctx-size".to_string(),
-                "4096".to_string(),
+                "32768".to_string(),
                 "--temp".to_string(),
                 "0".to_string(),
                 "--prompt".to_string(),
                 "-".to_string(),
+            ]
+        );
+        assert_eq!(
+            grammar_config.command_arguments(),
+            vec![
+                "--model".to_string(),
+                "/models/qwen.gguf".to_string(),
+                "--ctx-size".to_string(),
+                "32768".to_string(),
+                "--temp".to_string(),
+                "0".to_string(),
+                "--grammar-file".to_string(),
+                "schemas/steward-response.gbnf".to_string(),
+                "--prompt".to_string(),
+                "-".to_string(),
+            ]
+        );
+        assert_eq!(
+            mistral_config.command_arguments(),
+            vec![
+                "--model".to_string(),
+                "/models/qwen.gguf".to_string(),
+                "--max-seq-len".to_string(),
+                "32768".to_string(),
+                "--temperature".to_string(),
+                "0".to_string(),
+                "--json-output".to_string(),
+                "--prompt-stdin".to_string(),
             ]
         );
     }
@@ -1761,6 +2459,87 @@ mod tests {
         assert!(grammar.contains("proposal ::= object-start ws action-field"));
         assert!(grammar.contains("action ::= create-cell-draft-action"));
         assert!(grammar.contains("request-verification-action"));
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_context_compiler_response_json_schema_describes_packet_shape_proposals(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let schema: serde_json::Value =
+            serde_json::from_str(local_model_context_compiler_response_json_schema())?;
+
+        assert_eq!(
+            schema["$id"].as_str(),
+            Some("https://continuitydb.dev/schemas/local-model-context-compiler-response.schema.json")
+        );
+        assert_eq!(
+            schema["x-continuitydb-schema-version"].as_u64(),
+            Some(LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_SCHEMA_VERSION as u64)
+        );
+        assert_eq!(
+            schema["required"],
+            serde_json::json!(["context_compiler_proposals"])
+        );
+        assert!(schema["$defs"]["context_compiler_proposal"].is_object());
+        assert!(schema["$defs"]["context_compiler_proposal_line"].is_object());
+        assert_eq!(
+            schema["$defs"]["context_compiler_proposal"]["properties"]["proposed_lines"]["items"]
+                ["$ref"]
+                .as_str(),
+            Some("#/$defs/context_compiler_proposal_line")
+        );
+        assert_eq!(
+            schema["$defs"]["context_compiler_proposal"]["required"],
+            serde_json::json!([
+                "target_cell_id",
+                "strategy",
+                "abstraction_level",
+                "reason_tags",
+                "evidence_locators"
+            ])
+        );
+        assert_eq!(
+            schema["$defs"]["context_compiler_proposal"]["properties"]["abstraction_level"]["$ref"]
+                .as_str(),
+            Some("#/$defs/context_abstraction_level")
+        );
+        assert_eq!(
+            schema["$defs"]["context_packet_strategy"]["enum"],
+            serde_json::json!([
+                "raw_projection",
+                "operational_brief",
+                "revision_capsule",
+                "uncertainty_brief",
+                "scavenging_brief",
+                "falsification_brief"
+            ])
+        );
+        assert_eq!(
+            schema["$defs"]["context_abstraction_level"]["enum"],
+            serde_json::json!([
+                "raw",
+                "brief",
+                "capsule",
+                "evidence_dense",
+                "scavenging",
+                "falsification"
+            ])
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "local-model")]
+    #[test]
+    fn local_model_context_compiler_response_gbnf_grammar_describes_packet_shape_proposals() {
+        let grammar = local_model_context_compiler_response_gbnf_grammar();
+
+        assert!(grammar.contains("root ::= context-compiler-response"));
+        assert!(grammar.contains("context-compiler-proposals-field"));
+        assert!(grammar.contains("abstraction-level-field"));
+        assert!(grammar.contains("evidence-dense"));
+        assert!(grammar.contains("proposed-lines-field"));
+        assert!(grammar.contains("falsification-brief"));
+        assert!(!grammar.contains("request-verification-action"));
     }
 
     #[cfg(feature = "local-model")]
@@ -2443,12 +3222,19 @@ mod tests {
         .require_citation("test://frontier")]);
         let benchmark = LocalModelBenchmark::new(small_model_candidates()[0], runner, suite);
 
-        let baseline =
-            LocalModelBenchmarkBaseline::from_report(benchmark.run(steward()?), created_at());
+        let baseline = LocalModelBenchmarkBaseline::from_report_with_candidate_selection(
+            benchmark.run(steward()?),
+            created_at(),
+            "default_ci_candidate",
+        );
 
         assert!(baseline.passed());
         assert_eq!(baseline.candidate_model_id(), "Qwen/Qwen2.5-0.5B-Instruct");
         assert_eq!(baseline.candidate_role(), "default-feasibility");
+        assert_eq!(
+            baseline.candidate_selection_source(),
+            "default_ci_candidate"
+        );
         assert_eq!(baseline.recorded_at(), created_at());
         assert_eq!(baseline.evaluation().case_reports().len(), 1);
         Ok(())
@@ -2538,6 +3324,14 @@ mod tests {
         let regression = LocalModelBenchmarkRegression::compare(&previous, &current);
 
         assert!(regression.regressed());
+        assert_eq!(
+            regression.previous_candidate_selection_source(),
+            "unspecified"
+        );
+        assert_eq!(
+            regression.current_candidate_selection_source(),
+            "unspecified"
+        );
         assert_eq!(regression.previous_passed_cases(), 1);
         assert_eq!(regression.current_passed_cases(), 0);
         assert_eq!(regression.pass_count_delta(), -1);
@@ -3771,6 +4565,136 @@ mod tests {
 
         assert!(matches!(result, Err(StewardError::ProposalStoreCorrupt)));
         fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_validates_model_packet_suggestions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let source =
+            StaticContextCompilerProposalSource::new(vec![ContextCompilerProposalDraft::new(
+                cell_id,
+                ContextPacketStrategy::FalsificationBrief,
+                vec!["task-intent-action".to_string()],
+                vec!["trace://release/upload".to_string()],
+            )]);
+        let orchestrator = ContextCompilerOrchestrator::new(source);
+
+        let proposals = orchestrator.propose(
+            ContextCompilerOrchestratorInput::new(
+                "what should I do next without repeating the upload failure?",
+                vec![cell_id],
+            )
+            .with_candidate_evidence_locators(cell_id, vec!["trace://release/upload".to_string()]),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].target_cell_id, cell_id);
+        assert_eq!(
+            proposals[0].strategy,
+            ContextPacketStrategy::FalsificationBrief
+        );
+        assert_eq!(
+            proposals[0].abstraction_level,
+            ContextPacketStrategy::FalsificationBrief.default_abstraction_level()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_preserves_explicit_abstraction_level(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cell_id = StateCellId::new();
+        let source =
+            StaticContextCompilerProposalSource::new(vec![ContextCompilerProposalDraft::new(
+                cell_id,
+                ContextPacketStrategy::RevisionCapsule,
+                vec!["audit-context-needed".to_string()],
+                vec!["trace://release/upload".to_string()],
+            )
+            .with_abstraction_level(ContextAbstractionLevel::EvidenceDense)]);
+        let orchestrator = ContextCompilerOrchestrator::new(source);
+
+        let proposals = orchestrator.propose(
+            ContextCompilerOrchestratorInput::new(
+                "explain the retained release upload failure with evidence",
+                vec![cell_id],
+            )
+            .with_candidate_evidence_locators(cell_id, vec!["trace://release/upload".to_string()]),
+        )?;
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].strategy,
+            ContextPacketStrategy::RevisionCapsule
+        );
+        assert_eq!(
+            proposals[0].abstraction_level,
+            ContextAbstractionLevel::EvidenceDense
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_rejects_non_candidate_packet_suggestions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let candidate = StateCellId::new();
+        let outside_candidate = StateCellId::new();
+        let source =
+            StaticContextCompilerProposalSource::new(vec![ContextCompilerProposalDraft::new(
+                outside_candidate,
+                ContextPacketStrategy::ScavengingBrief,
+                vec!["task-intent-safety".to_string()],
+                vec!["trace://outside".to_string()],
+            )]);
+        let orchestrator = ContextCompilerOrchestrator::new(source);
+
+        let result = orchestrator.propose(ContextCompilerOrchestratorInput::new(
+            "is this safe to use now?",
+            vec![candidate],
+        ));
+
+        assert_eq!(
+            result,
+            Err(StewardError::InvalidContextCompilerProposalTarget)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_compiler_orchestrator_rejects_missing_candidate_packet_suggestion(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let proposed_candidate = StateCellId::new();
+        let missing_candidate = StateCellId::new();
+        let source =
+            StaticContextCompilerProposalSource::new(vec![ContextCompilerProposalDraft::new(
+                proposed_candidate,
+                ContextPacketStrategy::OperationalBrief,
+                vec!["task-intent-operational".to_string()],
+                vec!["trace://proposed".to_string()],
+            )]);
+        let orchestrator = ContextCompilerOrchestrator::new(source);
+
+        let result = orchestrator.propose(
+            ContextCompilerOrchestratorInput::new(
+                "compile every selected candidate",
+                vec![proposed_candidate, missing_candidate],
+            )
+            .with_candidate_evidence_locators(
+                proposed_candidate,
+                vec!["trace://proposed".to_string()],
+            )
+            .with_candidate_evidence_locators(
+                missing_candidate,
+                vec!["trace://missing".to_string()],
+            ),
+        );
+
+        assert_eq!(
+            result,
+            Err(StewardError::MissingContextCompilerProposalTarget)
+        );
         Ok(())
     }
 }

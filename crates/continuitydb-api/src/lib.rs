@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use continuitydb_checkout::{
-    audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice,
+    audit, checkout, AuditTrace, CheckoutError, CheckoutRequest, CheckoutSlice, CheckoutSummary,
 };
 #[cfg(feature = "steward")]
 use continuitydb_core::{
@@ -10,8 +10,10 @@ use continuitydb_core::{
     Citation, Confidence, Evidence, Scope, SemanticAnchor, SourceId, TrustSignal, ValidTimeRange,
 };
 use continuitydb_core::{
-    CommitId, CommitManifest, CoreError, RevisionLinkKind, RevisionLinkRecord, StateCell,
-    StateCellId, UtilityFeedback,
+    AttentionSignal, CommitId, CommitManifest, ContextAffordance, ContextGap,
+    ContextLifecyclePolicy, ContextPacket, CoreError, EpistemicUncertainty, InvalidationCondition,
+    LifecycleStage, MemoryProjection, RevisionLinkKind, RevisionLinkRecord, StateCell, StateCellId,
+    TrajectoryMemory, UtilityFeedback,
 };
 use continuitydb_kernel::{
     CellLookup, CommitManifestLookup, FileKernel, FileKernelHealth, FileKernelLookupPlan,
@@ -20,10 +22,13 @@ use continuitydb_kernel::{
 };
 use continuitydb_query::{
     decode_query_json, parse_query_text, CheckoutQuery, ContinuityQuery, QueryEnvelopeError,
-    QueryError, QueryTextError,
+    QueryError, QueryReturnShape, QueryTextError,
 };
 use continuitydb_revision::{
     detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
+    revise_attention_signal, revise_context_affordance, revise_context_gap,
+    revise_context_lifecycle_policy, revise_epistemic_uncertainty, revise_invalidation_condition,
+    revise_lifecycle_stage, revise_memory_projection, revise_trajectory_memory,
     revise_utility_feedback, scan_cell_conflicts, CellConflict, CellConflictScan,
     ConflictResolutionRecommendation, ConflictResolutionScan,
 };
@@ -46,6 +51,10 @@ use thiserror::Error;
 pub const COMMIT_EXPORT_FORMAT: &str = "continuitydb.commit_export";
 /// Supported JSON commit export envelope version.
 pub const COMMIT_EXPORT_FORMAT_VERSION: u32 = 1;
+/// Wire-format marker for projected checkout query result envelopes.
+pub const CHECKOUT_QUERY_RESULT_FORMAT: &str = "continuitydb.checkout_query.result";
+/// Supported projected checkout query result envelope version.
+pub const CHECKOUT_QUERY_RESULT_FORMAT_VERSION: u32 = 1;
 
 /// Errors produced by the native ContinuityDB operation API.
 #[derive(Debug, Error, PartialEq)]
@@ -100,6 +109,12 @@ pub enum ContinuityError {
     /// Commit export envelope JSON could not be encoded or decoded.
     #[error("commit export envelope JSON is invalid")]
     CommitExportJson,
+    /// Projected checkout query result JSON could not be encoded or decoded.
+    #[error("checkout query result JSON is invalid")]
+    CheckoutQueryResultJson,
+    /// Projected checkout query result envelope has an unsupported format or version.
+    #[error("checkout query result envelope is invalid")]
+    InvalidCheckoutQueryResultEnvelope,
     /// Commit export envelope file could not be read or written.
     #[error("commit export envelope file I/O failed")]
     CommitExportFileIo,
@@ -117,6 +132,87 @@ pub enum ContinuityError {
         /// Health report that explains why the store is not canonical.
         health: FileKernelHealth,
     },
+}
+
+/// Projected result for query execution APIs that honor `QueryReturnShape`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "result")]
+pub enum CheckoutQueryResult {
+    /// Full deterministic checkout slice with selected cells and metadata.
+    PackedContext(CheckoutSlice),
+    /// Deterministic aggregate checkout summary without full cell payloads.
+    Summary(CheckoutSummary),
+    /// Selected StateCells without checkout metadata.
+    Cells(Vec<StateCell>),
+    /// Compiled StateCell v2 context packets without full StateCell payloads.
+    ContextPackets(Vec<ContextPacket>),
+}
+
+impl CheckoutQueryResult {
+    /// Returns the query return shape represented by this projected result.
+    pub fn return_shape(&self) -> QueryReturnShape {
+        match self {
+            Self::PackedContext(_) => QueryReturnShape::PackedContextWithMetadata,
+            Self::Summary(_) => QueryReturnShape::SummaryOnly,
+            Self::Cells(_) => QueryReturnShape::CellsOnly,
+            Self::ContextPackets(_) => QueryReturnShape::ContextPacketsOnly,
+        }
+    }
+}
+
+/// Versioned JSON envelope for projected checkout query results.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CheckoutQueryResultEnvelope {
+    /// Wire-format marker.
+    pub format: String,
+    /// Wire-format version.
+    pub format_version: u32,
+    /// Query return shape carried by `result`.
+    pub return_shape: QueryReturnShape,
+    /// Projected query result.
+    pub result: CheckoutQueryResult,
+}
+
+impl CheckoutQueryResultEnvelope {
+    /// Wraps a projected query result in the current JSON envelope.
+    pub fn new(result: CheckoutQueryResult) -> Self {
+        Self {
+            format: CHECKOUT_QUERY_RESULT_FORMAT.to_string(),
+            format_version: CHECKOUT_QUERY_RESULT_FORMAT_VERSION,
+            return_shape: result.return_shape(),
+            result,
+        }
+    }
+
+    /// Validates envelope identity and version.
+    pub fn validate(&self) -> Result<(), ContinuityError> {
+        if self.format == CHECKOUT_QUERY_RESULT_FORMAT
+            && self.format_version == CHECKOUT_QUERY_RESULT_FORMAT_VERSION
+            && self.return_shape == self.result.return_shape()
+        {
+            Ok(())
+        } else {
+            Err(ContinuityError::InvalidCheckoutQueryResultEnvelope)
+        }
+    }
+}
+
+/// Encodes a projected checkout query result as a versioned JSON envelope.
+pub fn encode_checkout_query_result_json(
+    result: CheckoutQueryResult,
+) -> Result<Vec<u8>, ContinuityError> {
+    serde_json::to_vec(&CheckoutQueryResultEnvelope::new(result))
+        .map_err(|_error| ContinuityError::CheckoutQueryResultJson)
+}
+
+/// Decodes a projected checkout query result from a versioned JSON envelope.
+pub fn decode_checkout_query_result_json(
+    bytes: &[u8],
+) -> Result<CheckoutQueryResult, ContinuityError> {
+    let envelope = serde_json::from_slice::<CheckoutQueryResultEnvelope>(bytes)
+        .map_err(|_error| ContinuityError::CheckoutQueryResultJson)?;
+    envelope.validate()?;
+    Ok(envelope.result)
 }
 
 /// Native embeddable ContinuityDB operation boundary.
@@ -407,6 +503,23 @@ impl<K: StorageKernel> ContinuityDb<K> {
         Ok(record)
     }
 
+    fn record_successor_revision_links(
+        &mut self,
+        successor: StateCellId,
+        predecessor: StateCellId,
+        recorded_at: DateTime<Utc>,
+    ) -> Result<(), ContinuityError> {
+        for kind in [RevisionLinkKind::Supersedes, RevisionLinkKind::Predecessor] {
+            self.kernel.append_revision_link(RevisionLinkRecord::new(
+                successor,
+                kind,
+                predecessor,
+                recorded_at,
+            ))?;
+        }
+        Ok(())
+    }
+
     /// Lists native revision-link records matching deterministic lookup constraints.
     pub fn list_revision_links(
         &self,
@@ -425,6 +538,14 @@ impl<K: StorageKernel> ContinuityDb<K> {
         self.checkout(query.compile_checkout()?)
     }
 
+    /// Executes a typed checkout query and projects the result according to its return shape.
+    pub fn checkout_query_projected(
+        &self,
+        query: CheckoutQuery,
+    ) -> Result<CheckoutQueryResult, ContinuityError> {
+        self.checkout_continuity_query_projected(ContinuityQuery::Checkout(query))
+    }
+
     /// Materializes a deterministic continuity slice from a top-level typed query.
     pub fn checkout_continuity_query(
         &self,
@@ -433,14 +554,49 @@ impl<K: StorageKernel> ContinuityDb<K> {
         self.checkout(query.compile_checkout()?)
     }
 
+    /// Executes a top-level typed query and projects the result according to its return shape.
+    pub fn checkout_continuity_query_projected(
+        &self,
+        query: ContinuityQuery,
+    ) -> Result<CheckoutQueryResult, ContinuityError> {
+        let return_shape = query.return_shape();
+        let slice = self.checkout_continuity_query(query)?;
+        match return_shape {
+            QueryReturnShape::PackedContextWithMetadata => {
+                Ok(CheckoutQueryResult::PackedContext(slice))
+            }
+            QueryReturnShape::SummaryOnly => Ok(CheckoutQueryResult::Summary(slice.summary)),
+            QueryReturnShape::CellsOnly => Ok(CheckoutQueryResult::Cells(slice.cells)),
+            QueryReturnShape::ContextPacketsOnly => {
+                Ok(CheckoutQueryResult::ContextPackets(slice.context_packets))
+            }
+        }
+    }
+
     /// Materializes a deterministic continuity slice from a versioned typed query JSON envelope.
     pub fn checkout_query_json(&self, bytes: &[u8]) -> Result<CheckoutSlice, ContinuityError> {
         self.checkout_continuity_query(decode_query_json(bytes)?)
     }
 
+    /// Executes a versioned typed query JSON envelope and projects the result shape.
+    pub fn checkout_query_json_projected(
+        &self,
+        bytes: &[u8],
+    ) -> Result<CheckoutQueryResult, ContinuityError> {
+        self.checkout_continuity_query_projected(decode_query_json(bytes)?)
+    }
+
     /// Materializes a deterministic continuity slice from strict text query syntax.
     pub fn checkout_query_text(&self, input: &str) -> Result<CheckoutSlice, ContinuityError> {
         self.checkout_continuity_query(parse_query_text(input)?)
+    }
+
+    /// Executes strict text query syntax and projects the result shape.
+    pub fn checkout_query_text_projected(
+        &self,
+        input: &str,
+    ) -> Result<CheckoutQueryResult, ContinuityError> {
+        self.checkout_continuity_query_projected(parse_query_text(input)?)
     }
 
     /// Materializes a deterministic continuity slice from a saved typed query file.
@@ -450,6 +606,15 @@ impl<K: StorageKernel> ContinuityDb<K> {
     ) -> Result<CheckoutSlice, ContinuityError> {
         let encoded = fs::read(query_path).map_err(|_error| ContinuityError::QueryFileIo)?;
         self.checkout_continuity_query(decode_query_file(&encoded)?)
+    }
+
+    /// Executes a saved query file and projects the result shape.
+    pub fn checkout_query_file_projected<P: AsRef<Path>>(
+        &self,
+        query_path: P,
+    ) -> Result<CheckoutQueryResult, ContinuityError> {
+        let encoded = fs::read(query_path).map_err(|_error| ContinuityError::QueryFileIo)?;
+        self.checkout_continuity_query_projected(decode_query_file(&encoded)?)
     }
 
     /// Returns the manifest for a database commit boundary when it exists.
@@ -1028,6 +1193,223 @@ impl<K: StorageKernel> ContinuityDb<K> {
         let revision = revise_utility_feedback(&previous, feedback);
         let successor_id = revision.cell.id;
         self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records a lifecycle-stage transition as an append-only successor StateCell.
+    pub fn record_lifecycle_stage(
+        &mut self,
+        cell_id: StateCellId,
+        lifecycle_stage: LifecycleStage,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_lifecycle_stage_at(cell_id, lifecycle_stage, Utc::now())
+    }
+
+    /// Records a lifecycle-stage transition at a deterministic system time.
+    pub fn record_lifecycle_stage_at(
+        &mut self,
+        cell_id: StateCellId,
+        lifecycle_stage: LifecycleStage,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_lifecycle_stage(&previous, lifecycle_stage);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records a context lifecycle policy as an append-only successor StateCell.
+    pub fn record_context_lifecycle_policy(
+        &mut self,
+        cell_id: StateCellId,
+        lifecycle_policy: ContextLifecyclePolicy,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_context_lifecycle_policy_at(cell_id, lifecycle_policy, Utc::now())
+    }
+
+    /// Records a context lifecycle policy at a deterministic system time.
+    pub fn record_context_lifecycle_policy_at(
+        &mut self,
+        cell_id: StateCellId,
+        lifecycle_policy: ContextLifecyclePolicy,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_context_lifecycle_policy(&previous, lifecycle_policy);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records a memory projection as an append-only successor StateCell.
+    pub fn record_memory_projection(
+        &mut self,
+        cell_id: StateCellId,
+        projection: MemoryProjection,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_memory_projection_at(cell_id, projection, Utc::now())
+    }
+
+    /// Records a memory projection at a deterministic system time.
+    pub fn record_memory_projection_at(
+        &mut self,
+        cell_id: StateCellId,
+        projection: MemoryProjection,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_memory_projection(&previous, projection);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records native epistemic uncertainty as an append-only successor StateCell.
+    pub fn record_epistemic_uncertainty(
+        &mut self,
+        cell_id: StateCellId,
+        uncertainty: EpistemicUncertainty,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_epistemic_uncertainty_at(cell_id, uncertainty, Utc::now())
+    }
+
+    /// Records native epistemic uncertainty at a deterministic system time.
+    pub fn record_epistemic_uncertainty_at(
+        &mut self,
+        cell_id: StateCellId,
+        uncertainty: EpistemicUncertainty,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_epistemic_uncertainty(&previous, uncertainty);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records native attention signal as an append-only successor StateCell.
+    pub fn record_attention_signal(
+        &mut self,
+        cell_id: StateCellId,
+        attention: AttentionSignal,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_attention_signal_at(cell_id, attention, Utc::now())
+    }
+
+    /// Records native attention signal at a deterministic system time.
+    pub fn record_attention_signal_at(
+        &mut self,
+        cell_id: StateCellId,
+        attention: AttentionSignal,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_attention_signal(&previous, attention);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records native context affordance as an append-only successor StateCell.
+    pub fn record_context_affordance(
+        &mut self,
+        cell_id: StateCellId,
+        context_affordance: ContextAffordance,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_context_affordance_at(cell_id, context_affordance, Utc::now())
+    }
+
+    /// Records native context affordance at a deterministic system time.
+    pub fn record_context_affordance_at(
+        &mut self,
+        cell_id: StateCellId,
+        context_affordance: ContextAffordance,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_context_affordance(&previous, context_affordance);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records native context gap as an append-only successor StateCell.
+    pub fn record_context_gap(
+        &mut self,
+        cell_id: StateCellId,
+        context_gap: ContextGap,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_context_gap_at(cell_id, context_gap, Utc::now())
+    }
+
+    /// Records native context gap at a deterministic system time.
+    pub fn record_context_gap_at(
+        &mut self,
+        cell_id: StateCellId,
+        context_gap: ContextGap,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_context_gap(&previous, context_gap);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records native invalidation condition as an append-only successor StateCell.
+    pub fn record_invalidation_condition(
+        &mut self,
+        cell_id: StateCellId,
+        invalidation_condition: InvalidationCondition,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_invalidation_condition_at(cell_id, invalidation_condition, Utc::now())
+    }
+
+    /// Records native invalidation condition at a deterministic system time.
+    pub fn record_invalidation_condition_at(
+        &mut self,
+        cell_id: StateCellId,
+        invalidation_condition: InvalidationCondition,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_invalidation_condition(&previous, invalidation_condition);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
+        Ok(successor_id)
+    }
+
+    /// Records native trajectory memory as an append-only successor StateCell.
+    pub fn record_trajectory_memory(
+        &mut self,
+        cell_id: StateCellId,
+        trajectory_memory: TrajectoryMemory,
+    ) -> Result<StateCellId, ContinuityError> {
+        self.record_trajectory_memory_at(cell_id, trajectory_memory, Utc::now())
+    }
+
+    /// Records native trajectory memory at a deterministic system time.
+    pub fn record_trajectory_memory_at(
+        &mut self,
+        cell_id: StateCellId,
+        trajectory_memory: TrajectoryMemory,
+        committed_at: DateTime<Utc>,
+    ) -> Result<StateCellId, ContinuityError> {
+        let previous = self.lookup_one_cell(cell_id)?;
+        let revision = revise_trajectory_memory(&previous, trajectory_memory);
+        let successor_id = revision.cell.id;
+        self.kernel.append_cell_at(revision.cell, committed_at)?;
+        self.record_successor_revision_links(successor_id, cell_id, committed_at)?;
         Ok(successor_id)
     }
 
@@ -1316,6 +1698,17 @@ fn cell_lookup_from_checkout_request(request: CheckoutRequest) -> CellLookup {
         system_at: request.system_at,
         commit_id: request.commit_id,
         activation: request.activation,
+        lifecycle_stage: None,
+        retention_policy: None,
+        use_policy: None,
+        promotion_policy: None,
+        projection_kind: None,
+        minimum_uncertainty: None,
+        minimum_surprise_bits: None,
+        minimum_probability_delta: None,
+        minimum_salience: None,
+        minimum_context_affordance: None,
+        minimum_epistemic_pressure: None,
         answerability_question: request.answerability_question,
         evidence_source: request.evidence_source,
         dependency_target: request.dependency_target,
@@ -1348,6 +1741,13 @@ impl ContinuityDb<FileKernel> {
         let db = Self::open_file(path)?;
         db.ensure_kernel_requirements(requirements)?;
         Ok(db)
+    }
+
+    /// Opens a file-backed ContinuityDB instance only when persistent index checkpoints are available.
+    pub fn open_persistent_indexed_append_log_file<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<Self, ContinuityError> {
+        Self::open_file_with_requirements(path, KernelRequirements::persistent_indexed_append_log())
     }
 
     /// Opens a file-backed ContinuityDB instance only when the store is already canonical.
@@ -1488,9 +1888,13 @@ mod tests {
     #[cfg(feature = "steward")]
     use continuitydb_core::{ActivationState, CellDependencyKind};
     use continuitydb_core::{
-        Answerability, CellCost, CellPayload, Citation, CommitId, Confidence, Evidence,
-        RevisionLinkKind, Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal,
-        UtilityFeedback, ValidTimeRange,
+        Answerability, AttentionSignal, CellCost, CellPayload, Citation, CommitId, Confidence,
+        ContextAffordance, ContextCompilerPolicy, ContextGap, ContextGapKind,
+        ContextLifecyclePolicy, ContextPacketStrategy, ContextProfile, EpistemicUncertainty,
+        Evidence, InvalidationCondition, InvalidationConditionKind, LifecycleStage,
+        MemoryProjection, MemoryProjectionKind, PromotionPolicy, RetentionPolicy, RevisionLinkKind,
+        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrajectoryMemory, TrustSignal,
+        UsePolicy, UtilityFeedback, ValidTimeRange,
     };
     use continuitydb_kernel::{
         CellLookup, CommitManifestLookup, FileKernel, KernelDurability, KernelError,
@@ -1514,6 +1918,7 @@ mod tests {
     #[cfg(feature = "steward")]
     use super::StewardApplicationResult;
     use super::{
+        decode_checkout_query_result_json, encode_checkout_query_result_json, CheckoutQueryResult,
         CommitExportBatch, CommitExportFileSummary, CommitImportSummary, CommitSlice, ContinuityDb,
         ContinuityError,
     };
@@ -1737,6 +2142,9 @@ mod tests {
         assert_eq!(health.checksum_free_records, 0);
         assert_eq!(health.canonical_records, 0);
         assert!(!health.compaction_recommended);
+        assert!(!health.persistent_index_checkpoint_present_on_open);
+        assert!(!health.persistent_index_checkpoint_trusted_on_open);
+        assert!(health.persistent_index_checkpoint_rebuilt_on_open);
 
         fs::remove_file(path)?;
         Ok(())
@@ -1880,6 +2288,20 @@ WHERE scope = project("continuitydb")"#,
     }
 
     #[test]
+    fn api_open_persistent_indexed_append_log_file_accepts_file_kernel(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_file_kernel_path("api-open-file-require-persistent-indexed-append-log");
+
+        let db = ContinuityDb::open_persistent_indexed_append_log_file(&path)?;
+
+        assert_eq!(db.kernel().path(), path.as_path());
+        assert!(db.kernel_satisfies(KernelRequirements::persistent_indexed_append_log()));
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
     fn api_open_file_rejects_unsatisfied_kernel_requirements() {
         let path = temp_file_kernel_path("api-open-file-require-indexed");
         let required = KernelRequirements::indexed_embedded();
@@ -1893,7 +2315,7 @@ WHERE scope = project("continuitydb")"#,
                 actual,
             }) if error_required == required
                 && actual.durability == continuitydb_kernel::KernelDurability::AppendLog
-                && !actual.persistent_indexes
+                && actual.persistent_indexes
         ));
 
         let _ = fs::remove_file(path);
@@ -1917,10 +2339,36 @@ WHERE scope = project("continuitydb")"#,
             system_at: Some(committed_at),
             commit_id: None,
             activation: None,
+            lifecycle_stage: None,
+            retention_policy: None,
+            use_policy: None,
+            promotion_policy: None,
+            projection_kind: None,
+            minimum_uncertainty: None,
+            minimum_surprise_bits: None,
+            minimum_probability_delta: None,
+            minimum_salience: None,
+            minimum_context_affordance: None,
+            minimum_epistemic_pressure: None,
+            context_gap_kind: None,
+            minimum_context_gap_priority: None,
+            invalidation_condition_kind: None,
+            minimum_invalidation_priority: None,
+            epistemic_action: None,
+            epistemic_action_reason: None,
+            selection_reason: None,
+            trajectory_memory_strategy: None,
+            minimum_trajectory_memory_confidence: None,
             answerability_question: None,
+            compiler_intent: None,
+            compiler_proposals: Vec::new(),
             evidence_source: None,
             dependency_target: None,
             dependency_kind: None,
+            revision_related_cell: None,
+            revision_link_kind: None,
+            context_profile: ContextProfile::Execution,
+            compiler_policy: ContextCompilerPolicy::RawBaseline,
             minimum_confidence: Confidence::new(0.8)?,
             token_budget: 100,
         })?;
@@ -2032,7 +2480,245 @@ WHERE scope = project("continuitydb")"#,
     }
 
     #[test]
-    fn api_checkout_query_json_preserves_query_compilation_errors(
+    fn api_checkout_query_json_accepts_summary_only_return_shape(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-json-summary",
+            0.91,
+            12,
+        )?)?;
+        let query = ContinuityQuery::Checkout(
+            CheckoutQuery::new(QueryTask::new(
+                "stored-facts",
+                "what should the agent know?",
+            ))
+            .with_return_shape(QueryReturnShape::SummaryOnly),
+        );
+        let encoded = encode_query_json(query)?;
+
+        let slice = db.checkout_query_json(&encoded)?;
+
+        assert_eq!(slice.summary.selected_cell_count, 1);
+        assert_eq!(slice.summary.total_tokens, 12);
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_json_projected_returns_summary_only(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-json-projected-summary",
+            0.91,
+            12,
+        )?)?;
+        let query = ContinuityQuery::Checkout(
+            CheckoutQuery::new(QueryTask::new(
+                "stored-facts",
+                "what should the agent know?",
+            ))
+            .with_return_shape(QueryReturnShape::SummaryOnly),
+        );
+        let encoded = encode_query_json(query)?;
+
+        let result = db.checkout_query_json_projected(&encoded)?;
+
+        match result {
+            CheckoutQueryResult::Summary(summary) => {
+                assert_eq!(summary.selected_cell_count, 1);
+                assert_eq!(summary.total_tokens, 12);
+            }
+            CheckoutQueryResult::PackedContext(_)
+            | CheckoutQueryResult::Cells(_)
+            | CheckoutQueryResult::ContextPackets(_) => {
+                return Err(std::io::Error::other(
+                    "summary_only projection returned non-summary result",
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_text_projected_preserves_packed_default(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-text-projected-packed",
+            0.91,
+            12,
+        )?)?;
+
+        let result = db.checkout_query_text_projected(
+            r#"CHECKOUT "stored-facts" ANSWER "what should the agent know?""#,
+        )?;
+
+        match result {
+            CheckoutQueryResult::PackedContext(slice) => {
+                assert_eq!(slice.cells.len(), 1);
+                assert_eq!(slice.summary.selected_cell_count, 1);
+            }
+            CheckoutQueryResult::Summary(_)
+            | CheckoutQueryResult::Cells(_)
+            | CheckoutQueryResult::ContextPackets(_) => {
+                return Err(
+                    std::io::Error::other("default projection returned non-packed result").into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_text_projected_returns_cells_only(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-text-projected-cells",
+            0.91,
+            12,
+        )?)?;
+
+        let result = db.checkout_query_text_projected(
+            r#"CHECKOUT "stored-facts" ANSWER "what should the agent know?"
+RETURN cells_only"#,
+        )?;
+
+        match result {
+            CheckoutQueryResult::Cells(cells) => {
+                assert_eq!(cells.len(), 1);
+                assert_eq!(
+                    cells[0].payload,
+                    CellPayload::Text(
+                        "project:continuitydb:query-text-projected-cells".to_string()
+                    )
+                );
+            }
+            CheckoutQueryResult::PackedContext(_)
+            | CheckoutQueryResult::Summary(_)
+            | CheckoutQueryResult::ContextPackets(_) => {
+                return Err(std::io::Error::other(
+                    "cells_only projection returned non-cell result",
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_text_projected_returns_context_packets_only(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let mut cell = sample_cell(
+            "project:continuitydb:query-text-projected-context-packets",
+            0.91,
+            12,
+        )?;
+        cell.add_projection(MemoryProjection::new(
+            MemoryProjectionKind::Semantic,
+            "Current belief: context packets are the agent-facing projection.",
+            Confidence::new(0.88)?,
+            CellCost::new(9, 0)?,
+        )?);
+        db.ingest_cell(cell)?;
+
+        let result = db.checkout_query_text_projected(
+            r#"CHECKOUT "stored-facts" ANSWER "what should the agent know?"
+RETURN context_packets_only"#,
+        )?;
+
+        match result {
+            CheckoutQueryResult::ContextPackets(context_packets) => {
+                assert_eq!(context_packets.len(), 1);
+                assert_eq!(context_packets[0].profile, ContextProfile::Execution);
+                assert_eq!(
+                    context_packets[0].lines,
+                    vec![
+                        "Current belief: context packets are the agent-facing projection."
+                            .to_string()
+                    ]
+                );
+                assert_eq!(context_packets[0].entries.len(), 1);
+            }
+            CheckoutQueryResult::PackedContext(_)
+            | CheckoutQueryResult::Summary(_)
+            | CheckoutQueryResult::Cells(_) => {
+                return Err(std::io::Error::other(
+                    "context_packets_only projection returned non-packet result",
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_result_json_wraps_projected_summary(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-result-envelope-summary",
+            0.91,
+            12,
+        )?)?;
+        let query = CheckoutQuery::new(QueryTask::new(
+            "stored-facts",
+            "what should the agent know?",
+        ))
+        .with_return_shape(QueryReturnShape::SummaryOnly);
+        let result = db.checkout_query_projected(query)?;
+
+        let encoded = encode_checkout_query_result_json(result.clone())?;
+        let json: serde_json::Value = serde_json::from_slice(&encoded)?;
+        let decoded = decode_checkout_query_result_json(&encoded)?;
+
+        assert_eq!(
+            json["format"].as_str(),
+            Some("continuitydb.checkout_query.result")
+        );
+        assert_eq!(json["format_version"].as_u64(), Some(1));
+        assert_eq!(json["return_shape"].as_str(), Some("summary_only"));
+        assert_eq!(json["result"]["type"].as_str(), Some("summary"));
+        assert_eq!(
+            json["result"]["result"]["selected_cell_count"].as_u64(),
+            Some(1)
+        );
+        assert!(json["result"]["result"].get("cells").is_none());
+        assert_eq!(decoded, result);
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_result_json_rejects_shape_drift() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:query-result-envelope-shape-drift",
+            0.91,
+            12,
+        )?)?;
+        let result = db.checkout_query_text_projected(
+            r#"CHECKOUT "stored-facts" ANSWER "what should the agent know?""#,
+        )?;
+        let encoded = encode_checkout_query_result_json(result)?;
+        let mut json: serde_json::Value = serde_json::from_slice(&encoded)?;
+        json["return_shape"] = serde_json::Value::from("summary_only");
+        let drifted = serde_json::to_vec(&json)?;
+
+        let decoded = decode_checkout_query_result_json(&drifted);
+
+        assert_eq!(
+            decoded.err(),
+            Some(ContinuityError::InvalidCheckoutQueryResultEnvelope)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_checkout_query_json_preserves_query_optimization_errors(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let db = ContinuityDb::new(MemoryKernel::default());
         let query = ContinuityQuery::Checkout(
@@ -2040,7 +2726,7 @@ WHERE scope = project("continuitydb")"#,
                 "stored-facts",
                 "what should the agent know?",
             ))
-            .with_return_shape(QueryReturnShape::CellsOnly),
+            .with_optimization(QueryOptimization::TokenCostOnly),
         );
         let encoded = encode_query_json(query)?;
 
@@ -2048,8 +2734,8 @@ WHERE scope = project("continuitydb")"#,
 
         assert_eq!(
             result.err(),
-            Some(ContinuityError::Query(QueryError::UnsupportedReturnShape(
-                QueryReturnShape::CellsOnly
+            Some(ContinuityError::Query(QueryError::UnsupportedOptimization(
+                QueryOptimization::TokenCostOnly
             )))
         );
         Ok(())
@@ -2275,22 +2961,28 @@ WHERE scope = project("continuitydb")
     }
 
     #[test]
-    fn api_checkout_query_returns_unsupported_shape_error() {
-        let db = ContinuityDb::new(MemoryKernel::default());
+    fn api_checkout_query_accepts_cells_only_shape_as_slice(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        db.ingest_cell(sample_cell(
+            "project:continuitydb:api-query-cells-only",
+            0.91,
+            12,
+        )?)?;
         let query = CheckoutQuery::new(QueryTask::new(
             "api-query-shape",
             "what should the agent know?",
         ))
         .with_return_shape(QueryReturnShape::CellsOnly);
 
-        let result = db.checkout_query(query);
+        let slice = db.checkout_query(query)?;
 
-        assert!(matches!(
-            result,
-            Err(ContinuityError::Query(QueryError::UnsupportedReturnShape(
-                QueryReturnShape::CellsOnly
-            )))
-        ));
+        assert_eq!(slice.cells.len(), 1);
+        assert_eq!(
+            slice.cells[0].payload,
+            CellPayload::Text("project:continuitydb:api-query-cells-only".to_string())
+        );
+        Ok(())
     }
 
     #[test]
@@ -3976,6 +4668,813 @@ WHERE scope = project("continuitydb")
             result,
             Err(ContinuityError::CellNotFound { cell_id }) if cell_id == missing_id
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_lifecycle_stage_as_successor_cell() -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let lifecycle_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 45, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:lifecycle-api", 0.91, 12)?;
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+
+        let successor_id = db.record_lifecycle_stage_at(
+            original_id,
+            LifecycleStage::Operationalized,
+            lifecycle_commit,
+        )?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.lifecycle_stage, LifecycleStage::Observed);
+        assert_eq!(successor.lifecycle_stage, LifecycleStage::Operationalized);
+        assert_eq!(successor.activation, original.activation);
+        assert_eq!(successor.system_time.from(), lifecycle_commit);
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_context_lifecycle_policy_as_successor_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let policy_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 50, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:lifecycle-policy-api", 0.91, 12)?,
+            initial_commit,
+        )?;
+        let lifecycle_policy = ContextLifecyclePolicy {
+            retention: RetentionPolicy::DecayUnlessReinforced,
+            use_policy: UsePolicy::VerifyBeforeUse,
+            promotion: PromotionPolicy::ConfidenceThreshold(Confidence::new(0.75)?),
+        };
+
+        let successor_id =
+            db.record_context_lifecycle_policy_at(original_id, lifecycle_policy, policy_commit)?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+        let links = db.list_revision_links(RevisionLinkLookup {
+            source: Some(successor_id),
+            target: Some(original_id),
+            kind: None,
+        })?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.lifecycle_policy, ContextLifecyclePolicy::default());
+        assert_eq!(successor.lifecycle_policy, lifecycle_policy);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.source, link.kind, link.target, link.recorded_at))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    successor_id,
+                    RevisionLinkKind::Supersedes,
+                    original_id,
+                    policy_commit,
+                ),
+                (
+                    successor_id,
+                    RevisionLinkKind::Predecessor,
+                    original_id,
+                    policy_commit,
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_memory_projection_as_successor_cell() -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let projection_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 50, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let mut cell = sample_cell("project:continuitydb:projection-api", 0.91, 18)?;
+        cell.add_projection(MemoryProjection::new(
+            MemoryProjectionKind::Semantic,
+            "Current belief: upload is blocked.",
+            Confidence::new(0.81)?,
+            CellCost::new(7, 0)?,
+        )?);
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+        let projection = MemoryProjection::new(
+            MemoryProjectionKind::Procedural,
+            "Next action: verify asset upload target before retrying.",
+            Confidence::new(0.88)?,
+            CellCost::new(10, 0)?,
+        )?;
+
+        let successor_id =
+            db.record_memory_projection_at(original_id, projection.clone(), projection_commit)?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.projections.len(), 1);
+        assert_eq!(successor.projections.len(), 2);
+        assert_eq!(successor.projections[1], projection);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(successor.system_time.from(), projection_commit);
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_epistemic_uncertainty_as_successor_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let uncertainty_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 55, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:uncertainty-api", 0.91, 18)?;
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+        let uncertainty =
+            EpistemicUncertainty::new(Confidence::new(0.73)?, 4.2, "baseline belief failed")?;
+
+        let successor_id = db.record_epistemic_uncertainty_at(
+            original_id,
+            uncertainty.clone(),
+            uncertainty_commit,
+        )?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.uncertainty, EpistemicUncertainty::default());
+        assert_eq!(successor.uncertainty, uncertainty);
+        assert_eq!(successor.projections, original.projections);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(successor.system_time.from(), uncertainty_commit);
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_attention_signal_as_successor_cell() -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let attention_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:attention-api", 0.91, 18)?;
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+        let attention = AttentionSignal::new(0.9, 0.8, 0.85, 0.75)?;
+
+        let successor_id =
+            db.record_attention_signal_at(original_id, attention, attention_commit)?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.attention, AttentionSignal::default());
+        assert_eq!(successor.attention, attention);
+        assert_eq!(successor.uncertainty, original.uncertainty);
+        assert_eq!(successor.projections, original.projections);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(successor.system_time.from(), attention_commit);
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_context_affordance_as_successor_cell() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let affordance_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 5, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:context-affordance-api", 0.91, 18)?;
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+        let context_affordance = ContextAffordance::new(0.95, 0.9, 0.8, 0.4, 0.95, 0.1)?;
+
+        let successor_id =
+            db.record_context_affordance_at(original_id, context_affordance, affordance_commit)?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+        let links = db.list_revision_links(RevisionLinkLookup {
+            source: Some(successor_id),
+            target: Some(original_id),
+            kind: None,
+        })?;
+
+        assert_ne!(successor_id, original_id);
+        assert_eq!(original.context_affordance, ContextAffordance::default());
+        assert_eq!(successor.context_affordance, context_affordance);
+        assert_eq!(successor.attention, original.attention);
+        assert_eq!(successor.uncertainty, original.uncertainty);
+        assert_eq!(successor.projections, original.projections);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(successor.system_time.from(), affordance_commit);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.source, link.kind, link.target, link.recorded_at))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    successor_id,
+                    RevisionLinkKind::Supersedes,
+                    original_id,
+                    affordance_commit,
+                ),
+                (
+                    successor_id,
+                    RevisionLinkKind::Predecessor,
+                    original_id,
+                    affordance_commit,
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_context_gap_as_successor_cell() -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let gap_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 10, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:context-gap-api", 0.91, 18)?;
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+        let gap = ContextGap::new(
+            ContextGapKind::MissingEvidence,
+            "which retained artifact proves the live run?",
+            "missing evidence should drive scavenging instead of collapse",
+            0.9,
+        )?;
+
+        let successor_id = db.record_context_gap_at(original_id, gap.clone(), gap_commit)?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+        let links = db.list_revision_links(RevisionLinkLookup {
+            source: Some(successor_id),
+            target: Some(original_id),
+            kind: None,
+        })?;
+
+        assert_ne!(successor_id, original_id);
+        assert!(original.context_gaps.is_empty());
+        assert_eq!(successor.context_gaps, vec![gap]);
+        assert_eq!(successor.context_affordance, original.context_affordance);
+        assert_eq!(successor.attention, original.attention);
+        assert_eq!(successor.uncertainty, original.uncertainty);
+        assert_eq!(successor.projections, original.projections);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(successor.system_time.from(), gap_commit);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.source, link.kind, link.target, link.recorded_at))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    successor_id,
+                    RevisionLinkKind::Supersedes,
+                    original_id,
+                    gap_commit,
+                ),
+                (
+                    successor_id,
+                    RevisionLinkKind::Predecessor,
+                    original_id,
+                    gap_commit,
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_invalidation_condition_as_successor_cell(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let condition_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 15, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:invalidation-condition-api", 0.91, 18)?;
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+        let condition = InvalidationCondition::new(
+            InvalidationConditionKind::ContradictoryEvidence,
+            "a retained benchmark run contradicts this cell's selected answer",
+            "falsification conditions should drive revision instead of silent reuse",
+            0.95,
+        )?;
+
+        let successor_id =
+            db.record_invalidation_condition_at(original_id, condition.clone(), condition_commit)?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+        let links = db.list_revision_links(RevisionLinkLookup {
+            source: Some(successor_id),
+            target: Some(original_id),
+            kind: None,
+        })?;
+
+        assert_ne!(successor_id, original_id);
+        assert!(original.invalidation_conditions.is_empty());
+        assert_eq!(successor.invalidation_conditions, vec![condition]);
+        assert_eq!(successor.context_gaps, original.context_gaps);
+        assert_eq!(successor.context_affordance, original.context_affordance);
+        assert_eq!(successor.attention, original.attention);
+        assert_eq!(successor.uncertainty, original.uncertainty);
+        assert_eq!(successor.projections, original.projections);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(successor.system_time.from(), condition_commit);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.source, link.kind, link.target, link.recorded_at))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    successor_id,
+                    RevisionLinkKind::Supersedes,
+                    original_id,
+                    condition_commit,
+                ),
+                (
+                    successor_id,
+                    RevisionLinkKind::Predecessor,
+                    original_id,
+                    condition_commit,
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_records_trajectory_memory_as_successor_cell() -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let trajectory_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 20, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let cell = sample_cell("project:continuitydb:trajectory-memory-api", 0.91, 18)?;
+        let original_id = db.ingest_cell_at(cell, initial_commit)?;
+        let trajectory_memory = TrajectoryMemory::new(
+            "reuse rollout summary for release upload recovery",
+            "identified the release asset upload failure path",
+            "target GitHub Release was missing during asset upload",
+            "artifact://rollout/release-upload-404",
+            0.86,
+            "check release existence before uploading retained assets",
+            vec!["publishing release artifacts".to_string()],
+            vec!["release lookup and upload report both validate".to_string()],
+            ContextPacketStrategy::ScavengingBrief,
+        )?;
+
+        let successor_id = db.record_trajectory_memory_at(
+            original_id,
+            trajectory_memory.clone(),
+            trajectory_commit,
+        )?;
+
+        let original = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(original_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing original cell"))?;
+        let successor = db
+            .kernel()
+            .lookup_cells(CellLookup {
+                cell_id: Some(successor_id),
+                ..CellLookup::default()
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing successor cell"))?;
+        let links = db.list_revision_links(RevisionLinkLookup {
+            source: Some(successor_id),
+            target: Some(original_id),
+            kind: None,
+        })?;
+
+        assert_ne!(successor_id, original_id);
+        assert!(original.trajectory_memory.is_none());
+        assert_eq!(successor.trajectory_memory, Some(trajectory_memory));
+        assert_eq!(
+            successor.invalidation_conditions,
+            original.invalidation_conditions
+        );
+        assert_eq!(successor.context_gaps, original.context_gaps);
+        assert_eq!(successor.context_affordance, original.context_affordance);
+        assert_eq!(successor.attention, original.attention);
+        assert_eq!(successor.uncertainty, original.uncertainty);
+        assert_eq!(successor.projections, original.projections);
+        assert_eq!(successor.lifecycle_stage, original.lifecycle_stage);
+        assert_eq!(successor.system_time.from(), trajectory_commit);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.source, link.kind, link.target, link.recorded_at))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    successor_id,
+                    RevisionLinkKind::Supersedes,
+                    original_id,
+                    trajectory_commit,
+                ),
+                (
+                    successor_id,
+                    RevisionLinkKind::Predecessor,
+                    original_id,
+                    trajectory_commit,
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn api_successor_revision_operations_persist_native_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let initial_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let revision_commit = Utc
+            .with_ymd_and_hms(2026, 5, 20, 13, 0, 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("invalid test timestamp"))?;
+        let mut db = ContinuityDb::new(MemoryKernel::default());
+        let utility_original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:persisted-utility-links", 0.91, 18)?,
+            initial_commit,
+        )?;
+        let lifecycle_original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:persisted-lifecycle-links", 0.91, 18)?,
+            initial_commit,
+        )?;
+        let lifecycle_policy_original_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:persisted-lifecycle-policy-links",
+                0.91,
+                18,
+            )?,
+            initial_commit,
+        )?;
+        let projection_original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:persisted-projection-links", 0.91, 18)?,
+            initial_commit,
+        )?;
+        let uncertainty_original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:persisted-uncertainty-links", 0.91, 18)?,
+            initial_commit,
+        )?;
+        let attention_original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:persisted-attention-links", 0.91, 18)?,
+            initial_commit,
+        )?;
+        let context_affordance_original_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:persisted-context-affordance-links",
+                0.91,
+                18,
+            )?,
+            initial_commit,
+        )?;
+        let context_gap_original_id = db.ingest_cell_at(
+            sample_cell("project:continuitydb:persisted-context-gap-links", 0.91, 18)?,
+            initial_commit,
+        )?;
+        let invalidation_condition_original_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:persisted-invalidation-condition-links",
+                0.91,
+                18,
+            )?,
+            initial_commit,
+        )?;
+        let trajectory_memory_original_id = db.ingest_cell_at(
+            sample_cell(
+                "project:continuitydb:persisted-trajectory-memory-links",
+                0.91,
+                18,
+            )?,
+            initial_commit,
+        )?;
+
+        let utility_successor_id = db.record_utility_feedback_at(
+            utility_original_id,
+            UtilityFeedback::new(
+                Confidence::new(0.9)?,
+                Confidence::new(0.8)?,
+                Confidence::new(0.7)?,
+            ),
+            revision_commit,
+        )?;
+        let lifecycle_successor_id = db.record_lifecycle_stage_at(
+            lifecycle_original_id,
+            LifecycleStage::Operationalized,
+            revision_commit,
+        )?;
+        let lifecycle_policy_successor_id = db.record_context_lifecycle_policy_at(
+            lifecycle_policy_original_id,
+            ContextLifecyclePolicy {
+                retention: RetentionPolicy::DecayUnlessReinforced,
+                use_policy: UsePolicy::VerifyBeforeUse,
+                promotion: PromotionPolicy::Manual,
+            },
+            revision_commit,
+        )?;
+        let projection_successor_id = db.record_memory_projection_at(
+            projection_original_id,
+            MemoryProjection::new(
+                MemoryProjectionKind::Procedural,
+                "Next action: preserve successor audit links.",
+                Confidence::new(0.88)?,
+                CellCost::new(9, 0)?,
+            )?,
+            revision_commit,
+        )?;
+        let uncertainty_successor_id = db.record_epistemic_uncertainty_at(
+            uncertainty_original_id,
+            EpistemicUncertainty::new(Confidence::new(0.73)?, 4.2, "baseline belief failed")?,
+            revision_commit,
+        )?;
+        let attention_successor_id = db.record_attention_signal_at(
+            attention_original_id,
+            AttentionSignal::new(0.9, 0.8, 0.85, 0.75)?,
+            revision_commit,
+        )?;
+        let context_affordance_successor_id = db.record_context_affordance_at(
+            context_affordance_original_id,
+            ContextAffordance::new(0.95, 0.9, 0.8, 0.4, 0.95, 0.1)?,
+            revision_commit,
+        )?;
+        let context_gap_successor_id = db.record_context_gap_at(
+            context_gap_original_id,
+            ContextGap::new(
+                ContextGapKind::MissingEvidence,
+                "which retained artifact proves this result?",
+                "missing evidence must remain an explicit scavenging target",
+                0.9,
+            )?,
+            revision_commit,
+        )?;
+        let invalidation_condition_successor_id = db.record_invalidation_condition_at(
+            invalidation_condition_original_id,
+            InvalidationCondition::new(
+                InvalidationConditionKind::BoundaryViolation,
+                "the cell was selected outside the scope where its evidence applies",
+                "invalid use boundaries must persist as revision-triggering metadata",
+                0.88,
+            )?,
+            revision_commit,
+        )?;
+        let trajectory_memory_successor_id = db.record_trajectory_memory_at(
+            trajectory_memory_original_id,
+            TrajectoryMemory::new(
+                "reuse rollout summaries for release operations",
+                "captured the missing-release upload failure",
+                "release upload targeted a missing GitHub Release",
+                "artifact://rollout/persisted-trajectory",
+                0.86,
+                "verify release existence before uploading retained assets",
+                vec!["release asset publication".to_string()],
+                vec!["release lookup and upload report validate".to_string()],
+                ContextPacketStrategy::ScavengingBrief,
+            )?,
+            revision_commit,
+        )?;
+
+        for (successor_id, original_id) in [
+            (utility_successor_id, utility_original_id),
+            (lifecycle_successor_id, lifecycle_original_id),
+            (lifecycle_policy_successor_id, lifecycle_policy_original_id),
+            (projection_successor_id, projection_original_id),
+            (uncertainty_successor_id, uncertainty_original_id),
+            (attention_successor_id, attention_original_id),
+            (
+                context_affordance_successor_id,
+                context_affordance_original_id,
+            ),
+            (context_gap_successor_id, context_gap_original_id),
+            (
+                invalidation_condition_successor_id,
+                invalidation_condition_original_id,
+            ),
+            (
+                trajectory_memory_successor_id,
+                trajectory_memory_original_id,
+            ),
+        ] {
+            let links = db.list_revision_links(RevisionLinkLookup {
+                source: Some(successor_id),
+                target: Some(original_id),
+                kind: None,
+            })?;
+
+            assert_eq!(
+                links
+                    .iter()
+                    .map(|link| (link.source, link.kind, link.target, link.recorded_at))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (
+                        successor_id,
+                        RevisionLinkKind::Supersedes,
+                        original_id,
+                        revision_commit,
+                    ),
+                    (
+                        successor_id,
+                        RevisionLinkKind::Predecessor,
+                        original_id,
+                        revision_commit,
+                    ),
+                ]
+            );
+        }
         Ok(())
     }
 

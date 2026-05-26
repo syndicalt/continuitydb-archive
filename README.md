@@ -1,273 +1,55 @@
 # ContinuityDB
 
-ContinuityDB is a Rust-native embeddable datastore for agent world models: context, beliefs, knowledge, evidence, uncertainty, and operational truth.
+> Project status: archived failed research prototype.
+>
+> The original ContinuityDB thesis did not survive falsification. A specialized
+> StateCell datastore was not shown to be necessary for strong agent memory, and
+> the strongest evidence now points to behavior, control, retrieval policy, and
+> runtime-level memory as the real bottlenecks. This repository is retained for
+> audit, salvageable benchmark patterns, and frontier-memory research notes; it
+> should not be treated as an active production database roadmap.
 
-The primitive unit is the `StateCell`, an append-only, evidence-backed, temporally-aware unit of operational truth. ContinuityDB owns StateCell semantics, belief revision, supersession, deterministic checkout, and auditability. Storage engines are substrates behind a kernel interface, not the identity of the database.
+See [ARCHIVED.md](ARCHIVED.md) and [Project Postmortem](docs/project-postmortem.md).
 
-## Current Scope
+## What This Was
 
-The first milestone builds:
+ContinuityDB was a Rust-native embeddable datastore experiment for continuity
+state. Its intended product model was:
 
-- Core StateCell domain types.
-- Deterministic StateCell workload generation for benchmark and storage-engine comparisons.
-- Storage-kernel-generic deterministic workload measurement for ingest and checkout.
-- CLI workload measurement for memory and file-backed kernels.
-- CLI file workload lookup-plan diagnostics.
-- JSONL workload measurement baseline recording.
-- Durable file workload lookup-plan baseline snapshots.
-- File workload lookup-plan baseline regression detection.
-- CLI workload artifact bundle directory.
-- CLI workload report artifact metadata.
-- CLI workload report artifact metadata validation.
-- CLI workload replay fixture artifacts.
-- CLI workload artifact replay.
-- CLI workload replay comparison gate.
-- CLI workload replay report artifacts.
-- CLI workload replay artifact bundles.
-- CLI workload replay report artifact metadata.
-- CLI workload replay artifact bundle separation.
-- CLI workload replay input manifest validation.
-- CLI workload replay validated input manifest metadata.
-- CLI workload replay manifest-validation failure report artifacts.
-- CLI workload replay manifest-validation failure artifact bundles.
-- CLI workload replay manifest fixture-path validation.
-- CLI workload replay manifest report-path validation.
-- CLI workload replay manifest artifact-directory validation.
-- CLI workload replay manifest workload-summary validation.
-- CLI workload replay manifest fixture byte-count validation.
-- CLI workload replay manifest report-content validation.
-- CLI workload replay manifest report-content mismatch diagnostics.
-- CLI workload bundle validation command.
-- CLI workload bundle validation report artifacts.
-- CLI workload bundle validation failure evidence metadata.
-- CLI workload bundle validation manifest failure metadata.
-- CLI workload bundle validation report failure metadata.
-- CLI workload measurement report artifact output.
-- CLI workload regression failure report artifact output.
-- CLI workload measurement baseline recording.
-- Deterministic workload baseline regression comparison.
-- CLI workload baseline regression comparison and failure gating.
-- A pluggable storage kernel trait.
-- An in-memory kernel for correctness tests.
-- Basic revision links.
-- Core native revision-link records.
-- Storage-kernel-native revision-link records.
-- Native API revision-link record operations.
-- Deterministic checkout.
-- Semantic-anchor scoped checkout and strict text query constraints.
-- Activation-aware checkout and strict text query constraints.
-- Typed Continuity Query AST compiling checkout semantics into native requests.
-- First strict text parser for `CHECKOUT` queries.
-- Bitemporal and commit-scoped constraints in strict text `CHECKOUT` queries.
-- Dependency-aware constraints in strict text `CHECKOUT` queries.
-- Standalone dependency-kind storage lookups with file-kernel planner diagnostics.
-- File-kernel lookup plans with exact post-filter match counts.
-- File-kernel lookup plans with filtered-candidate diagnostics.
-- File-kernel lookup plans with exact predicate labels.
-- File-kernel lookup plans with candidate selectivity diagnostics.
-- File-kernel lookup plans with lossy temporal index diagnostics.
-- Portable typed query serialization for bindings and future query files.
-- Versioned JSON envelopes for portable typed query files.
-- Read-only typed query AST introspection for embedders and bindings.
-- Native typed query execution through the embeddable API.
-- Native API execution for versioned typed query envelopes.
-- Native API execution for saved typed query files.
-- Native and CLI execution for saved text `CHECKOUT` query files.
-- Native API execution for strict text `CHECKOUT` query strings.
-- CLI execution for serialized typed query files.
-- CLI execution for versioned typed query envelopes.
-- Commit-scoped checkout.
-- Audit traces.
-- Commit-aware audit traces.
-- Revision-link-aware direct audit traces.
-- Revision-link-aware checkout audit traces.
-- Deterministic Steward proposal substrate.
-- Pluggable proposal audit ledger store contract.
-- JSONL file-backed proposal audit store.
-- StorageKernel-backed proposal audit store adapter.
-- Native feature-gated Steward proposal audit API.
-- Native feature-gated Steward conflict-resolution audit API.
-- Native feature-gated Steward conflict-resolution audit-and-application API.
-- Native feature-gated Steward frontier/watch audit API.
-- Native feature-gated Steward frontier/watch audit-and-application API.
-- Native feature-gated Steward `MarkFrontier` application API.
-- Native feature-gated Steward `LabelAnswerability` application API.
-- Native feature-gated Steward `AdjustConfidence` application API.
-- Native feature-gated Steward `RequestVerification` application API.
-- Native feature-gated Steward `LinkRevision` application API.
-- Native feature-gated Steward `CreateCellDraft` application API.
-- Native feature-gated Steward accepted-proposal dispatch API.
-- Native feature-gated Steward typed accepted-proposal dispatch API.
-- Deterministic mock Steward for test-first development.
-- Feature-gated local model Steward boundary.
-- Local executable Steward model runner.
-- Stable local model Steward response schema and grammar contract.
-- Feature-gated CLI local model response schema and grammar export.
-- CLI local model contract export byte metadata.
-- Deterministic llama.cpp and mistral.rs runtime profiles.
-- Fixed Steward proposal-quality evaluation harness.
-- Executable local model benchmark fixture.
-- Durable local model benchmark baseline store.
-- Reproducible local model benchmark runtime manifests.
-- Local model benchmark response contract versioning.
-- Compatible local model benchmark regression gates.
-- Public compatible local model benchmark baseline lookup for embedders.
-- Public local model evaluation summary metrics.
-- CLI local model evaluation summary output.
-- CLI local model per-case evaluation detail output.
-- Public local model benchmark stability report API.
-- CLI local model benchmark stability reporting.
-- CLI local model instability failure gating.
-- Typed local model evaluation failure diagnostics.
-- Stable local model evaluation failure code serialization.
-- Local model evaluation failure count summaries.
-- Local model regression failure count comparisons.
-- Local model regression failure count delta summaries.
-- Local model regression case outcome summaries.
-- Local model regression changed-case failure summaries.
-- Local model regression same-outcome failure change summaries.
-- Local model regression changed-case response fingerprints.
-- Local model regression passing-response change summaries.
-- Local model regression changed-case reason flags.
-- Local model regression changed-case reason counts.
-- Local model regression total changed-case counts.
-- CLI local model changed-case report artifacts.
-- CLI local model changed-case report comparison requirement.
-- CLI local model fixed evaluation failure gating.
-- CLI local model fixed evaluation failure report artifacts.
-- CLI local model benchmark report artifact output.
-- Default local model conflict-classification evaluation case.
-- Default local model supersession-classification evaluation case.
-- Default local model confidence-adjustment evaluation case.
-- Default local model targeted-verification evaluation case.
-- Default local model create-cell-draft evaluation case.
-- Default local model unsupported-claim evaluation case.
-- Default local model multi-source citation preservation evaluation case.
-- Default local model policy-rejection avoidance evaluation case.
-- Public local model evaluation contract introspection.
-- CLI local model evaluation suite contract export.
-- Durable local model evaluation suite fingerprints.
-- CLI local model evaluation suite fingerprint output.
-- CLI small local Steward model candidate registry output.
-- Small local Steward model runtime metadata.
-- Small local Steward model benchmark argument templates.
-- CLI local model benchmark candidate defaults.
-- CLI local model benchmark grammar path support.
-- CLI local model candidate requirement enforcement.
-- CLI local model benchmark contract artifact directory.
-- CLI local model contract artifact byte metadata.
-- CLI local model contract artifact metadata validation.
-- CLI local model benchmark prompt artifact directory.
-- CLI local model prompt artifact metadata validation.
-- CLI local model benchmark dry-run preflight output.
-- CLI local model dry-run contract byte metadata.
-- CLI local model dry-run baseline compatibility preflight.
-- CLI local model dry-run baseline byte evidence.
-- CLI local model dry-run baseline compatibility evidence.
-- CLI local model contract fingerprints.
-- Durable local model contract fingerprints.
-- Durable local model contract byte metadata.
-- Durable local model prompt fingerprints.
-- Durable local model response fingerprints.
-- CLI local model benchmark response artifact directory.
-- CLI local model response artifact manifests.
-- CLI local model response artifact manifest metadata validation.
-- CLI local model response artifact manifest content validation.
-- CLI local model response artifact manifest content mismatch diagnostics.
-- CLI local model response artifact metadata validation.
-- CLI local model bundle validation response artifact output.
-- CLI local model benchmark artifact bundle directory.
-- CLI local model benchmark bundle manifests.
-- CLI local model benchmark report artifact metadata.
-- CLI local model benchmark report artifact metadata validation.
-- CLI local model bundle validation report artifacts.
-- CLI local model bundle validation failure report artifacts.
-- CLI local model bundle validation manifest failure metadata.
-- CLI local model bundle validation report failure metadata.
-- CLI local model bundle validation changed-case failure metadata.
-- CLI local model bundle validation contract artifact failure metadata.
-- CLI local model bundle validation response manifest failure metadata.
-- CLI local model bundle validation response artifact failure metadata.
-- CLI local model changed-case report bundle artifacts.
-- CLI local model changed-case report artifact metadata.
-- CLI local model changed-case report artifact metadata validation.
-- CLI local model changed-case report content validation.
-- CLI local model fixed-failure artifact bundles.
-- CLI local model regression artifact bundles.
-- CLI local model instability artifact bundles.
-- CLI local model regression failure report artifacts.
-- CLI local model instability failure report artifacts.
-- Feature-gated CLI local model benchmark baseline recording.
-- Deterministic frontier/watch Steward proposal integration.
-- Durable frontier/watch subscription stores.
-- Deterministic frontier subscription runner.
-- Atomic kernel-level StateCell write batches.
-- First-class commit identifiers for transaction-scoped lookup.
-- First-class commit manifests for transaction-boundary inspection.
-- Commit manifest timeline listing.
-- Cursor-based commit manifest listing for incremental audit and sync reads.
-- Explicit durable commit records in the JSONL file kernel.
-- Versioned JSONL file-kernel format headers.
-- Per-record JSONL file-kernel checksums for cell and commit records.
-- File-kernel secondary indexes for answerability questions and evidence sources.
-- File-kernel secondary indexes for activation states and dependency filters.
-- File-kernel secondary indexes for scope lookups.
-- File-kernel secondary indexes for minimum-confidence lookups.
-- File-kernel secondary indexes for valid-time lookups.
-- File-kernel secondary indexes for system-time lookups.
-- File-kernel indexed candidate-set selection.
-- File-kernel indexed candidate-set intersection.
-- File-kernel lookup-plan introspection.
-- File-kernel explainable lookup-plan constraint labels.
-- File-kernel per-constraint lookup-plan cardinalities.
-- File-kernel residual lookup-plan diagnostics.
-- Workload residual lookup-plan regression detection.
-- File-kernel secondary indexes for revision-link lookups.
-- Typed storage-kernel capability introspection for embedders.
-- Typed storage-kernel requirement checks for production readiness gates.
-- File-backed store status for visible cell, commit, revision-link, and durable file size counts.
-- File-backed store health reporting for canonical and compaction-worthy logs.
-- Canonical file-store requirement gate for production open/inspection paths.
-- Line-addressed JSONL file-kernel corruption diagnostics.
-- Headered JSONL file-kernel partial-commit detection.
-- Durable filesystem flush boundaries for JSONL file-kernel writes.
-- JSONL file-kernel compaction into the canonical durable record format.
-- Conditional file-store compaction for explicit maintenance automation.
-- Native file-backed compaction API.
-- Native file-backed open helpers with requirement enforcement.
-- Native file-backed lookup-plan introspection API.
-- Native query-constrained file-backed lookup-plan introspection API.
-- CLI file-backed lookup-plan inspection.
-- CLI query-constrained lookup-plan inspection.
-- CLI file-backed compaction command.
-- Native commit cell materialization API.
-- Native commit slice materialization API for cursor-selected commit replay.
-- Native commit export batch API for backup and sync flows.
-- Native validated commit import batch API for replay flows.
-- Native direct commit copy between open databases for local sync.
-- Revision-link-aware commit export, import, and direct copy.
-- Duplicate-safe revision-link import validation.
-- Duplicate-safe revision-link storage and API append validation.
-- Commit import dry-run validation for backup and sync workflows.
-- Commit import summaries with cursor metadata for checkpointed sync.
-- Versioned JSON commit export envelope for backup and sync files.
-- Native commit backup and restore file helper API.
-- Native typed operation API for ingest, checkout, and audit.
-- Native typed utility feedback revision API.
-- Native read-only conflict analysis API.
-- Native read-only batch conflict analysis API.
-- CLI kernel capability inspection and requirement checks.
-- CLI file-backed commands routed through native open helpers.
-- CLI commit backup and restore commands over versioned export envelopes.
-- CLI incremental commit export for cursor-based backup and sync workflows.
-- CLI direct commit copy for local file-backed sync.
-- CLI backup and restore preservation of native revision links.
-- A thin CLI over library APIs.
+```text
+StateCell -> checkout(task, budget) -> ContextPacket
+```
 
-## Roadmap
+The bet was that agent memory needed a specialized database primitive for
+beliefs, evidence, uncertainty, revision history, lifecycle policy, and
+operational outcomes. The retained evidence did not justify that bet.
 
-The frontier roadmap is tracked in [`docs/roadmap.md`](docs/roadmap.md). The next major research item is an embedded database Steward model: a local, proposal-only model layer that helps maintain StateCells, conflicts, answerability, frontier priorities, and audit explanations without directly mutating committed truth.
+## Archive Notes
 
-## Engineering Standard
+- Do not treat the roadmap as current execution guidance.
+- Do not build a production storage engine from this thesis.
+- Do not cite historical internal benchmark scores as validation.
+- Salvage benchmark cases, failure analysis, and falsification discipline into
+  future memory-evaluation work if useful.
 
-Development is test-first. No demo-only behavior, unchecked library panics, or shortcuts are accepted.
+## Verification For Historical Changes
+
+This repository may contain unmerged experimental changes. If inspecting or
+salvaging code, use normal Rust verification commands before trusting a slice:
+
+```bash
+cargo fmt -- --check
+cargo test --workspace --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+## Documentation
+
+- [Archive Status](ARCHIVED.md)
+- [Project Postmortem](docs/project-postmortem.md)
+- [Thesis](docs/thesis.md)
+- [Context Packet Architecture](docs/context-packet-architecture.md)
+- [Benchmark Regime](docs/benchmark-regime.md)
+- [Roadmap](docs/roadmap.md)
+
+Historical benchmark artifacts have been removed from the repository front door. New evidence should measure whether checkout improves real agent behavior over long horizons, not whether old internal rubrics favor ContinuityDB.

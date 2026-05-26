@@ -5,18 +5,20 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+description.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 chrono.workspace = true
-continuitydb-checkout = { path = "../continuitydb-checkout" }
-continuitydb-core = { path = "../continuitydb-core" }
-continuitydb-kernel = { path = "../continuitydb-kernel" }
+continuitydb-checkout = { path = "../continuitydb-checkout", version = "0.1.0" }
+continuitydb-core = { path = "../continuitydb-core", version = "0.1.0" }
+continuitydb-kernel = { path = "../continuitydb-kernel", version = "0.1.0" }
+continuitydb-memory = { path = "../continuitydb-memory", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
-continuitydb-memory = { path = "../continuitydb-memory" }
 
 [lints]
 workspace = true

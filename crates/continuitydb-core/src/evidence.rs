@@ -32,6 +32,9 @@ pub struct Citation {
 pub struct Confidence(f32);
 
 impl Confidence {
+    /// Lowest valid confidence value.
+    pub const ZERO: Self = Self(0.0);
+
     /// Creates a bounded confidence value.
     pub fn new(value: f32) -> Result<Self, CoreError> {
         if !(0.0..=1.0).contains(&value) {

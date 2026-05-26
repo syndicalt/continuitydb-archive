@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to release.
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release Assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve Tag
+        id: release_tag
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${DISPATCH_TAG}"
+          fi
+          if [[ -z "$tag" ]]; then
+            echo "release tag is required" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release_tag.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Release Preflight
+        run: scripts/release_preflight.sh
+
+      - name: Ensure GitHub Release Exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: gh release view "$RELEASE_TAG" --repo "$RELEASE_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$RELEASE_REPOSITORY" --verify-tag --title "$RELEASE_TAG" --notes ""
+
+      - name: Upload GitHub Release Assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: scripts/upload_release_assets.sh "$RELEASE_TAG" target/release-preflight/release-assets.json
+
+      - name: Validate GitHub Release Upload Report
+        if: always()
+        run: |
+          cargo run -p continuitydb-cli -- validate-release-upload-report \
+            --report-path target/release-preflight/release-upload-report.json \
+            --validation-report-path target/release-preflight/release-upload-report-validation.json \
+            --failure-report-path target/release-preflight/release-upload-report-validation-failure.json
+
+      - name: Upload Release Preflight Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuitydb-release-preflight
+          path: target/release-preflight
+          if-no-files-found: warn

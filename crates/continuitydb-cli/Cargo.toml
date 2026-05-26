@@ -5,23 +5,30 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+description.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [[bin]]
 name = "continuitydb"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
-continuitydb-api = { path = "../continuitydb-api" }
-continuitydb-checkout = { path = "../continuitydb-checkout" }
-continuitydb-core = { path = "../continuitydb-core" }
-continuitydb-kernel = { path = "../continuitydb-kernel" }
-continuitydb-memory = { path = "../continuitydb-memory" }
-continuitydb-query = { path = "../continuitydb-query" }
-continuitydb-steward = { path = "../continuitydb-steward", optional = true }
-continuitydb-workload = { path = "../continuitydb-workload" }
+continuitydb-api = { path = "../continuitydb-api", version = "0.1.0" }
+continuitydb-checkout = { path = "../continuitydb-checkout", version = "0.1.0" }
+continuitydb-core = { path = "../continuitydb-core", version = "0.1.0" }
+continuitydb-kernel = { path = "../continuitydb-kernel", version = "0.1.0" }
+continuitydb-memory = { path = "../continuitydb-memory", version = "0.1.0" }
+continuitydb-query = { path = "../continuitydb-query", version = "0.1.0" }
+continuitydb-steward = { path = "../continuitydb-steward", version = "0.1.0", optional = true }
+continuitydb-workload = { path = "../continuitydb-workload", version = "0.1.0" }
 serde_json.workspace = true
+sha2.workspace = true
+ureq.workspace = true
 
 [features]
 local-model = ["dep:continuitydb-steward", "continuitydb-steward/local-model"]

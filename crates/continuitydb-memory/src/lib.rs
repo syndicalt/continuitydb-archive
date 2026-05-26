@@ -1,7 +1,10 @@
 //! In-memory StorageKernel implementation for correctness tests.
 
 use chrono::{DateTime, Utc};
-use continuitydb_core::{CommitId, CommitManifest, RevisionLinkRecord, StateCell, SystemTimeRange};
+use continuitydb_core::{
+    CommitId, CommitManifest, ContextPacketSelectionReason, RevisionLinkRecord, StateCell,
+    SystemTimeRange, UtilityFeedback,
+};
 use continuitydb_kernel::{
     CellLookup, CommitManifestLookup, KernelError, RevisionLinkLookup, StorageKernel,
 };
@@ -104,6 +107,125 @@ impl StorageKernel for MemoryKernel {
                 lookup
                     .activation
                     .map_or(true, |activation| cell.activation == activation)
+            })
+            .filter(|cell| {
+                lookup
+                    .lifecycle_stage
+                    .map_or(true, |stage| cell.lifecycle_stage == stage)
+            })
+            .filter(|cell| {
+                lookup
+                    .retention_policy
+                    .map_or(true, |policy| cell.lifecycle_policy.retention == policy)
+            })
+            .filter(|cell| {
+                lookup
+                    .use_policy
+                    .map_or(true, |policy| cell.lifecycle_policy.use_policy == policy)
+            })
+            .filter(|cell| {
+                lookup
+                    .promotion_policy
+                    .map_or(true, |policy| cell.lifecycle_policy.promotion == policy)
+            })
+            .filter(|cell| {
+                lookup.projection_kind.map_or(true, |kind| {
+                    cell.projections
+                        .iter()
+                        .any(|projection| projection.kind == kind)
+                })
+            })
+            .filter(|cell| {
+                lookup.minimum_uncertainty.map_or(true, |minimum| {
+                    cell.uncertainty.score.value() >= minimum.value()
+                })
+            })
+            .filter(|cell| {
+                lookup
+                    .minimum_surprise_bits
+                    .map_or(true, |minimum| cell.uncertainty.surprise_bits >= minimum)
+            })
+            .filter(|cell| {
+                lookup.minimum_probability_delta.map_or(true, |minimum| {
+                    cell.uncertainty
+                        .expectation
+                        .as_ref()
+                        .is_some_and(|expectation| expectation.probability_delta >= minimum)
+                })
+            })
+            .filter(|cell| {
+                lookup
+                    .minimum_salience
+                    .map_or(true, |minimum| cell.attention.salience_score() >= minimum)
+            })
+            .filter(|cell| {
+                lookup.minimum_context_affordance.map_or(true, |minimum| {
+                    cell.context_affordance.context_affordance_score() >= minimum
+                })
+            })
+            .filter(|cell| {
+                lookup.minimum_epistemic_pressure.map_or(true, |minimum| {
+                    cell.epistemic_pressure().checkout_pressure >= minimum
+                })
+            })
+            .filter(|cell| {
+                lookup.context_gap_kind.map_or(true, |kind| {
+                    cell.context_gaps.iter().any(|gap| gap.kind == kind)
+                })
+            })
+            .filter(|cell| {
+                lookup.minimum_context_gap_priority.map_or(true, |minimum| {
+                    cell.context_gaps
+                        .iter()
+                        .any(|gap| gap.priority.value() >= minimum.value())
+                })
+            })
+            .filter(|cell| {
+                lookup.invalidation_condition_kind.map_or(true, |kind| {
+                    cell.invalidation_conditions
+                        .iter()
+                        .any(|condition| condition.kind == kind)
+                })
+            })
+            .filter(|cell| {
+                lookup
+                    .minimum_invalidation_priority
+                    .map_or(true, |minimum| {
+                        cell.invalidation_conditions
+                            .iter()
+                            .any(|condition| condition.priority.value() >= minimum.value())
+                    })
+            })
+            .filter(|cell| {
+                lookup
+                    .epistemic_action
+                    .map_or(true, |action| cell.epistemic_action() == action)
+            })
+            .filter(|cell| {
+                lookup.epistemic_action_reason.map_or(true, |reason| {
+                    cell.epistemic_action_reasons().contains(&reason)
+                })
+            })
+            .filter(|cell| {
+                lookup
+                    .selection_reason
+                    .map_or(true, |reason| cell_matches_selection_reason(cell, reason))
+            })
+            .filter(|cell| {
+                lookup.trajectory_memory_strategy.map_or(true, |strategy| {
+                    cell.trajectory_memory
+                        .as_ref()
+                        .is_some_and(|memory| memory.checkout_strategy == strategy)
+                })
+            })
+            .filter(|cell| {
+                lookup
+                    .minimum_trajectory_memory_confidence
+                    .map_or(true, |minimum| {
+                        cell.trajectory_memory
+                            .as_ref()
+                            .is_some_and(|memory| memory.confidence.value() >= minimum.value())
+                    })
             })
             .filter(|cell| {
                 lookup
@@ -220,13 +342,45 @@ impl StorageKernel for MemoryKernel {
     }
 }
 
+fn cell_matches_selection_reason(cell: &StateCell, reason: ContextPacketSelectionReason) -> bool {
+    match reason {
+        ContextPacketSelectionReason::EvidenceConfidence => cell
+            .evidence
+            .iter()
+            .any(|evidence| evidence.confidence.value() > 0.0),
+        ContextPacketSelectionReason::UtilityFeedback => {
+            cell.utility_feedback.utility_score() != UtilityFeedback::default().utility_score()
+        }
+        ContextPacketSelectionReason::LifecycleStage => cell.lifecycle_stage != Default::default(),
+        ContextPacketSelectionReason::ProjectionProfile => !cell.projections.is_empty(),
+        ContextPacketSelectionReason::NativeUncertainty => cell.uncertainty.is_recorded(),
+        ContextPacketSelectionReason::EpistemicCalibration => cell.calibration.is_recorded(),
+        ContextPacketSelectionReason::ContextAffordance => cell.context_affordance.is_recorded(),
+        ContextPacketSelectionReason::ContextGap => !cell.context_gaps.is_empty(),
+        ContextPacketSelectionReason::InvalidationCondition => {
+            !cell.invalidation_conditions.is_empty()
+        }
+        ContextPacketSelectionReason::TrajectoryMemory => cell.trajectory_memory.is_some(),
+        ContextPacketSelectionReason::LifecyclePolicy => {
+            cell.lifecycle_policy != Default::default()
+        }
+        ContextPacketSelectionReason::AttentionSignal => cell.attention.is_recorded(),
+        ContextPacketSelectionReason::Answerability => !cell.answerability.questions().is_empty(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        ActivationState, Answerability, CellCost, CellDependency, CellDependencyKind, CellPayload,
-        Citation, CommitId, Confidence, Evidence, RevisionLinkKind, RevisionLinkRecord, Scope,
-        SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, ValidTimeRange,
+        ActivationState, Answerability, AttentionSignal, CellCost, CellDependency,
+        CellDependencyKind, CellPayload, Citation, CommitId, Confidence, ContextAffordance,
+        ContextGap, ContextGapKind, ContextLifecyclePolicy, ContextPacketSelectionReason,
+        ContextPacketStrategy, EpistemicAction, EpistemicActionReason, EpistemicExpectation,
+        EpistemicUncertainty, Evidence, InvalidationCondition, InvalidationConditionKind,
+        LifecycleStage, MemoryProjection, MemoryProjectionKind, PromotionPolicy, RetentionPolicy,
+        RevisionLinkKind, RevisionLinkRecord, Scope, SemanticAnchor, SourceId, StateCell,
+        StateCellId, TrajectoryMemory, TrustSignal, UsePolicy, ValidTimeRange,
     };
     use continuitydb_kernel::{
         CellLookup, CommitManifestLookup, KernelDurability, KernelError, RevisionLinkLookup,
@@ -653,6 +807,435 @@ mod tests {
         })?;
 
         assert_eq!(results, vec![frontier]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_lifecycle_stage() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let observed = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:lifecycle-observed", 0.8, 10)?,
+        )?;
+        let consolidated = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:lifecycle-consolidated", 0.9, 10)?
+                .with_lifecycle_stage(LifecycleStage::Consolidated),
+        )?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            lifecycle_stage: Some(LifecycleStage::Consolidated),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![consolidated]);
+        assert_ne!(results, vec![observed]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_lifecycle_use_policy() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut verify = sample_cell("project:continuitydb:lifecycle-policy-verify", 0.9, 10)?;
+        verify.set_lifecycle_policy(ContextLifecyclePolicy {
+            retention: RetentionPolicy::DecayUnlessReinforced,
+            use_policy: UsePolicy::VerifyBeforeUse,
+            promotion: PromotionPolicy::Manual,
+        });
+        let verify = append_committed(&mut kernel, verify)?;
+        append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:lifecycle-policy-use", 0.9, 10)?,
+        )?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            use_policy: Some(UsePolicy::VerifyBeforeUse),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![verify]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_projection_kind() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut procedural = sample_cell("project:continuitydb:projection-procedural", 0.9, 12)?;
+        procedural.add_projection(MemoryProjection::new(
+            MemoryProjectionKind::Procedural,
+            "Run the retained validation command before trusting artifacts.",
+            Confidence::new(0.91)?,
+            CellCost::new(8, 0)?,
+        )?);
+        let procedural = append_committed(&mut kernel, procedural)?;
+        let mut semantic = sample_cell("project:continuitydb:projection-semantic", 0.9, 12)?;
+        semantic.add_projection(MemoryProjection::new(
+            MemoryProjectionKind::Semantic,
+            "Artifact validation proves retained bundle integrity.",
+            Confidence::new(0.88)?,
+            CellCost::new(8, 0)?,
+        )?);
+        append_committed(&mut kernel, semantic)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            projection_kind: Some(MemoryProjectionKind::Procedural),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![procedural]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_uncertainty_thresholds() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut surprising = sample_cell("project:continuitydb:uncertainty-surprising", 0.9, 12)?;
+        surprising.set_uncertainty(EpistemicUncertainty::new(
+            Confidence::new(0.76)?,
+            4.2,
+            "baseline belief failed",
+        )?);
+        let surprising = append_committed(&mut kernel, surprising)?;
+        let mut routine = sample_cell("project:continuitydb:uncertainty-routine", 0.9, 12)?;
+        routine.set_uncertainty(EpistemicUncertainty::new(
+            Confidence::new(0.4)?,
+            0.8,
+            "minor ambiguity",
+        )?);
+        append_committed(&mut kernel, routine)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            minimum_uncertainty: Some(Confidence::new(0.7)?),
+            minimum_surprise_bits: Some(3.0),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![surprising]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_minimum_salience() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut salient = sample_cell("project:continuitydb:salient-context", 0.9, 12)?;
+        salient.set_attention(AttentionSignal::new(0.9, 0.8, 0.9, 0.8)?);
+        let salient = append_committed(&mut kernel, salient)?;
+        let mut routine = sample_cell("project:continuitydb:routine-context", 0.9, 12)?;
+        routine.set_attention(AttentionSignal::new(0.1, 0.1, 0.2, 0.0)?);
+        append_committed(&mut kernel, routine)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            minimum_salience: Some(0.7),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![salient]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_minimum_context_affordance(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut high_value = sample_cell("project:continuitydb:high-affordance-context", 0.9, 12)?;
+        high_value.set_context_affordance(ContextAffordance::new(0.95, 0.9, 0.8, 0.4, 0.95, 0.1)?);
+        let high_value = append_committed(&mut kernel, high_value)?;
+        let mut routine = sample_cell("project:continuitydb:routine-affordance-context", 0.9, 12)?;
+        routine.set_context_affordance(ContextAffordance::new(0.2, 0.1, 0.1, 0.1, 0.2, 0.2)?);
+        append_committed(&mut kernel, routine)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            minimum_context_affordance: Some(0.7),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![high_value]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_minimum_epistemic_pressure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut pressured = sample_cell("project:continuitydb:pressure-context", 0.8, 12)?;
+        pressured.set_uncertainty(EpistemicUncertainty::new(
+            Confidence::new(0.7)?,
+            4.0,
+            "high uncertainty with violated baseline",
+        )?);
+        pressured.set_attention(AttentionSignal::new(0.8, 0.6, 0.75, 0.4)?);
+        let pressured = append_committed(&mut kernel, pressured)?;
+        let mut routine = sample_cell("project:continuitydb:routine-pressure-context", 0.9, 12)?;
+        routine.set_uncertainty(EpistemicUncertainty::new(
+            Confidence::new(0.2)?,
+            0.2,
+            "minor uncertainty",
+        )?);
+        append_committed(&mut kernel, routine)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            minimum_epistemic_pressure: Some(0.55),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![pressured]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_minimum_probability_delta() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut kernel = MemoryKernel::default();
+        let mut shifted = sample_cell("project:continuitydb:probability-shift", 0.9, 12)?;
+        let expectation = EpistemicExpectation::from_expected_outcome(
+            "release artifact exists",
+            Confidence::new(0.9)?,
+            false,
+        )?;
+        shifted.set_uncertainty(EpistemicUncertainty::from_expectation(
+            Confidence::new(0.7)?,
+            expectation,
+            "high-certainty baseline failed",
+        )?);
+        let shifted = append_committed(&mut kernel, shifted)?;
+        let mut routine = sample_cell("project:continuitydb:probability-routine", 0.9, 12)?;
+        let routine_expectation = EpistemicExpectation::from_expected_outcome(
+            "routine check remains ambiguous",
+            Confidence::new(0.5)?,
+            false,
+        )?;
+        routine.set_uncertainty(EpistemicUncertainty::from_expectation(
+            Confidence::new(0.4)?,
+            routine_expectation,
+            "low-certainty baseline changed little",
+        )?);
+        append_committed(&mut kernel, routine)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            minimum_probability_delta: Some(0.7),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![shifted]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_epistemic_action() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut scavenge = sample_cell("project:continuitydb:action-scavenge", 0.9, 12)?;
+        let expectation = EpistemicExpectation::from_expected_outcome(
+            "release asset exists",
+            Confidence::new(0.9)?,
+            false,
+        )?;
+        scavenge.set_uncertainty(EpistemicUncertainty::from_expectation(
+            Confidence::new(0.82)?,
+            expectation,
+            "strong baseline failed and needs missing evidence",
+        )?);
+        let scavenge = append_committed(&mut kernel, scavenge)?;
+        append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:action-use", 0.9, 12)?,
+        )?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            epistemic_action: Some(EpistemicAction::Scavenge),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![scavenge]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_epistemic_action_reason() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut kernel = MemoryKernel::default();
+        let mut surprising = sample_cell("project:continuitydb:reason-surprise", 0.9, 12)?;
+        let expectation = EpistemicExpectation::from_expected_outcome(
+            "release asset exists",
+            Confidence::new(0.9)?,
+            false,
+        )?;
+        surprising.set_uncertainty(EpistemicUncertainty::from_expectation(
+            Confidence::new(0.22)?,
+            expectation,
+            "baseline failed but confidence remains low",
+        )?);
+        let surprising = append_committed(&mut kernel, surprising)?;
+        let mut uncertain = sample_cell("project:continuitydb:reason-uncertainty", 0.9, 12)?;
+        uncertain.set_uncertainty(EpistemicUncertainty::new(
+            Confidence::new(0.82)?,
+            0.5,
+            "uncertain but not surprising",
+        )?);
+        append_committed(&mut kernel, uncertain)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            epistemic_action_reason: Some(EpistemicActionReason::HighSurprise),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![surprising]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_selection_reason() -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let routine = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:selection-reason-routine", 0.9, 12)?,
+        )?;
+        let mut salient = sample_cell("project:continuitydb:selection-reason-attention", 0.9, 12)?;
+        salient.set_attention(AttentionSignal::new(0.8, 0.7, 0.9, 0.6)?);
+        let salient = append_committed(&mut kernel, salient)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            selection_reason: Some(ContextPacketSelectionReason::AttentionSignal),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![salient]);
+        assert!(!results.contains(&routine));
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_trajectory_memory_confidence_and_strategy(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let mut reusable = sample_cell("project:continuitydb:trajectory-memory-reusable", 0.9, 12)?;
+        reusable.set_trajectory_memory(TrajectoryMemory::new(
+            "retry release upload without checking target release",
+            "found package artifact and upload command",
+            "GitHub release upload returned 404",
+            "target/alpha-workflow/release-upload-failure.json",
+            0.86,
+            "verify the release target before reusing upload state",
+            vec!["release upload workflow".to_string()],
+            vec!["successful upload report exists".to_string()],
+            ContextPacketStrategy::FalsificationBrief,
+        )?);
+        let reusable = append_committed(&mut kernel, reusable)?;
+        let mut weak = sample_cell("project:continuitydb:trajectory-memory-weak", 0.9, 12)?;
+        weak.set_trajectory_memory(TrajectoryMemory::new(
+            "retry upload from stale checkout",
+            "found release workflow",
+            "failure was not reproduced",
+            "target/weak-trace.json",
+            0.42,
+            "weak lesson should not cross confidence threshold",
+            vec!["release upload workflow".to_string()],
+            vec!["fresh run contradicts it".to_string()],
+            ContextPacketStrategy::FalsificationBrief,
+        )?);
+        append_committed(&mut kernel, weak)?;
+        let mut wrong_shape = sample_cell(
+            "project:continuitydb:trajectory-memory-wrong-shape",
+            0.9,
+            12,
+        )?;
+        wrong_shape.set_trajectory_memory(TrajectoryMemory::new(
+            "look for missing release evidence",
+            "found partial logs",
+            "trace lacks upload outcome",
+            "target/scavenge-trace.json",
+            0.91,
+            "scavenge for retained upload evidence first",
+            vec!["release upload workflow".to_string()],
+            vec!["complete upload report exists".to_string()],
+            ContextPacketStrategy::ScavengingBrief,
+        )?);
+        append_committed(&mut kernel, wrong_shape)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            trajectory_memory_strategy: Some(ContextPacketStrategy::FalsificationBrief),
+            minimum_trajectory_memory_confidence: Some(Confidence::new(0.8)?),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![reusable]);
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_context_gap_kind_and_priority(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let routine = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:context-gap-routine", 0.9, 12)?,
+        )?;
+        let mut low_priority =
+            sample_cell("project:continuitydb:context-gap-low-priority", 0.9, 12)?;
+        low_priority.add_context_gap(ContextGap::new(
+            ContextGapKind::MissingEvidence,
+            "which artifact proves the claim?",
+            "low-priority gap should not cross the threshold",
+            0.4,
+        )?);
+        let low_priority = append_committed(&mut kernel, low_priority)?;
+        let mut high_priority =
+            sample_cell("project:continuitydb:context-gap-high-priority", 0.9, 12)?;
+        high_priority.add_context_gap(ContextGap::new(
+            ContextGapKind::MissingEvidence,
+            "which retained artifact proves the live run?",
+            "high-priority missing evidence should remain retrievable",
+            0.9,
+        )?);
+        let high_priority = append_committed(&mut kernel, high_priority)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            context_gap_kind: Some(ContextGapKind::MissingEvidence),
+            minimum_context_gap_priority: Some(Confidence::new(0.7)?),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![high_priority]);
+        assert!(!results.contains(&routine));
+        assert!(!results.contains(&low_priority));
+        Ok(())
+    }
+
+    #[test]
+    fn memory_kernel_filters_by_invalidation_condition_kind_and_priority(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut kernel = MemoryKernel::default();
+        let routine = append_committed(
+            &mut kernel,
+            sample_cell("project:continuitydb:invalidation-routine", 0.9, 12)?,
+        )?;
+        let mut low_priority =
+            sample_cell("project:continuitydb:invalidation-low-priority", 0.9, 12)?;
+        low_priority.add_invalidation_condition(InvalidationCondition::new(
+            InvalidationConditionKind::DependencyInvalidated,
+            "a low-impact dependency is superseded",
+            "low-priority falsifiers should not cross the threshold",
+            0.4,
+        )?);
+        let low_priority = append_committed(&mut kernel, low_priority)?;
+        let mut high_priority =
+            sample_cell("project:continuitydb:invalidation-high-priority", 0.9, 12)?;
+        high_priority.add_invalidation_condition(InvalidationCondition::new(
+            InvalidationConditionKind::DependencyInvalidated,
+            "a retained dependency artifact is superseded",
+            "high-priority falsifiers should remain directly retrievable",
+            0.9,
+        )?);
+        let high_priority = append_committed(&mut kernel, high_priority)?;
+
+        let results = kernel.lookup_cells(CellLookup {
+            invalidation_condition_kind: Some(InvalidationConditionKind::DependencyInvalidated),
+            minimum_invalidation_priority: Some(Confidence::new(0.7)?),
+            ..CellLookup::default()
+        })?;
+
+        assert_eq!(results, vec![high_priority]);
+        assert!(!results.contains(&routine));
+        assert!(!results.contains(&low_priority));
         Ok(())
     }
 

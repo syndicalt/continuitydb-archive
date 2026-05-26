@@ -1,7 +1,10 @@
 //! Feature-gated local model Steward boundary.
 
 use chrono::{DateTime, TimeZone, Utc};
-use continuitydb_core::{SemanticAnchor, StateCellId};
+use continuitydb_core::{
+    ContextAbstractionLevel, ContextCompilerProposalLine, ContextPacketStrategy, SemanticAnchor,
+    StateCellId,
+};
 use continuitydb_revision::RevisionLinkKind;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,12 +17,15 @@ use std::{
 };
 
 use crate::{
+    ContextCompilerOrchestratorInput, ContextCompilerProposalDraft, ContextCompilerProposalSource,
     ProposalId, ProposalOutcome, ProposalPolicy, StewardAction, StewardError, StewardIdentity,
     StewardProposal,
 };
 
 /// Stable local model response schema version.
 pub const LOCAL_MODEL_RESPONSE_SCHEMA_VERSION: u32 = 1;
+/// Stable local model context compiler response schema version.
+pub const LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_SCHEMA_VERSION: u32 = 2;
 
 const LOCAL_MODEL_RESPONSE_JSON_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -117,9 +123,90 @@ const LOCAL_MODEL_RESPONSE_JSON_SCHEMA: &str = r##"{
   }
 }"##;
 
+const LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_JSON_SCHEMA: &str = r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuitydb.dev/schemas/local-model-context-compiler-response.schema.json",
+  "title": "ContinuityDB Local Model Context Compiler Response",
+  "type": "object",
+  "additionalProperties": false,
+  "x-continuitydb-schema-version": 2,
+  "required": ["context_compiler_proposals"],
+  "properties": {
+    "context_compiler_proposals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/context_compiler_proposal" }
+    }
+  },
+  "$defs": {
+    "context_compiler_proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_cell_id", "strategy", "abstraction_level", "reason_tags", "evidence_locators"],
+      "properties": {
+        "target_cell_id": { "type": "string", "format": "uuid" },
+        "strategy": { "$ref": "#/$defs/context_packet_strategy" },
+        "abstraction_level": { "$ref": "#/$defs/context_abstraction_level" },
+        "reason_tags": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "evidence_locators": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "proposed_lines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/context_compiler_proposal_line" }
+        }
+      }
+    },
+    "context_compiler_proposal_line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "citations", "token_count"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "citations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "token_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "context_packet_strategy": {
+      "enum": [
+        "raw_projection",
+        "operational_brief",
+        "revision_capsule",
+        "uncertainty_brief",
+        "scavenging_brief",
+        "falsification_brief"
+      ]
+    },
+    "context_abstraction_level": {
+      "enum": [
+        "raw",
+        "brief",
+        "capsule",
+        "evidence_dense",
+        "scavenging",
+        "falsification"
+      ]
+    }
+  }
+}"##;
+
 /// Returns the stable JSON Schema for local model Steward responses.
 pub fn local_model_response_json_schema() -> &'static str {
     LOCAL_MODEL_RESPONSE_JSON_SCHEMA
+}
+
+/// Returns the stable JSON Schema for local model context compiler responses.
+pub fn local_model_context_compiler_response_json_schema() -> &'static str {
+    LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_JSON_SCHEMA
 }
 
 const LOCAL_MODEL_RESPONSE_GBNF_GRAMMAR: &str = r#"
@@ -180,11 +267,69 @@ null ::= "null"
 string ::= "\"" ([^"\\] | "\\" ["\\/bfnrt])* "\""
 number ::= "-"? ([0-9] | [1-9] [0-9]*) ("." [0-9]+)?
 ws ::= [ \t\n\r]*
+	"#;
+
+const LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_GBNF_GRAMMAR: &str = r#"
+root ::= context-compiler-response
+context-compiler-response ::= object-start ws context-compiler-proposals-field ws object-end
+context-compiler-proposals-field ::= string-context-compiler-proposals ws colon ws array-start ws context-compiler-proposal-list? ws array-end
+context-compiler-proposal-list ::= context-compiler-proposal (ws comma ws context-compiler-proposal)*
+context-compiler-proposal ::= object-start ws target-cell-id-field ws comma ws strategy-field ws comma ws abstraction-level-field ws comma ws reason-tags-field ws comma ws evidence-locators-field (ws comma ws proposed-lines-field)? ws object-end
+target-cell-id-field ::= string-target-cell-id ws colon ws string
+strategy-field ::= string-strategy ws colon ws context-packet-strategy
+abstraction-level-field ::= string-abstraction-level ws colon ws context-abstraction-level
+reason-tags-field ::= string-reason-tags ws colon ws string-array
+evidence-locators-field ::= string-evidence-locators ws colon ws string-array
+proposed-lines-field ::= string-proposed-lines ws colon ws array-start ws proposed-line-list? ws array-end
+proposed-line-list ::= proposed-line (ws comma ws proposed-line)*
+proposed-line ::= object-start ws text-field ws comma ws citations-field ws comma ws token-count-field ws object-end
+text-field ::= string-text ws colon ws string
+citations-field ::= string-citations ws colon ws string-array
+token-count-field ::= string-token-count ws colon ws integer
+context-packet-strategy ::= raw-projection | operational-brief | revision-capsule | uncertainty-brief | scavenging-brief | falsification-brief
+context-abstraction-level ::= raw | brief | capsule | evidence-dense | scavenging | falsification
+raw-projection ::= "\"raw_projection\""
+operational-brief ::= "\"operational_brief\""
+revision-capsule ::= "\"revision_capsule\""
+uncertainty-brief ::= "\"uncertainty_brief\""
+scavenging-brief ::= "\"scavenging_brief\""
+falsification-brief ::= "\"falsification_brief\""
+raw ::= "\"raw\""
+brief ::= "\"brief\""
+capsule ::= "\"capsule\""
+evidence-dense ::= "\"evidence_dense\""
+scavenging ::= "\"scavenging\""
+falsification ::= "\"falsification\""
+string-array ::= array-start ws (string (ws comma ws string)*)? ws array-end
+string-context-compiler-proposals ::= "\"context_compiler_proposals\""
+string-target-cell-id ::= "\"target_cell_id\""
+string-strategy ::= "\"strategy\""
+string-abstraction-level ::= "\"abstraction_level\""
+string-reason-tags ::= "\"reason_tags\""
+string-evidence-locators ::= "\"evidence_locators\""
+string-proposed-lines ::= "\"proposed_lines\""
+string-text ::= "\"text\""
+string-citations ::= "\"citations\""
+string-token-count ::= "\"token_count\""
+object-start ::= "{"
+object-end ::= "}"
+array-start ::= "["
+array-end ::= "]"
+colon ::= ":"
+comma ::= ","
+string ::= "\"" ([^"\\] | "\\" ["\\/bfnrt])* "\""
+integer ::= [1-9] [0-9]*
+ws ::= [ \t\n\r]*
 "#;
 
 /// Returns a conservative GBNF grammar for local model Steward responses.
 pub fn local_model_response_gbnf_grammar() -> &'static str {
     LOCAL_MODEL_RESPONSE_GBNF_GRAMMAR
+}
+
+/// Returns a conservative GBNF grammar for local model context compiler responses.
+pub fn local_model_context_compiler_response_gbnf_grammar() -> &'static str {
+    LOCAL_MODEL_CONTEXT_COMPILER_RESPONSE_GBNF_GRAMMAR
 }
 
 /// Backend that runs local model inference for the database Steward.
@@ -522,6 +667,104 @@ where
     }
 }
 
+/// Feature-gated source that asks a local model for context compiler packet-shape drafts.
+#[derive(Clone, Debug)]
+pub struct LocalModelContextCompilerProposalSource<B> {
+    steward: LocalModelSteward<B>,
+    created_at: DateTime<Utc>,
+}
+
+impl<B> LocalModelContextCompilerProposalSource<B>
+where
+    B: LocalModelBackend,
+{
+    /// Creates a local model context compiler proposal source.
+    pub fn new(steward: LocalModelSteward<B>, created_at: DateTime<Utc>) -> Self {
+        Self {
+            steward,
+            created_at,
+        }
+    }
+
+    /// Returns the wrapped local model Steward.
+    pub fn steward(&self) -> &LocalModelSteward<B> {
+        &self.steward
+    }
+
+    fn input_for_context_compiler(
+        &self,
+        input: &ContextCompilerOrchestratorInput,
+    ) -> LocalModelStewardInput {
+        let mut steward_input = LocalModelStewardInput::new(
+            self.created_at,
+            format!(
+                "Propose context compiler packet shapes for task intent: {}",
+                input.task_intent()
+            ),
+        );
+        for cell_id in input.candidate_cell_ids() {
+            steward_input = steward_input.with_evidence(
+                format!("statecell://{cell_id:?}"),
+                "Allowed checkout candidate for context compiler proposal.",
+            );
+            let mut trajectory_trace_locator = None;
+            if let Some(trajectory_memory) = input.candidate_trajectory_memory(*cell_id) {
+                steward_input = steward_input.with_evidence(
+                    trajectory_memory.trace_locator(),
+                    format!(
+                        "Trajectory memory for allowed checkout candidate {cell_id}: lesson: {}; hypothesis tried: {}; progress made: {}; failure mode: {}; applies when: {}; invalidated when: {}; confidence {:.3}; checkout strategy: {}.",
+                        trajectory_memory.reusable_lesson(),
+                        trajectory_memory.hypothesis_tried(),
+                        trajectory_memory.progress_made(),
+                        trajectory_memory.failure_mode(),
+                        trajectory_memory.applicability_conditions().join("; "),
+                        trajectory_memory.invalidation_conditions().join("; "),
+                        trajectory_memory.confidence().value(),
+                        context_packet_strategy_contract_name(trajectory_memory.checkout_strategy())
+                    ),
+                );
+                trajectory_trace_locator = Some(trajectory_memory.trace_locator().to_string());
+            }
+            for locator in input.candidate_evidence_locators(*cell_id) {
+                if trajectory_trace_locator.as_deref() == Some(locator.as_str()) {
+                    continue;
+                }
+                steward_input = steward_input.with_evidence(
+                    locator,
+                    format!("Source evidence locator for allowed checkout candidate {cell_id}."),
+                );
+            }
+        }
+        steward_input
+    }
+}
+
+fn context_packet_strategy_contract_name(strategy: ContextPacketStrategy) -> &'static str {
+    match strategy {
+        ContextPacketStrategy::RawProjection => "raw_projection",
+        ContextPacketStrategy::OperationalBrief => "operational_brief",
+        ContextPacketStrategy::RevisionCapsule => "revision_capsule",
+        ContextPacketStrategy::UncertaintyBrief => "uncertainty_brief",
+        ContextPacketStrategy::ScavengingBrief => "scavenging_brief",
+        ContextPacketStrategy::FalsificationBrief => "falsification_brief",
+    }
+}
+
+impl<B> ContextCompilerProposalSource for LocalModelContextCompilerProposalSource<B>
+where
+    B: LocalModelBackend,
+{
+    fn propose_context_compiler_drafts(
+        &self,
+        input: &ContextCompilerOrchestratorInput,
+    ) -> Result<Vec<ContextCompilerProposalDraft>, StewardError> {
+        let response = self
+            .steward
+            .raw_response(self.input_for_context_compiler(input))?;
+        decode_context_compiler_response(&response)
+    }
+}
+
 /// Input for a feature-gated local model Steward run.
 #[derive(Clone, Debug)]
 pub struct LocalModelStewardInput {
@@ -571,9 +814,109 @@ pub struct StewardEvaluationCase {
     name: String,
     input: LocalModelStewardInput,
     expected_actions: Vec<StewardAction>,
+    acceptance_criteria: Vec<StewardAcceptanceCriterion>,
     required_citations: Vec<String>,
     required_rationale_terms: Vec<String>,
     forbidden_rationale_terms: Vec<String>,
+}
+
+/// Required acceptance criteria for local Steward model evaluation.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StewardAcceptanceCriterion {
+    /// Model output must decode through the strict Steward JSON response contract.
+    ValidJsonSchemaConformance,
+    /// Model output must distinguish conflict links from supersession links.
+    ConflictVersusSupersessionClassification,
+    /// Model output must preserve evidence citations in emitted proposals.
+    EvidenceCitationPreservation,
+    /// Model output must not assert unsupported claims beyond supplied evidence.
+    UnsupportedClaimAvoidance,
+    /// Repeated low-temperature model output must be stable enough for regression gating.
+    StableLowTemperatureOutput,
+    /// Model output must explicitly preserve uncertainty when evidence is insufficient.
+    ExplicitUncertaintyForInsufficientEvidence,
+    /// Model output must avoid proposals rejected by deterministic policy.
+    DeterministicPolicyRejectionAvoidance,
+}
+
+impl StewardAcceptanceCriterion {
+    /// Returns the stable snake-case criterion identifier.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ValidJsonSchemaConformance => "valid_json_schema_conformance",
+            Self::ConflictVersusSupersessionClassification => {
+                "conflict_versus_supersession_classification"
+            }
+            Self::EvidenceCitationPreservation => "evidence_citation_preservation",
+            Self::UnsupportedClaimAvoidance => "unsupported_claim_avoidance",
+            Self::StableLowTemperatureOutput => "stable_low_temperature_output",
+            Self::ExplicitUncertaintyForInsufficientEvidence => {
+                "explicit_uncertainty_for_insufficient_evidence"
+            }
+            Self::DeterministicPolicyRejectionAvoidance => {
+                "deterministic_policy_rejection_avoidance"
+            }
+        }
+    }
+}
+
+/// Returns the complete acceptance criteria that the fixed Steward suite must cover.
+pub fn required_steward_acceptance_criteria() -> &'static [StewardAcceptanceCriterion] {
+    &[
+        StewardAcceptanceCriterion::ValidJsonSchemaConformance,
+        StewardAcceptanceCriterion::ConflictVersusSupersessionClassification,
+        StewardAcceptanceCriterion::EvidenceCitationPreservation,
+        StewardAcceptanceCriterion::UnsupportedClaimAvoidance,
+        StewardAcceptanceCriterion::StableLowTemperatureOutput,
+        StewardAcceptanceCriterion::ExplicitUncertaintyForInsufficientEvidence,
+        StewardAcceptanceCriterion::DeterministicPolicyRejectionAvoidance,
+    ]
+}
+
+/// Deterministic acceptance-coverage summary for a Steward evaluation suite.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StewardAcceptanceCoverage {
+    covered: Vec<StewardAcceptanceCriterion>,
+    missing: Vec<StewardAcceptanceCriterion>,
+}
+
+impl StewardAcceptanceCoverage {
+    fn from_suite(suite: &StewardEvaluationSuite) -> Self {
+        let covered_set: BTreeSet<StewardAcceptanceCriterion> = suite
+            .cases()
+            .iter()
+            .flat_map(StewardEvaluationCase::acceptance_criteria)
+            .copied()
+            .collect();
+        let covered = required_steward_acceptance_criteria()
+            .iter()
+            .copied()
+            .filter(|criterion| covered_set.contains(criterion))
+            .collect();
+        let missing = required_steward_acceptance_criteria()
+            .iter()
+            .copied()
+            .filter(|criterion| !covered_set.contains(criterion))
+            .collect();
+
+        Self { covered, missing }
+    }
+
+    /// Returns covered required acceptance criteria in canonical order.
+    pub fn covered(&self) -> &[StewardAcceptanceCriterion] {
+        &self.covered
+    }
+
+    /// Returns required acceptance criteria with no covering fixed case.
+    pub fn missing(&self) -> &[StewardAcceptanceCriterion] {
+        &self.missing
+    }
+
+    /// Returns whether every required acceptance criterion is covered.
+    pub fn complete(&self) -> bool {
+        self.missing.is_empty()
+    }
 }
 
 impl StewardEvaluationCase {
@@ -587,6 +930,7 @@ impl StewardEvaluationCase {
             name: name.into(),
             input: LocalModelStewardInput::new(created_at, task),
             expected_actions: Vec::new(),
+            acceptance_criteria: Vec::new(),
             required_citations: Vec::new(),
             required_rationale_terms: Vec::new(),
             forbidden_rationale_terms: Vec::new(),
@@ -602,6 +946,14 @@ impl StewardEvaluationCase {
     /// Requires at least one emitted proposal to match the expected action.
     pub fn expect_action(mut self, action: StewardAction) -> Self {
         self.expected_actions.push(action);
+        self
+    }
+
+    /// Marks this case as covering one required acceptance criterion.
+    pub fn cover_acceptance_criterion(mut self, criterion: StewardAcceptanceCriterion) -> Self {
+        if !self.acceptance_criteria.contains(&criterion) {
+            self.acceptance_criteria.push(criterion);
+        }
         self
     }
 
@@ -636,6 +988,11 @@ impl StewardEvaluationCase {
     /// Returns expected actions that at least one emitted proposal must match.
     pub fn expected_actions(&self) -> &[StewardAction] {
         &self.expected_actions
+    }
+
+    /// Returns acceptance criteria covered by this fixed case.
+    pub fn acceptance_criteria(&self) -> &[StewardAcceptanceCriterion] {
+        &self.acceptance_criteria
     }
 
     /// Returns citation locators that emitted proposals must preserve.
@@ -697,6 +1054,9 @@ impl StewardEvaluationSuite {
                     serde_json::to_string(action).unwrap_or_else(|_error| format!("{action:?}"));
                 fields.push(format!("expected_action={encoded}"));
             }
+            for criterion in case.acceptance_criteria() {
+                fields.push(format!("acceptance_criterion={}", criterion.as_str()));
+            }
             for citation in case.required_citations() {
                 fields.push(format!("required_citation={citation}"));
             }
@@ -709,6 +1069,11 @@ impl StewardEvaluationSuite {
         }
 
         fingerprint_fields(&fields)
+    }
+
+    /// Returns deterministic coverage of the required Steward acceptance criteria.
+    pub fn acceptance_coverage(&self) -> StewardAcceptanceCoverage {
+        StewardAcceptanceCoverage::from_suite(self)
     }
 
     /// Evaluates a local model Steward against all cases.
@@ -1010,8 +1375,19 @@ impl StewardEvaluationFailure {
 pub struct SmallModelCandidate {
     model_id: &'static str,
     role: &'static str,
+    evaluation_priority: u8,
+    evaluation_tier: &'static str,
+    evaluation_use: &'static str,
+    ci_suitable: bool,
+    quality_gate_eligible: bool,
+    default_quality_gate_candidate: bool,
     recommended_runtime: &'static str,
+    compatible_runtimes: &'static [&'static str],
     artifact_format: &'static str,
+    license: &'static str,
+    parameter_count_millions: u16,
+    context_window_tokens: u32,
+    model_card_url: &'static str,
     recommended_temperature_millis: u16,
     requires_grammar: bool,
     notes: &'static str,
@@ -1028,14 +1404,69 @@ impl SmallModelCandidate {
         self.role
     }
 
+    /// Returns the 1-based evaluation priority for experiment ordering.
+    pub fn evaluation_priority(&self) -> u8 {
+        self.evaluation_priority
+    }
+
+    /// Returns the coarse evaluation tier for grouping experiments.
+    pub fn evaluation_tier(&self) -> &'static str {
+        self.evaluation_tier
+    }
+
+    /// Returns the intended evaluation use for this candidate.
+    pub fn evaluation_use(&self) -> &'static str {
+        self.evaluation_use
+    }
+
+    /// Returns whether this candidate is suitable for automated CI evaluation.
+    pub fn ci_suitable(&self) -> bool {
+        self.ci_suitable
+    }
+
+    /// Returns whether this candidate should participate in quality regression gates.
+    pub fn quality_gate_eligible(&self) -> bool {
+        self.quality_gate_eligible
+    }
+
+    /// Returns whether this is the canonical one-candidate quality gate model.
+    pub fn default_quality_gate_candidate(&self) -> bool {
+        self.default_quality_gate_candidate
+    }
+
     /// Returns the recommended local inference runtime for this candidate.
     pub fn recommended_runtime(&self) -> &'static str {
         self.recommended_runtime
     }
 
+    /// Returns local inference runtimes this candidate is expected to support.
+    pub fn compatible_runtimes(&self) -> &'static [&'static str] {
+        self.compatible_runtimes
+    }
+
     /// Returns the expected local model artifact format.
     pub fn artifact_format(&self) -> &'static str {
         self.artifact_format
+    }
+
+    /// Returns the model license identifier from the model card.
+    pub fn license(&self) -> &'static str {
+        self.license
+    }
+
+    /// Returns the approximate public model parameter count in millions.
+    pub fn parameter_count_millions(&self) -> u16 {
+        self.parameter_count_millions
+    }
+
+    /// Returns the advertised context window in tokens for evaluation planning.
+    pub fn context_window_tokens(&self) -> u32 {
+        self.context_window_tokens
+    }
+
+    /// Returns the public model-card URL used as metadata provenance.
+    pub fn model_card_url(&self) -> &'static str {
+        self.model_card_url
     }
 
     /// Returns the recommended benchmark temperature for stable proposal output.
@@ -1060,7 +1491,35 @@ impl SmallModelCandidate {
         model_path: impl Into<PathBuf>,
     ) -> LocalExecutableRunnerConfig {
         LlamaCppRuntimeProfile::new(executable, model_path)
+            .with_context_size(self.context_window_tokens as usize)
             .with_temperature(format_temperature(self.recommended_temperature_millis))
+            .runner_config()
+    }
+
+    /// Builds the recommended runner configuration with the Steward response grammar.
+    pub fn recommended_runner_config_with_grammar_file(
+        &self,
+        executable: impl Into<PathBuf>,
+        model_path: impl Into<PathBuf>,
+        grammar_file: impl Into<PathBuf>,
+    ) -> LocalExecutableRunnerConfig {
+        LlamaCppRuntimeProfile::new(executable, model_path)
+            .with_context_size(self.context_window_tokens as usize)
+            .with_temperature(format_temperature(self.recommended_temperature_millis))
+            .with_steward_response_grammar_file(grammar_file)
+            .runner_config()
+    }
+
+    /// Builds the recommended mistral.rs runner configuration for Steward JSON output.
+    pub fn recommended_mistral_runner_config(
+        &self,
+        executable: impl Into<PathBuf>,
+        model_path: impl Into<PathBuf>,
+    ) -> LocalExecutableRunnerConfig {
+        MistralRsRuntimeProfile::new(executable, model_path)
+            .with_context_size(self.context_window_tokens as usize)
+            .with_temperature(format_temperature(self.recommended_temperature_millis))
+            .with_steward_json_output()
             .runner_config()
     }
 }
@@ -1071,8 +1530,19 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
         SmallModelCandidate {
             model_id: "Qwen/Qwen2.5-0.5B-Instruct",
             role: "default-feasibility",
+            evaluation_priority: 1,
+            evaluation_tier: "default",
+            evaluation_use: "first real Steward proposal experiments",
+            ci_suitable: true,
+            quality_gate_eligible: true,
+            default_quality_gate_candidate: true,
             recommended_runtime: "llama.cpp",
+            compatible_runtimes: &["llama.cpp", "mistral.rs"],
             artifact_format: "GGUF",
+            license: "Apache-2.0",
+            parameter_count_millions: 490,
+            context_window_tokens: 32_768,
+            model_card_url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct",
             recommended_temperature_millis: 0,
             requires_grammar: true,
             notes: "Smallest default feasibility candidate; evaluate first with grammar-constrained JSON output.",
@@ -1080,8 +1550,19 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
         SmallModelCandidate {
             model_id: "Qwen/Qwen3-0.6B",
             role: "current-reasoning",
+            evaluation_priority: 2,
+            evaluation_tier: "comparison",
+            evaluation_use: "compare proposal quality against Qwen2.5-0.5B",
+            ci_suitable: true,
+            quality_gate_eligible: true,
+            default_quality_gate_candidate: false,
             recommended_runtime: "llama.cpp",
+            compatible_runtimes: &["llama.cpp", "mistral.rs"],
             artifact_format: "GGUF",
+            license: "Apache-2.0",
+            parameter_count_millions: 600,
+            context_window_tokens: 32_768,
+            model_card_url: "https://huggingface.co/Qwen/Qwen3-0.6B",
             recommended_temperature_millis: 0,
             requires_grammar: true,
             notes: "Reasoning comparison candidate; run with thinking disabled or constrained for deterministic benchmarks.",
@@ -1089,8 +1570,19 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
         SmallModelCandidate {
             model_id: "HuggingFaceTB/SmolLM2-360M-Instruct",
             role: "ultra-small-experimental",
+            evaluation_priority: 3,
+            evaluation_tier: "experimental",
+            evaluation_use: "measure the lower bound for constrained proposal quality",
+            ci_suitable: false,
+            quality_gate_eligible: false,
+            default_quality_gate_candidate: false,
             recommended_runtime: "llama.cpp",
+            compatible_runtimes: &["llama.cpp", "mistral.rs"],
             artifact_format: "GGUF",
+            license: "Apache-2.0",
+            parameter_count_millions: 360,
+            context_window_tokens: 8_192,
+            model_card_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct",
             recommended_temperature_millis: 0,
             requires_grammar: true,
             notes: "Lower-bound experimental candidate; use to measure minimum viable constrained proposal quality.",
@@ -1098,13 +1590,58 @@ pub fn small_model_candidates() -> &'static [SmallModelCandidate] {
         SmallModelCandidate {
             model_id: "HuggingFaceTB/SmolLM2-135M-Instruct",
             role: "smoke-test-only",
+            evaluation_priority: 4,
+            evaluation_tier: "smoke-test",
+            evaluation_use: "smoke-test constrained-output plumbing only",
+            ci_suitable: false,
+            quality_gate_eligible: false,
+            default_quality_gate_candidate: false,
             recommended_runtime: "llama.cpp",
+            compatible_runtimes: &["llama.cpp", "mistral.rs"],
             artifact_format: "GGUF",
+            license: "Apache-2.0",
+            parameter_count_millions: 135,
+            context_window_tokens: 8_192,
+            model_card_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct",
             recommended_temperature_millis: 0,
             requires_grammar: true,
             notes: "Smoke-test candidate only; do not treat passing toy output as production stewardship quality.",
         },
     ]
+}
+
+/// Returns the canonical small-model candidate for one-model quality gates.
+pub fn small_model_default_quality_gate_candidate() -> Option<SmallModelCandidate> {
+    small_model_candidates()
+        .iter()
+        .copied()
+        .find(SmallModelCandidate::default_quality_gate_candidate)
+}
+
+/// Returns the fixed small-model candidates that should participate in quality gates.
+pub fn small_model_quality_gate_candidates() -> Vec<SmallModelCandidate> {
+    small_model_candidates()
+        .iter()
+        .copied()
+        .filter(SmallModelCandidate::quality_gate_eligible)
+        .collect()
+}
+
+/// Returns the canonical small-model candidate for one-model CI evaluation.
+pub fn small_model_default_ci_candidate() -> Option<SmallModelCandidate> {
+    small_model_candidates()
+        .iter()
+        .copied()
+        .find(SmallModelCandidate::ci_suitable)
+}
+
+/// Returns the fixed small-model candidates suitable for automated CI evaluation.
+pub fn small_model_ci_candidates() -> Vec<SmallModelCandidate> {
+    small_model_candidates()
+        .iter()
+        .copied()
+        .filter(SmallModelCandidate::ci_suitable)
+        .collect()
 }
 
 /// Returns the fixed default proposal-quality suite for local Steward model baselines.
@@ -1135,6 +1672,12 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
             cell_id: None,
             request: "Gather additional source evidence.".to_string(),
         })
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::ValidJsonSchemaConformance)
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
+        .cover_acceptance_criterion(
+            StewardAcceptanceCriterion::ExplicitUncertaintyForInsufficientEvidence,
+        )
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::StableLowTemperatureOutput)
         .require_citation("continuitydb://evaluation/thin-evidence")
         .require_rationale_term("uncertainty"),
         StewardEvaluationCase::new(
@@ -1151,6 +1694,10 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
             kind: RevisionLinkKind::ConflictsWith,
             target: conflict_target,
         })
+        .cover_acceptance_criterion(
+            StewardAcceptanceCriterion::ConflictVersusSupersessionClassification,
+        )
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/conflict-evidence")
         .forbid_rationale_term("verified in production"),
         StewardEvaluationCase::new(
@@ -1167,6 +1714,10 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
             kind: RevisionLinkKind::Supersedes,
             target: supersession_target,
         })
+        .cover_acceptance_criterion(
+            StewardAcceptanceCriterion::ConflictVersusSupersessionClassification,
+        )
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/supersession-evidence")
         .require_rationale_term("supersedes")
         .forbid_rationale_term("conflicts with"),
@@ -1183,6 +1734,8 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
             cell_id: None,
             request: "Verify deployment status before treating the release as shipped.".to_string(),
         })
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::UnsupportedClaimAvoidance)
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/unsupported-release-claim")
         .require_rationale_term("unsupported")
         .forbid_rationale_term("deployed to all customers"),
@@ -1199,6 +1752,7 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
             cell_id: confidence_cell,
             proposed_confidence: 0.42,
         })
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/confidence-evidence")
         .require_rationale_term("confidence")
         .forbid_rationale_term("fully trusted"),
@@ -1215,6 +1769,7 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
             cell_id: Some(targeted_verification_cell),
             request: "Refresh the stale high-impact frontier signal.".to_string(),
         })
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/targeted-verification-evidence")
         .require_rationale_term("refresh")
         .forbid_rationale_term("no target"),
@@ -1233,6 +1788,7 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
                 "ContinuityDB local Steward benchmark produced a new result requiring review."
                     .to_string(),
         })
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/new-benchmark-evidence")
         .require_rationale_term("draft")
         .forbid_rationale_term("committed"),
@@ -1252,6 +1808,7 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
         .expect_action(StewardAction::MarkFrontier {
             cell_id: frontier_cell,
         })
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/release-build-source")
         .require_citation("continuitydb://evaluation/release-incident-source")
         .require_rationale_term("frontier"),
@@ -1269,6 +1826,10 @@ pub fn default_steward_evaluation_suite() -> StewardEvaluationSuite {
             request: "Ask for a concrete answerability question before labeling the cell."
                 .to_string(),
         })
+        .cover_acceptance_criterion(
+            StewardAcceptanceCriterion::DeterministicPolicyRejectionAvoidance,
+        )
+        .cover_acceptance_criterion(StewardAcceptanceCriterion::EvidenceCitationPreservation)
         .require_citation("continuitydb://evaluation/invalid-answerability-label")
         .require_rationale_term("invalid")
         .forbid_rationale_term("label applied"),
@@ -1618,6 +2179,8 @@ pub struct LocalModelBenchmarkBaseline {
     candidate_model_id: String,
     candidate_role: String,
     #[serde(default)]
+    candidate_selection: LocalModelCandidateSelectionRecord,
+    #[serde(default)]
     response_schema_version: u32,
     #[serde(default)]
     evaluation_suite_fingerprint: String,
@@ -1642,9 +2205,22 @@ pub struct LocalModelBenchmarkBaseline {
 impl LocalModelBenchmarkBaseline {
     /// Creates a durable baseline record from a benchmark report and timestamp.
     pub fn from_report(report: LocalModelBenchmarkReport, recorded_at: DateTime<Utc>) -> Self {
+        Self::from_report_with_candidate_selection(report, recorded_at, "unspecified")
+    }
+
+    /// Creates a durable baseline record with candidate-selection provenance.
+    pub fn from_report_with_candidate_selection(
+        report: LocalModelBenchmarkReport,
+        recorded_at: DateTime<Utc>,
+        candidate_selection_source: impl Into<String>,
+    ) -> Self {
         Self {
             candidate_model_id: report.candidate.model_id().to_string(),
             candidate_role: report.candidate.role().to_string(),
+            candidate_selection: LocalModelCandidateSelectionRecord {
+                source: candidate_selection_source.into(),
+                model_id: report.candidate.model_id().to_string(),
+            },
             response_schema_version: report.response_schema_version,
             evaluation_suite_fingerprint: report.evaluation_suite_fingerprint,
             schema_fingerprint: report.schema_fingerprint,
@@ -1667,6 +2243,11 @@ impl LocalModelBenchmarkBaseline {
     /// Returns the evaluated model role.
     pub fn candidate_role(&self) -> &str {
         &self.candidate_role
+    }
+
+    /// Returns how the benchmark candidate was selected.
+    pub fn candidate_selection_source(&self) -> &str {
+        &self.candidate_selection.source
     }
 
     /// Returns the local model response schema version used for this baseline.
@@ -1735,11 +2316,23 @@ impl LocalModelBenchmarkBaseline {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+struct LocalModelCandidateSelectionRecord {
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    model_id: String,
+}
+
 /// Deterministic comparison between two local model benchmark baselines.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalModelBenchmarkRegression {
     candidate_model_id: String,
     candidate_role: String,
+    #[serde(default)]
+    previous_candidate_selection: LocalModelCandidateSelectionRecord,
+    #[serde(default)]
+    current_candidate_selection: LocalModelCandidateSelectionRecord,
     previous_recorded_at: DateTime<Utc>,
     current_recorded_at: DateTime<Utc>,
     previous_passed_cases: usize,
@@ -1898,6 +2491,8 @@ impl LocalModelBenchmarkRegression {
         Self {
             candidate_model_id: current.candidate_model_id().to_string(),
             candidate_role: current.candidate_role().to_string(),
+            previous_candidate_selection: previous.candidate_selection.clone(),
+            current_candidate_selection: current.candidate_selection.clone(),
             previous_recorded_at: previous.recorded_at(),
             current_recorded_at: current.recorded_at(),
             previous_passed_cases,
@@ -1925,6 +2520,26 @@ impl LocalModelBenchmarkRegression {
     /// Returns the evaluated model role.
     pub fn candidate_role(&self) -> &str {
         &self.candidate_role
+    }
+
+    /// Returns how the previous baseline candidate was selected.
+    pub fn previous_candidate_selection_source(&self) -> &str {
+        &self.previous_candidate_selection.source
+    }
+
+    /// Returns the previous baseline candidate model identifier from selection metadata.
+    pub fn previous_candidate_selection_model_id(&self) -> &str {
+        &self.previous_candidate_selection.model_id
+    }
+
+    /// Returns how the current baseline candidate was selected.
+    pub fn current_candidate_selection_source(&self) -> &str {
+        &self.current_candidate_selection.source
+    }
+
+    /// Returns the current baseline candidate model identifier from selection metadata.
+    pub fn current_candidate_selection_model_id(&self) -> &str {
+        &self.current_candidate_selection.model_id
     }
 
     /// Returns when the previous baseline was recorded.
@@ -2378,6 +2993,77 @@ struct ModelResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct ModelContextCompilerResponse {
+    context_compiler_proposals: Vec<ModelContextCompilerProposal>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelContextCompilerProposal {
+    target_cell_id: StateCellId,
+    strategy: ModelContextPacketStrategy,
+    abstraction_level: ModelContextAbstractionLevel,
+    reason_tags: Vec<String>,
+    evidence_locators: Vec<String>,
+    #[serde(default)]
+    proposed_lines: Vec<ModelContextCompilerProposalLine>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelContextCompilerProposalLine {
+    text: String,
+    citations: Vec<String>,
+    token_count: i64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ModelContextPacketStrategy {
+    RawProjection,
+    OperationalBrief,
+    RevisionCapsule,
+    UncertaintyBrief,
+    ScavengingBrief,
+    FalsificationBrief,
+}
+
+impl From<ModelContextPacketStrategy> for ContextPacketStrategy {
+    fn from(value: ModelContextPacketStrategy) -> Self {
+        match value {
+            ModelContextPacketStrategy::RawProjection => Self::RawProjection,
+            ModelContextPacketStrategy::OperationalBrief => Self::OperationalBrief,
+            ModelContextPacketStrategy::RevisionCapsule => Self::RevisionCapsule,
+            ModelContextPacketStrategy::UncertaintyBrief => Self::UncertaintyBrief,
+            ModelContextPacketStrategy::ScavengingBrief => Self::ScavengingBrief,
+            ModelContextPacketStrategy::FalsificationBrief => Self::FalsificationBrief,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ModelContextAbstractionLevel {
+    Raw,
+    Brief,
+    Capsule,
+    EvidenceDense,
+    Scavenging,
+    Falsification,
+}
+
+impl From<ModelContextAbstractionLevel> for ContextAbstractionLevel {
+    fn from(value: ModelContextAbstractionLevel) -> Self {
+        match value {
+            ModelContextAbstractionLevel::Raw => Self::Raw,
+            ModelContextAbstractionLevel::Brief => Self::Brief,
+            ModelContextAbstractionLevel::Capsule => Self::Capsule,
+            ModelContextAbstractionLevel::EvidenceDense => Self::EvidenceDense,
+            ModelContextAbstractionLevel::Scavenging => Self::Scavenging,
+            ModelContextAbstractionLevel::Falsification => Self::Falsification,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
 struct ModelProposal {
     action: ModelAction,
     rationale: String,
@@ -2455,6 +3141,37 @@ fn decode_response(
             )
         })
         .collect()
+}
+
+fn decode_context_compiler_response(
+    response: &str,
+) -> Result<Vec<ContextCompilerProposalDraft>, StewardError> {
+    let response: ModelContextCompilerResponse =
+        serde_json::from_str(response).map_err(|_error| StewardError::InvalidModelResponse)?;
+
+    response
+        .context_compiler_proposals
+        .into_iter()
+        .map(|proposal| {
+            let proposed_lines = proposal
+                .proposed_lines
+                .into_iter()
+                .map(|line| {
+                    ContextCompilerProposalLine::new(line.text, line.citations, line.token_count)
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| StewardError::InvalidContextCompilerProposal)?;
+
+            Ok(ContextCompilerProposalDraft::new(
+                proposal.target_cell_id,
+                proposal.strategy.into(),
+                proposal.reason_tags,
+                proposal.evidence_locators,
+            )
+            .with_abstraction_level(proposal.abstraction_level.into())
+            .with_proposed_lines(proposed_lines))
+        })
+        .collect::<Result<Vec<_>, StewardError>>()
 }
 
 impl ModelAction {

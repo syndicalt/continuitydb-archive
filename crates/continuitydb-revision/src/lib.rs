@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 
 use continuitydb_core::{
-    ActivationState, Answerability, Confidence, SemanticAnchor, StateCell, StateCellId,
-    UtilityFeedback,
+    ActivationState, Answerability, AttentionSignal, Confidence, ContextAffordance, ContextGap,
+    ContextLifecyclePolicy, EpistemicUncertainty, InvalidationCondition, LifecycleStage,
+    MemoryProjection, SemanticAnchor, StateCell, StateCellId, TrajectoryMemory, UtilityFeedback,
 };
 
 pub use continuitydb_core::RevisionLinkKind;
@@ -74,6 +75,219 @@ pub fn revise_activation_state(
     revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
 
     ActivationStateRevision { cell, revision }
+}
+
+/// Result of applying a lifecycle-stage change as an append-only StateCell revision.
+pub struct LifecycleStageRevision {
+    /// New StateCell version carrying the revised lifecycle stage.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with an updated lifecycle stage.
+pub fn revise_lifecycle_stage(
+    previous: &StateCell,
+    lifecycle_stage: LifecycleStage,
+) -> LifecycleStageRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.lifecycle_stage = lifecycle_stage;
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    LifecycleStageRevision { cell, revision }
+}
+
+/// Result of applying a context lifecycle policy as an append-only StateCell revision.
+pub struct ContextLifecyclePolicyRevision {
+    /// New StateCell version carrying the revised lifecycle policy.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with an updated context lifecycle policy.
+pub fn revise_context_lifecycle_policy(
+    previous: &StateCell,
+    lifecycle_policy: ContextLifecyclePolicy,
+) -> ContextLifecyclePolicyRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.lifecycle_policy = lifecycle_policy;
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    ContextLifecyclePolicyRevision { cell, revision }
+}
+
+/// Result of appending a memory projection as an append-only StateCell revision.
+pub struct MemoryProjectionRevision {
+    /// New StateCell version carrying the appended memory projection.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with an appended memory projection.
+pub fn revise_memory_projection(
+    previous: &StateCell,
+    projection: MemoryProjection,
+) -> MemoryProjectionRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.projections.push(projection);
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    MemoryProjectionRevision { cell, revision }
+}
+
+/// Result of applying native epistemic uncertainty as an append-only StateCell revision.
+pub struct EpistemicUncertaintyRevision {
+    /// New StateCell version carrying the revised uncertainty contract.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with updated native epistemic uncertainty.
+pub fn revise_epistemic_uncertainty(
+    previous: &StateCell,
+    uncertainty: EpistemicUncertainty,
+) -> EpistemicUncertaintyRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.uncertainty = uncertainty;
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    EpistemicUncertaintyRevision { cell, revision }
+}
+
+/// Result of applying a native attention signal as an append-only StateCell revision.
+pub struct AttentionSignalRevision {
+    /// New StateCell version carrying the revised attention signal.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with updated native attention signal.
+pub fn revise_attention_signal(
+    previous: &StateCell,
+    attention: AttentionSignal,
+) -> AttentionSignalRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.attention = attention;
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    AttentionSignalRevision { cell, revision }
+}
+
+/// Result of applying a native context affordance signal as an append-only StateCell revision.
+pub struct ContextAffordanceRevision {
+    /// New StateCell version carrying the revised value-of-context signal.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with updated native context affordance.
+pub fn revise_context_affordance(
+    previous: &StateCell,
+    context_affordance: ContextAffordance,
+) -> ContextAffordanceRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.context_affordance = context_affordance;
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    ContextAffordanceRevision { cell, revision }
+}
+
+/// Result of appending a native context gap as an append-only StateCell revision.
+pub struct ContextGapRevision {
+    /// New StateCell version carrying the appended missing-context contract.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with an appended native context gap.
+pub fn revise_context_gap(previous: &StateCell, context_gap: ContextGap) -> ContextGapRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.context_gaps.push(context_gap);
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    ContextGapRevision { cell, revision }
+}
+
+/// Result of appending a native invalidation condition as an append-only StateCell revision.
+pub struct InvalidationConditionRevision {
+    /// New StateCell version carrying the appended falsification contract.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with an appended native invalidation condition.
+pub fn revise_invalidation_condition(
+    previous: &StateCell,
+    invalidation_condition: InvalidationCondition,
+) -> InvalidationConditionRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.invalidation_conditions.push(invalidation_condition);
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    InvalidationConditionRevision { cell, revision }
+}
+
+/// Result of applying native trajectory memory as an append-only StateCell revision.
+pub struct TrajectoryMemoryRevision {
+    /// New StateCell version carrying the revised rollout experience.
+    pub cell: StateCell,
+    /// Revision links connecting the new version to the prior version.
+    pub revision: RevisionGraph,
+}
+
+/// Creates a successor StateCell version with updated native trajectory memory.
+pub fn revise_trajectory_memory(
+    previous: &StateCell,
+    trajectory_memory: TrajectoryMemory,
+) -> TrajectoryMemoryRevision {
+    let mut cell = previous.clone();
+    cell.id = StateCellId::new();
+    cell.trajectory_memory = Some(trajectory_memory);
+
+    let mut revision = RevisionGraph::default();
+    revision.link(cell.id, RevisionLinkKind::Supersedes, previous.id);
+    revision.link(cell.id, RevisionLinkKind::Predecessor, previous.id);
+
+    TrajectoryMemoryRevision { cell, revision }
 }
 
 /// Result of applying answerability labels as an append-only StateCell revision.
@@ -368,14 +582,20 @@ fn max_evidence_confidence(cell: &StateCell) -> f32 {
 mod tests {
     use chrono::{TimeZone, Utc};
     use continuitydb_core::{
-        ActivationState, Answerability, CellCost, CellPayload, Citation, Confidence, Evidence,
-        Scope, SemanticAnchor, SourceId, StateCell, StateCellId, TrustSignal, UtilityFeedback,
-        ValidTimeRange,
+        ActivationState, Answerability, AttentionSignal, CellCost, CellPayload, Citation,
+        Confidence, ContextAffordance, ContextGap, ContextGapKind, ContextLifecyclePolicy,
+        ContextPacketStrategy, EpistemicUncertainty, Evidence, InvalidationCondition,
+        InvalidationConditionKind, LifecycleStage, MemoryProjection, MemoryProjectionKind,
+        PromotionPolicy, RetentionPolicy, Scope, SemanticAnchor, SourceId, StateCell, StateCellId,
+        TrajectoryMemory, TrustSignal, UsePolicy, UtilityFeedback, ValidTimeRange,
     };
 
     use super::{
         detect_cell_conflict, recommend_conflict_resolution, recommend_conflict_resolutions,
-        revise_activation_state, revise_answerability, revise_evidence_confidence,
+        revise_activation_state, revise_answerability, revise_attention_signal,
+        revise_context_affordance, revise_context_gap, revise_context_lifecycle_policy,
+        revise_epistemic_uncertainty, revise_evidence_confidence, revise_invalidation_condition,
+        revise_lifecycle_stage, revise_memory_projection, revise_trajectory_memory,
         revise_utility_feedback, scan_cell_conflicts, CellConflictKind, ConflictResolutionKind,
         RevisionGraph, RevisionLinkKind,
     };
@@ -502,6 +722,321 @@ mod tests {
         assert_ne!(revised.cell.id, previous.id);
         assert_eq!(previous.activation, ActivationState::Active);
         assert_eq!(revised.cell.activation, ActivationState::Frontier);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn lifecycle_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+
+        let revised = revise_lifecycle_stage(&previous, LifecycleStage::Consolidated);
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.lifecycle_stage, LifecycleStage::Observed);
+        assert_eq!(revised.cell.lifecycle_stage, LifecycleStage::Consolidated);
+        assert_eq!(revised.cell.activation, previous.activation);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(revised.cell.valid_time, previous.valid_time);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn lifecycle_policy_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let lifecycle_policy = ContextLifecyclePolicy {
+            retention: RetentionPolicy::DecayUnlessReinforced,
+            use_policy: UsePolicy::VerifyBeforeUse,
+            promotion: PromotionPolicy::ConfidenceThreshold(Confidence::new(0.75)?),
+        };
+
+        let revised = revise_context_lifecycle_policy(&previous, lifecycle_policy);
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.lifecycle_policy, ContextLifecyclePolicy::default());
+        assert_eq!(revised.cell.lifecycle_policy, lifecycle_policy);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.activation, previous.activation);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(revised.cell.valid_time, previous.valid_time);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn memory_projection_revision_appends_projection_as_successor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut previous = sample_cell()?;
+        previous.add_projection(MemoryProjection::new(
+            MemoryProjectionKind::Semantic,
+            "Current belief: release upload is blocked.",
+            Confidence::new(0.8)?,
+            CellCost::new(8, 0)?,
+        )?);
+        let projection = MemoryProjection::new(
+            MemoryProjectionKind::Procedural,
+            "Next action: verify release asset upload target before retrying.",
+            Confidence::new(0.88)?,
+            CellCost::new(10, 0)?,
+        )?;
+
+        let revised = revise_memory_projection(&previous, projection.clone());
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.projections.len(), 1);
+        assert_eq!(revised.cell.projections.len(), 2);
+        assert_eq!(revised.cell.projections[1], projection);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn epistemic_uncertainty_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let uncertainty =
+            EpistemicUncertainty::new(Confidence::new(0.73)?, 4.2, "baseline belief failed")?;
+
+        let revised = revise_epistemic_uncertainty(&previous, uncertainty.clone());
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.uncertainty, EpistemicUncertainty::default());
+        assert_eq!(revised.cell.uncertainty, uncertainty);
+        assert_eq!(revised.cell.projections, previous.projections);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn attention_signal_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let attention = AttentionSignal::new(0.9, 0.8, 0.85, 0.75)?;
+
+        let revised = revise_attention_signal(&previous, attention);
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.attention, AttentionSignal::default());
+        assert_eq!(revised.cell.attention, attention);
+        assert_eq!(revised.cell.uncertainty, previous.uncertainty);
+        assert_eq!(revised.cell.projections, previous.projections);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_affordance_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let context_affordance = ContextAffordance::new(0.95, 0.9, 0.8, 0.4, 0.95, 0.1)?;
+
+        let revised = revise_context_affordance(&previous, context_affordance);
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert_eq!(previous.context_affordance, ContextAffordance::default());
+        assert_eq!(revised.cell.context_affordance, context_affordance);
+        assert_eq!(revised.cell.attention, previous.attention);
+        assert_eq!(revised.cell.uncertainty, previous.uncertainty);
+        assert_eq!(revised.cell.projections, previous.projections);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_gap_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let gap = ContextGap::new(
+            ContextGapKind::MissingEvidence,
+            "which artifact proves the live run?",
+            "missing evidence should drive scavenging instead of collapse",
+            0.9,
+        )?;
+
+        let revised = revise_context_gap(&previous, gap.clone());
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert!(previous.context_gaps.is_empty());
+        assert_eq!(revised.cell.context_gaps, vec![gap]);
+        assert_eq!(revised.cell.context_affordance, previous.context_affordance);
+        assert_eq!(revised.cell.attention, previous.attention);
+        assert_eq!(revised.cell.uncertainty, previous.uncertainty);
+        assert_eq!(revised.cell.projections, previous.projections);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalidation_condition_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let condition = InvalidationCondition::new(
+            InvalidationConditionKind::ContradictoryEvidence,
+            "a retained live benchmark contradicts this cell's selected answer",
+            "falsification conditions must travel with lifecycle context",
+            0.95,
+        )?;
+
+        let revised = revise_invalidation_condition(&previous, condition.clone());
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert!(previous.invalidation_conditions.is_empty());
+        assert_eq!(revised.cell.invalidation_conditions, vec![condition]);
+        assert_eq!(revised.cell.context_gaps, previous.context_gaps);
+        assert_eq!(revised.cell.context_affordance, previous.context_affordance);
+        assert_eq!(revised.cell.attention, previous.attention);
+        assert_eq!(revised.cell.uncertainty, previous.uncertainty);
+        assert_eq!(revised.cell.projections, previous.projections);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.anchors, previous.anchors);
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Supersedes),
+            vec![previous.id]
+        );
+        assert_eq!(
+            revised
+                .revision
+                .targets(revised.cell.id, RevisionLinkKind::Predecessor),
+            vec![previous.id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn trajectory_memory_revision_creates_successor_with_revision_links(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = sample_cell()?;
+        let trajectory_memory = TrajectoryMemory::new(
+            "reuse rollout summary for release upload recovery",
+            "identified the release asset upload failure path",
+            "target GitHub Release was missing during asset upload",
+            "artifact://rollout/release-upload-404",
+            0.86,
+            "check release existence before uploading retained assets",
+            vec!["publishing release artifacts".to_string()],
+            vec!["release lookup and upload report both validate".to_string()],
+            ContextPacketStrategy::ScavengingBrief,
+        )?;
+
+        let revised = revise_trajectory_memory(&previous, trajectory_memory.clone());
+
+        assert_ne!(revised.cell.id, previous.id);
+        assert!(previous.trajectory_memory.is_none());
+        assert_eq!(revised.cell.trajectory_memory, Some(trajectory_memory));
+        assert_eq!(
+            revised.cell.invalidation_conditions,
+            previous.invalidation_conditions
+        );
+        assert_eq!(revised.cell.context_gaps, previous.context_gaps);
+        assert_eq!(revised.cell.context_affordance, previous.context_affordance);
+        assert_eq!(revised.cell.attention, previous.attention);
+        assert_eq!(revised.cell.uncertainty, previous.uncertainty);
+        assert_eq!(revised.cell.projections, previous.projections);
+        assert_eq!(revised.cell.lifecycle_stage, previous.lifecycle_stage);
+        assert_eq!(revised.cell.anchors, previous.anchors);
         assert_eq!(
             revised
                 .revision

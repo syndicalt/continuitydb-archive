@@ -44,4 +44,16 @@ pub enum StewardError {
     /// Proposal store content could not be decoded.
     #[error("proposal store content is corrupt")]
     ProposalStoreCorrupt,
+    /// Context compiler proposal source suggested a StateCell outside the checkout candidate set.
+    #[error("context compiler proposal target is not in the allowed candidate set")]
+    InvalidContextCompilerProposalTarget,
+    /// Context compiler proposal source suggested more than one packet shape for a StateCell.
+    #[error("context compiler proposal target is duplicated")]
+    DuplicateContextCompilerProposalTarget,
+    /// Context compiler proposal source omitted a selected checkout candidate.
+    #[error("context compiler proposal target is missing")]
+    MissingContextCompilerProposalTarget,
+    /// Context compiler proposal failed core packet-shape validation.
+    #[error("context compiler proposal is invalid")]
+    InvalidContextCompilerProposal,
 }

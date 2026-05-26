@@ -1,0 +1,72 @@
+name: Local Model Quality Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Runner label with local model artifacts available.
+        required: true
+        default: self-hosted
+      executable:
+        description: Path to the local model executable.
+        required: true
+        default: /usr/local/bin/llama-cli
+      qwen25_gguf:
+        description: Path to Qwen/Qwen2.5-0.5B-Instruct GGUF.
+        required: false
+      qwen3_gguf:
+        description: Path to Qwen/Qwen3-0.6B GGUF.
+        required: false
+      artifact_root:
+        description: Directory for retained gate artifacts.
+        required: true
+        default: local-model-artifacts/manual-gate
+      baseline_path:
+        description: Durable JSONL baseline path on the runner.
+        required: true
+        default: local-model-artifacts/local-model-baselines.jsonl
+      dry_run:
+        description: Run without invoking model inference.
+        required: true
+        type: boolean
+        default: false
+      fail_on_not_ready:
+        description: Fail the workflow when the final gate is not ready.
+        required: true
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  local-model-quality-gate:
+    name: Local Model Quality Gate
+    runs-on: ${{ inputs.runner_label }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Local Model Quality Gate
+        env:
+          CONTINUITYDB_LOCAL_MODEL_RUNNER: ${{ inputs.executable }}
+          CONTINUITYDB_QWEN25_GGUF: ${{ inputs.qwen25_gguf }}
+          CONTINUITYDB_QWEN3_GGUF: ${{ inputs.qwen3_gguf }}
+          CONTINUITYDB_LOCAL_MODEL_ARTIFACT_ROOT: ${{ inputs.artifact_root }}
+          CONTINUITYDB_LOCAL_MODEL_BASELINE_PATH: ${{ inputs.baseline_path }}
+          CONTINUITYDB_LOCAL_MODEL_DRY_RUN: ${{ inputs.dry_run }}
+          CONTINUITYDB_LOCAL_MODEL_FAIL_ON_NOT_READY: ${{ inputs.fail_on_not_ready }}
+        run: scripts/local_model_quality_gate.sh
+
+      - name: Upload Gate Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuitydb-local-model-quality-gate
+          path: ${{ inputs.artifact_root }}

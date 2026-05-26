@@ -1,425 +1,62 @@
 # ContinuityDB Roadmap
 
-This roadmap tracks frontier items that extend ContinuityDB beyond the initial deterministic Rust foundation.
+> Status: closed.
+>
+> This roadmap is historical context, not current execution guidance. The
+> original ContinuityDB product thesis has been marked failed after
+> falsification work showed that ordinary hybrid memory and retrieval systems
+> can recover much of the useful evidence without a specialized StateCell
+> datastore. Do not continue this roadmap as product work. See
+> [Project Postmortem](project-postmortem.md).
 
-## Roadmap Principles
-
-- Preserve ContinuityDB as a datastore, not an agent runtime.
-- Keep deterministic database semantics at the commit boundary.
-- Treat model outputs as proposals, not hidden truth mutations.
-- Require every accepted model-assisted change to be auditable as evidence.
-- Prefer small, embeddable, open-source models before hosted model dependencies.
-
-## Frontier Item: Embedded Database Steward
-
-ContinuityDB should eventually include an embedded agentic model layer that acts as a steward for the database itself. This is not a general agent orchestrator and must not run application workflows. Its job is to maintain the epistemic health of the datastore.
-
-The Steward may propose:
-
-- StateCell creation from new evidence.
-- Supersession and conflict links.
-- Confidence adjustments.
-- Answerability labels.
-- Frontier priority changes.
-- Checkout summaries and uncertainty explanations.
-- Verification or refresh tasks for stale or high-impact cells.
-
-The Steward must not directly mutate committed truth. It emits structured proposals. A deterministic policy layer validates, rejects, or accepts those proposals. Accepted proposals become append-only StateCells or revision links with provenance showing the source evidence, model identity, prompt/profile, policy decision, and resulting database mutation.
-
-Boundary rule:
-
-> ContinuityDB may use an embedded model to propose what state needs attention; deterministic database policy decides what becomes committed truth.
-
-## Steward Architecture Track
+ContinuityDB is being refactored around one product shape:
 
 ```text
-External apps and agents
-  ingest evidence, request checkout, provide feedback
-
-ContinuityDB API
-  deterministic request boundary
-
-Steward model layer
-  proposes revisions, conflicts, answerability, summaries, frontier work
-
-Policy and validation layer
-  validates proposal schema, confidence, permissions, and audit requirements
-
-Semantic engine
-  StateCells, evidence, bitemporality, revision, checkout, audit
-
-Storage kernel
-  append log, graph, temporal, text, vector, payload storage
+StateCell -> checkout(task, budget) -> ContextPacket
 ```
 
-## Storage Kernel Milestones
+## Principles
 
-1. Define the minimal `StorageKernel` append and lookup contract. Implemented in `continuitydb-kernel`.
-2. Provide an in-memory correctness kernel for deterministic tests. Implemented in `continuitydb-memory`.
-3. Add the first durable embedded kernel. Implemented as an append-only JSONL `FileKernel` in `continuitydb-kernel` with nested database directory creation; indexed production storage remains future work.
-4. Add first-class StateCell activation filtering. Implemented in `CellLookup` across memory and file kernels.
-5. Add first-class StateCell answerability filtering. Implemented in `CellLookup` across memory and file kernels.
-6. Add first-class evidence-source and minimum-confidence filtering. Implemented in `CellLookup` across memory and file kernels.
-7. Add deterministic in-process indexes for the durable file kernel. Implemented ID and semantic-anchor indexes rebuilt from the JSONL log on open and maintained after successful append, giving the first durable kernel a real indexing boundary while preserving the append log as source of truth.
-8. Add first-class system transaction-time stamping and lookup. Implemented `StateCell.system_time`, deterministic `StorageKernel::append_cell_at`, default append-time stamping, and `CellLookup.system_at` filtering across memory and file kernels.
-9. Add atomic StateCell write batches. Implemented `StorageKernel::append_cells` and `append_cells_at` across memory and file kernels so related cells can commit with one shared system transaction time and duplicate batches reject without partial visibility.
-10. Add first-class commit identifiers. Implemented `CommitId`, `StateCell.commit_id`, explicit commit-stamped append APIs, and `CellLookup.commit_id` filtering across memory and file kernels so transaction-scoped continuity slices have stable audit IDs.
-11. Add first-class commit manifests. Implemented `CommitManifest` and kernel/API manifest lookup so a commit boundary can expose its commit time and ordered StateCell IDs without reconstructing from checkout results.
-12. Add commit manifest timeline listing. Implemented ordered `list_commit_manifests` support across the storage kernel, memory/file kernels, and native API so audit and sync callers can discover commit boundaries deterministically.
-13. Add cursor-based commit manifest listing. Implemented `CommitManifestLookup` with exclusive commit cursors and limits across memory/file kernels and the native API for incremental audit, backup, and future sync reads.
-14. Add explicit durable commit records to the JSONL file kernel. Implemented backward-compatible `cell` and `commit` file records so new writes persist commit manifests directly while legacy raw StateCell logs remain readable.
-15. Add versioned JSONL file-kernel format headers. Implemented a supported `header` record for new stores while preserving legacy non-header logs and rejecting unsupported or misplaced headers.
-16. Add per-record JSONL file-kernel checksums. Implemented deterministic checksum fields for new cell and commit records, validation on reopen, and compatibility with checksum-free legacy envelope records.
-17. Add JSONL file-kernel compaction. Implemented `FileKernel::compact` to rewrite stored cells and commit manifests into the latest header plus checksummed cell and commit record format while preserving lookup and manifest listing behavior.
-18. Add line-addressed JSONL file-kernel corruption diagnostics. Implemented `KernelError::StoreCorruptRecord { line }` for decode-time header, checksum, and malformed JSONL failures so operators can locate damaged durable records.
-19. Add headered JSONL file-kernel partial-commit detection. Implemented explicit-manifest enforcement for current-format headered logs so crash-truncated cell records are rejected instead of reconstructed as committed truth, while headerless legacy raw logs remain readable.
-20. Add durable filesystem flush boundaries for JSONL file-kernel writes. Implemented internal durable write helpers using flush plus `sync_all` for headers, append batches, and compaction temp files, with parent-directory sync after compaction rename.
-21. Add file-kernel secondary indexes for answerability and evidence source lookups. Implemented derived in-process indexes rebuilt from the JSONL log and maintained after append so common context retrieval filters can start from indexed candidates while preserving append-order results and the canonical log as source of truth.
-22. Add file-kernel secondary indexes for activation and dependency lookups. Implemented derived in-process indexes for activation states, dependency targets, and dependency target/kind pairs so frontier and causality filters can start from indexed candidates while preserving append-order results.
-23. Add typed storage-kernel capability introspection. Implemented `KernelDurability`, `KernelCapabilities`, `StorageKernel::capabilities`, and native API exposure so embedders can distinguish ephemeral, append-log, and future indexed embedded kernels without depending on concrete kernel types.
-24. Add typed storage-kernel requirement matching. Implemented `KernelRequirements` and `KernelCapabilities::satisfies` so embedders can express ephemeral, durable append-log, and future indexed embedded storage requirements without duplicating capability comparison logic.
-25. Add file-backed store status. Implemented `FileKernelStatus` and `FileKernel::status` so operators and embedders can inspect visible cell counts, commit counts, revision-link counts, and durable file size after open-time validation.
-26. Add file-backed store health reporting. Implemented `FileKernelHealth` and `FileKernel::health` so validated readable stores report whether they are canonical, legacy raw, checksum-free, or compaction-worthy.
-27. Add native revision-link record storage. Implemented `RevisionLinkLookup`, append/list storage-kernel methods, in-memory revision-link storage, and checksummed JSONL file-kernel records that survive reopen and compaction.
-28. Add file-kernel secondary indexes for revision-link lookups. Implemented derived in-process indexes for revision-link source, target, kind, source-kind, target-kind, source-target, and source-target-kind filters while preserving append-order results and the canonical log as source of truth.
-29. Add revision-link-aware file-store status. Extended `FileKernelStatus` and inspection surfaces with visible revision-link counts so native revision graph records are operationally visible alongside cells and commits.
-30. Add duplicate revision-link append rejection. Implemented exact duplicate `RevisionLinkRecord` rejection across memory and file kernels, including pre-write file append checks and duplicate durable-log detection during file-kernel reopen.
-31. Add file-kernel secondary indexes for scope lookups. Implemented a derived scope-to-cell-position index rebuilt from the JSONL log and maintained after append so scope-constrained checkout can start from indexed candidates while preserving append-order results.
-32. Add file-kernel secondary indexes for minimum-confidence lookups. Implemented a derived max-evidence-confidence index rebuilt from the JSONL log and maintained after append so confidence-constrained checkout can start from indexed candidates while preserving exact final filtering.
-33. Add file-kernel secondary indexes for system-time lookups. Implemented a derived system-start-time index rebuilt from the JSONL log and maintained after append so transaction-time checkout can start from indexed candidates while preserving exact final range filtering.
-34. Add file-kernel secondary indexes for valid-time lookups. Implemented a derived valid-start-time index rebuilt from the JSONL log and maintained after append so real-world as-of checkout can start from indexed candidates while preserving exact final range filtering.
-35. Add file-kernel indexed candidate-set selection. Replaced fixed lookup-priority candidate selection with a smallest-indexed-candidate chooser so combined checkout constraints can start from the narrowest available derived index while preserving exact final filtering.
-36. Add file-kernel indexed candidate-set intersection. Extended candidate selection to intersect all available indexed lookup constraints, preserving exact final filtering while reducing over-selection when the narrowest single index still contains cells excluded by other indexed constraints.
-37. Add file-kernel lookup-plan introspection. Implemented `FileKernel::lookup_plan` and `FileKernelLookupPlan` so embedders can inspect indexed constraint counts, pre-filter candidate counts, and full-scan fallback behavior before executing a lookup.
-38. Add explainable file-kernel lookup-plan constraints. Extended `FileKernelLookupPlan` with deterministic indexed constraint labels and exposed them through the native API and CLI JSON so planner diagnostics explain which indexes shaped a candidate set, not only how many.
-39. Add per-constraint file lookup-plan cardinalities. Extended lookup-plan diagnostics with ordered per-index candidate counts so embedders and operators can see each indexed constraint's selectivity alongside the final intersected candidate count.
-40. Add exact-match file lookup-plan counts. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with exact post-filter match counts so operators can distinguish indexed candidate breadth from the StateCells that actually satisfy the lookup predicate.
-41. Add filtered-candidate file lookup-plan counts. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with rejected candidate counts so operators can see how much indexed candidate work exact predicates discard.
-42. Add exact-constraint file lookup-plan labels. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with exact predicate labels so operators can see which lookup predicates are proven after indexed candidate selection.
-43. Add candidate-selectivity file lookup-plan diagnostics. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with integer basis-point selectivity so operators and CI can compare exact-match survival rates without rederiving ratios.
-44. Add lossy temporal index lookup-plan diagnostics. Extended `FileKernelLookupPlan`, CLI JSON, workload snapshots, and workload baseline regression checks with lossy indexed constraint labels so operators can see when temporal indexes over-select candidates before exact range filtering.
-45. Add residual exact lookup-plan diagnostics. Extended `FileKernelLookupPlan`, CLI JSON, and workload snapshots with exact constraints that still require residual filtering after indexed candidate selection, making lossy temporal predicates and future unindexed predicates explicit to operators.
-46. Add residual exact lookup-plan regression detection. Extended workload baseline comparison with `LookupPlanResidualExactConstraintsChanged` so CI can detect planner changes that add or remove exact residual filtering after indexed candidate selection.
+- Keep the public model small.
+- Make checkout the product primitive.
+- Preserve evidence, uncertainty, revision, lifecycle, and dependency semantics inside packets.
+- Treat raw/static rendering and model assistance as diagnostics or implementation controls.
+- Remove benchmark artifacts that do not measure real agent behavior.
 
-## Checkout Milestones
+## Near-Term Work
 
-1. Push deterministic checkout constraints into storage lookup. Implemented for scope, valid time, answerability question, evidence source, and minimum confidence in `continuitydb-checkout`.
-2. Add selected-cell metadata to checkout slices. Implemented audit traces, uncertainty entries, and frontier recommendations in `continuitydb-checkout`.
-3. Add deterministic checkout alternatives. Implemented token-budget omission metadata with reason, citations, and confidence in `continuitydb-checkout`.
-4. Rank checkout candidates by deterministic utility-aware score. Implemented by combining max evidence confidence with `StateCell` utility feedback before token-budget packing in `continuitydb-checkout`.
-5. Add dependency-aware checkout constraints. Implemented dependency target and kind filters in `CheckoutRequest` with pushdown into `CellLookup`.
-6. Add activation-aware checkout constraints. Implemented `CheckoutRequest.activation` with pushdown into `CellLookup.activation` so callers can materialize dormant, active, frontier, or retired StateCells through deterministic checkout.
-7. Add semantic-anchor checkout constraints. Implemented `CheckoutRequest.semantic_anchor` with pushdown into `CellLookup.semantic_anchor` so callers can materialize StateCells by stable semantic identity through deterministic checkout.
-8. Add system-time checkout constraints. Implemented `CheckoutRequest.system_at` with pushdown into `CellLookup.system_at`, allowing continuity slices to be materialized as of a database transaction time.
-9. Add dependency-aware audit traces. Implemented `AuditDependency` metadata in checkout audit traces so selected cells explain dependency and causality links alongside citations.
-10. Add structured evidence audit traces. Implemented `AuditEvidence` metadata in checkout audit traces so selected cells expose source IDs, citation locators, confidence scores, and trust signals.
-11. Add commit-scoped checkout constraints. Implemented `CheckoutRequest.commit_id` with pushdown into `CellLookup.commit_id`, allowing continuity slices to be materialized for one explicit database commit boundary.
-12. Add commit-aware audit traces. Implemented `AuditTrace.commit_id` so direct audit and checkout-selected audit traces expose the database commit boundary that wrote each cell.
-13. Add revision-link-aware audit traces. Implemented `AuditTrace.revision_links` and direct native API audit enrichment so callers can see native supersession, predecessor, conflict, and derivation links where an audited StateCell participates.
-14. Add checkout-selected revision-link audit traces. Implemented kernel-backed enrichment for checkout-selected audit traces so materialized continuity slices carry native revision-link context without changing selection, ranking, alternatives, uncertainty, or frontier metadata.
+1. Simplify checkout naming and defaults.
+   - Default checkout compilation is `Automatic`.
+   - Static rendering is `RawBaseline` and should be used only for diagnostics and ablations.
+   - Model-shaped packets are `ModelAssisted` and must remain validated and evidence-backed.
 
-## Query Language Milestones
+2. Reduce public API leakage.
+   - Keep `checkout(task,budget)` as the primary mental model.
+   - Avoid making compiler internals part of normal product documentation.
+   - Keep packet-plan metadata auditable for debugging and tests.
 
-1. Add a typed Continuity Query AST. Implemented `continuitydb-query` with structured checkout query types and compilation into `CheckoutRequest`, establishing the semantic target for future text syntax and API bindings.
-2. Execute typed queries through the native API. Implemented `ContinuityDb::checkout_query` and `checkout_continuity_query` so embedders can materialize typed Continuity queries without manually compiling them into checkout requests.
-3. Add portable typed query serialization. Implemented serde support for `continuitydb-query` AST values with stable snake-case enum tags so future CLI query files, bindings, and agent APIs can exchange typed queries without a text parser.
-4. Execute serialized typed query files from the CLI. Implemented `continuitydb checkout-query <store-path> <query-path>` so saved `ContinuityQuery` JSON can materialize file-backed checkout slices through the native typed API before text query syntax exists.
-5. Add a versioned typed query JSON envelope. Implemented `QueryEnvelope`, `encode_query_json`, and `decode_query_json` in `continuitydb-query` so saved query files and bindings can validate format and version before executing raw typed query content.
-6. Add read-only typed query AST introspection. Implemented `CheckoutQuery` accessors for task, requirements, return shape, and optimization so embedders and bindings can inspect decoded query files without exposing internal fields.
-7. Add first strict text parser for checkout queries. Implemented `parse_query_text` for a minimal `CHECKOUT "task" ANSWER "question"` syntax with deterministic `WHERE` constraints for scope, minimum confidence, token budget, and evidence source.
-8. Add temporal and commit constraints to text checkout queries. Implemented strict `valid_at`, `system_at`, and `commit_id` constraints so text `CHECKOUT` syntax can express bitemporal and commit-scoped materialization already available in the typed AST.
-9. Add dependency constraints to text checkout queries. Implemented `dependency_target` and `dependency_kind` constraints, backed by `StateCellId` text parsing, so strict text `CHECKOUT` can express causality-aware materialization already available in the typed AST.
-10. Add activation constraints to typed and text checkout queries. Implemented `QueryRequirements.activation` and strict text `activation = ...` parsing so query files can materialize activation-scoped continuity slices.
-11. Add semantic-anchor constraints to typed and text checkout queries. Implemented `QueryRequirements.semantic_anchor` and strict text `semantic_anchor = "..."` parsing so query files can materialize anchor-scoped continuity slices.
+3. Harden packet contracts.
+   - Lifecycle `DoNotUseForAnswer`, invalidation, uncertainty, and evidence requirements must survive token pressure.
+   - Trajectory reuse must require applicability and must respect invalidation.
+   - Packet validation should reject context that looks complete but lost its semantic contract.
 
-## Utility Feedback Milestones
+4. Replace historical benchmarks.
+   - Old vector, graph, live-provider, adversarial-rubric, and long-context artifacts are not current evidence.
+   - The first replacement is `agent-behavior-benchmark`, which pins downstream behavior metrics over 10 deterministic tasks.
+   - Future evaluation should measure downstream agent behavior: revision accuracy, hedging quality, stale-belief avoidance, hallucinated-certainty rate, and long-horizon task success.
+   - Keep storage/workload diagnostics for engineering regressions, but do not present them as thesis proof.
 
-1. Add first-class StateCell utility feedback primitives. Implemented as bounded relevance, recency, and decision-impact scores in `continuitydb-core`, with neutral defaults for new and previously serialized cells.
-2. Add append-only utility feedback revision. Implemented in `continuitydb-revision` as a deterministic helper that creates a successor `StateCell` version and records supersession/predecessor links to the prior version.
+5. Keep storage boring and embeddable.
+   - Maintain memory and file-backed kernels.
+   - Continue toward a production storage engine only where it improves durability, queryability, and checkout performance.
 
-## Dependency and Causality Milestones
+## Current Definition Of Done
 
-1. Add first-class StateCell dependency references. Implemented in `continuitydb-core` as typed links to target `StateCellId` values with dependency kind and rationale, defaulting to an empty list for new and previously serialized cells.
-2. Add dependency-aware storage lookup. Implemented target and kind filters in `CellLookup` across memory and file kernels.
-3. Add standalone dependency-kind storage lookup. Extended memory and file kernels so `CellLookup.dependency_kind` filters dependency edges even without a target constraint, backed by a file-kernel dependency-kind index and lookup-plan diagnostics.
-4. Add core native revision-link records. Implemented `RevisionLinkKind` and `RevisionLinkRecord` in `continuitydb-core`, with compatibility re-export from `continuitydb-revision`, establishing the semantic record shape needed for storage-native revision links.
+ContinuityDB is on track when a caller can understand the system without learning benchmark modes:
 
-## Conflict Detection Milestones
-
-1. Add deterministic StateCell conflict detection. Implemented same-anchor, overlapping-valid-time, different-payload detection in `continuitydb-revision`, backed by half-open valid-time overlap semantics in `continuitydb-core`.
-2. Add deterministic candidate-set conflict scanning. Implemented unordered pairwise scanning in input order with aggregate reciprocal `ConflictsWith` revision links in `continuitydb-revision`.
-3. Add deterministic conflict resolution recommendations. Implemented non-mutating recommendations for confidence-gap supersession, latest-valid-time wins, and human review in `continuitydb-revision`.
-4. Add deterministic batch conflict resolution recommendations. Implemented candidate-set recommendation scanning with aggregate conflict links and proposed supersession links in `continuitydb-revision`.
-
-## CLI Milestones
-
-1. Expose deterministic checkout JSON from the CLI. Implemented as `continuitydb demo-checkout`, showing selected cells, audit traces, uncertainty, frontier recommendations, and alternatives.
-2. Expose JSONL file-store compaction from the CLI. Implemented as `continuitydb compact-file <path>` so operators can compact a file-backed store into the current canonical durable record format.
-3. Expose commit backup and restore from the CLI. Implemented `continuitydb export-commits <store-path> <output-path>` and `continuitydb import-commits <store-path> <input-path>` over the versioned commit export envelope so file-backed stores can be copied through a validated portable backup file.
-4. Expose kernel capability inspection from the CLI. Implemented `continuitydb inspect-kernel <store-path> [--require <profile>]` so operators and CI can inspect file-backed storage guarantees and fail early when a requested profile is not satisfied.
-5. Route file-backed CLI commands through native open helpers. Refactored inspection, compaction, export, and import commands to use `ContinuityDb<FileKernel>::open_file` or `open_file_with_requirements`, keeping operational tooling aligned with the embeddable API boundary.
-6. Include file-store status in kernel inspection. Extended `continuitydb inspect-kernel` JSON with visible cell count, commit count, revision-link count, and durable file size.
-7. Include file-store health in kernel inspection. Extended `continuitydb inspect-kernel` JSON with file-format health and compaction recommendation metadata.
-8. Add canonical file-store inspection gate. Implemented `continuitydb inspect-kernel --require-canonical` so CI and operators can fail early when a readable file store needs compaction.
-9. Add conditional file-store compaction. Implemented `continuitydb compact-file --if-needed` so operators can compact only when health recommends it.
-10. Add file lookup-plan inspection. Extended `continuitydb inspect-kernel --lookup-plan` to include default file-backed lookup candidate planning metadata for operator diagnostics and future planner regression checks.
-11. Add query-constrained file lookup-plan inspection. Extended `continuitydb inspect-kernel --lookup-query <CHECKOUT text>` to parse strict text checkout queries into file lookup-plan constraints so operators can inspect indexed candidate planning for real checkout predicates without executing materialization.
-12. Add commit import dry-run validation. Implemented `continuitydb import-commits --dry-run` so operators can validate backup files against a target store before mutation.
-13. Add incremental commit export. Implemented `continuitydb export-commits --after --limit` so operators can page commit backups through the same cursor semantics exposed by the native API.
-14. Report commit import cursors. Extended `continuitydb import-commits` output with `next_after` so operators can checkpoint imported backup pages.
-15. Add direct commit copy. Implemented `continuitydb copy-commits` so operators can copy cursor-selected commit pages between local file-backed stores without writing an intermediate backup file.
-16. Execute saved query files from the CLI. Extended `continuitydb checkout-query` to accept raw typed query JSON, versioned `continuitydb.query` envelopes, and strict text `CHECKOUT` query files through the native query-file API.
-17. Preserve native revision links in backup and copy flows. Extended CLI commit export/import and direct copy behavior to round-trip source-owned native revision-link records through the versioned commit export envelope.
-
-## Benchmark and Workload Milestones
-
-1. Add deterministic world-model workload generation. Implemented `continuitydb-workload` with stable StateCell IDs, semantic anchors, scoped evidence, frontier activation cadence, dependency edges, utility signals, and workload summaries so storage engines and checkout algorithms can be compared against repeatable corpora.
-2. Add deterministic workload measurement harness. Implemented storage-kernel-generic ingest and checkout measurement over generated workloads, reporting operation counts, selected and alternative checkout counts, frontier counts, token totals, and observational elapsed durations without making benchmark superiority claims.
-3. Add CLI workload measurement. Implemented `continuitydb measure-workload` for memory and file-backed kernels so deterministic workload ingest and checkout measurements can be collected as JSON from operator and CI workflows.
-4. Add durable workload measurement baselines. Implemented JSONL baseline records for workload measurement snapshots so historical ingest and checkout evidence can be retained before adding regression gates.
-5. Add CLI workload baseline recording. Extended `continuitydb measure-workload` with `--baseline-path` and `--label` so operator and CI runs can append durable JSONL baseline records while still printing current measurement JSON.
-6. Add deterministic workload baseline regression comparison. Implemented latest matching baseline lookup and count/timing comparison reports so future storage-engine changes can be checked against durable workload evidence before adding CI gates.
-7. Add CLI workload baseline regression gate. Extended `continuitydb measure-workload` with baseline comparison, elapsed-growth tolerance, JSON comparison reporting, and optional non-zero exits for deterministic regressions.
-8. Add file-kernel lookup-plan diagnostics to workload measurement. Extended `continuitydb measure-workload --kernel file` JSON with the exact checkout request's file lookup plan so workload artifacts capture indexed constraints, per-index cardinalities, final candidate counts, and full-scan fallback alongside ingest and checkout timings.
-9. Add durable file workload lookup-plan baseline snapshots. Extended workload measurement snapshots with optional serialized file lookup-plan diagnostics so JSONL baselines preserve indexed constraint labels, exact predicate labels, per-index candidate counts, final candidate counts, exact match counts, filtered candidate counts, candidate selectivity, and full-scan status for future planner regression analysis.
-10. Add file workload lookup-plan baseline regression detection. Extended workload baseline comparison with deterministic lookup-plan presence, indexed constraint, exact constraint, candidate count, exact match count, filtered candidate count, candidate selectivity, full-scan, and per-constraint candidate-count regressions so persisted planner evidence can fail CI before selected checkout counts change.
-11. Add CLI workload report artifacts. Added `measure-workload --report-path` so successful workload measurements can write the same structured JSON printed to stdout into an archiveable artifact for CI and storage-engine trials.
-12. Add CLI workload regression failure report artifacts. Added `measure-workload --failure-report-path` so regression-gated workload runs can preserve structured comparison evidence before exiting non-zero without recording the regressed run as a new baseline.
-13. Add CLI workload artifact bundles. Added `measure-workload --artifact-dir` so successful and regression-gated workload runs can write `workload-report.json` plus a versioned `continuitydb-workload.manifest.json` under one archiveable CI directory.
-14. Add CLI workload report artifact metadata. Extended workload bundle manifests with `workload_report_fingerprint` and `workload_report_bytes` so archived workload bundles identify the exact root workload report artifact they describe.
-15. Add CLI workload report artifact metadata validation. Extended `replay-workload --require-manifest` to validate `workload_report_fingerprint` and `workload_report_bytes` against the canonical workload report payload with `bundle_manifest` normalized out, preserving report integrity without cyclic manifest/report fingerprints.
-16. Add CLI workload replay fixture artifacts. Extended workload artifact bundles with deterministic `workload-cells.json` and `checkout-request.json` files plus fingerprints so archived storage-engine runs carry the exact StateCell corpus and checkout predicate needed for replay.
-17. Add CLI workload artifact replay. Added `replay-workload --artifact-dir` for memory and file kernels so archived workload cells and checkout requests can be ingested and re-executed to reproduce comparable checkout counts from a bundle.
-18. Add CLI workload replay comparison gates. Extended `replay-workload` with `--compare-report` and `--fail-on-mismatch` so replayed deterministic workload and checkout counts can be compared against the archived `workload-report.json` and fail CI when fixtures no longer reproduce the report.
-19. Add CLI workload replay report artifacts. Added `replay-workload --report-path` and `--failure-report-path` so successful replay evidence and mismatch-gate failures can be written as durable JSON artifacts for CI and storage-engine trials.
-20. Add CLI workload replay artifact bundles. Added `replay-workload --replay-artifact-dir` so replay success and mismatch-gate evidence can be archived as `replay-report.json` plus a versioned `continuitydb-workload-replay.manifest.json` without mutating the input workload bundle.
-21. Add CLI workload replay report artifact metadata. Extended replay bundle manifests with `replay_report_fingerprint` and `replay_report_bytes` so archived replay bundles identify the exact replay report artifact they describe.
-22. Add CLI workload replay artifact bundle separation. Rejected `replay-workload --replay-artifact-dir` values that equal the input `--artifact-dir`, preserving the source workload bundle as an immutable replay fixture.
-23. Add CLI workload replay input manifest validation. Added `replay-workload --require-manifest` so reproducible storage-engine trials can reject tampered `workload-cells.json` or `checkout-request.json` fixture files before replaying archived workload bundles.
-24. Add CLI workload replay validated input manifest metadata. Extended `replay-workload --require-manifest` reports and replay bundle manifests with validated input manifest path, fingerprint, and byte-count metadata so archived replay evidence identifies the enforced source bundle manifest.
-25. Add CLI workload replay manifest-validation failure report artifacts. Extended `replay-workload --require-manifest --failure-report-path` so input manifest validation failures write structured JSON with the validation stage, error message, artifact paths, and fixture fingerprints before exiting non-zero.
-26. Add CLI workload replay manifest-validation failure artifact bundles. Extended `replay-workload --require-manifest --replay-artifact-dir` so input manifest validation failures archive `replay-report.json` and `continuitydb-workload-replay.manifest.json` with failure stage, message, artifact paths, and fixture fingerprints before exiting non-zero.
-27. Add CLI workload replay manifest fixture-path validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `workload-cells.json` or `checkout-request.json` paths do not match the replayed artifact directory, even when fixture fingerprints still match.
-28. Add CLI workload replay manifest report-path validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `workload-report.json` path does not match the replayed artifact directory, preserving the bundle manifest as an authoritative description of the archived workload report.
-29. Add CLI workload replay manifest artifact-directory validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `artifact_dir` does not match the replayed artifact directory, preserving the manifest as a self-consistent description of the archived workload bundle.
-30. Add CLI workload replay manifest workload-summary validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded workload summary does not match the archived `workload-cells.json` summary, preserving the manifest as an accurate description of the replay fixture corpus.
-31. Add CLI workload replay manifest fixture byte-count validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose recorded `workload-cells.json` or `checkout-request.json` byte counts do not match the archived fixture files, preserving manifest metadata integrity alongside fingerprint validation.
-32. Add CLI workload replay manifest report-content validation. Extended `replay-workload --require-manifest` to reject workload bundle manifests whose manifest-owned report fields no longer match the archived `workload-report.json`, preserving the bundle report and manifest as one self-consistent replay contract.
-33. Add CLI workload replay manifest report-content mismatch keys. Extended manifest report-content validation errors with the mismatched manifest-owned report key, so lookup-plan drift and other archived report mismatches are diagnosable without manually diffing artifacts.
-34. Add CLI workload bundle validation command. Added `validate-workload-bundle --artifact-dir` so archived workload measurement bundles can validate manifest, report, and fixture integrity directly without executing replay.
-35. Add CLI workload bundle validation report artifacts. Extended `validate-workload-bundle` with `--report-path` and `--failure-report-path` so success and validation-failure evidence can be archived directly in CI.
-36. Add CLI workload bundle validation failure evidence metadata. Extended `validate-workload-bundle --failure-report-path` with best-effort fixture paths, byte counts, and fingerprints so rejected archived bundles carry diagnosable evidence.
-37. Add CLI workload bundle validation manifest failure metadata. Extended `validate-workload-bundle --failure-report-path` with best-effort manifest path, byte count, and fingerprint evidence so invalid manifest failures identify the inspected manifest bytes.
-38. Add CLI workload bundle validation report failure metadata. Extended `validate-workload-bundle --failure-report-path` with best-effort workload report path, byte count, and fingerprint evidence so rejected bundles identify the inspected report bytes.
-
-## Native API Milestones
-
-1. Add typed embeddable operations for ingest, checkout, and audit. Implemented in `continuitydb-api` as `ContinuityDb<K>` over any `StorageKernel`, backed by first-class `CellLookup.cell_id` support in memory and file kernels.
-2. Add native typed query execution. Implemented checkout execution for `continuitydb-query` AST values through `ContinuityDb<K>`, preserving typed query errors and delegating materialization to the existing checkout engine.
-3. Add native versioned query-envelope execution. Implemented `ContinuityDb::checkout_query_json` so embedders can execute `continuitydb.query` envelope bytes directly while preserving distinct query compilation and envelope validation errors.
-4. Add native saved query-file execution. Implemented `ContinuityDb::checkout_query_file` so embedders can execute either raw `ContinuityQuery` JSON files or versioned `continuitydb.query` envelope files while preserving native query, envelope, JSON, and file I/O error boundaries.
-5. Add native saved text query-file execution. Extended `ContinuityDb::checkout_query_file` to recognize strict text `CHECKOUT` query files and route them through `parse_query_text` before normal typed query execution.
-6. Add native strict text query execution. Implemented `ContinuityDb::checkout_query_text` so embedders can execute strict `CHECKOUT` text directly without creating saved query files, preserving text parser and query compilation error boundaries.
-7. Add typed utility feedback revision operations. Implemented `ContinuityDb::record_utility_feedback` and `record_utility_feedback_at` so applications can record outcome feedback as append-only successor StateCells through the native API.
-8. Add typed read-only conflict analysis operations. Implemented `ContinuityDb::detect_conflict` and `recommend_conflict_resolution` so applications can inspect deterministic StateCell conflicts and non-mutating resolution recommendations through the native API.
-9. Add typed read-only batch conflict analysis operations. Implemented `ContinuityDb::detect_conflicts` and `recommend_conflict_resolutions` so applications can analyze deterministic conflict frontiers across ordered stored cell sets through the native API.
-10. Add ordered commit cell materialization. Implemented `ContinuityDb::commit_cells` so callers can hydrate the StateCells written by one commit in manifest order, with unknown commits reported as `CommitNotFound`.
-11. Add cursor-based commit slice materialization. Implemented `CommitSlice` and `ContinuityDb::commit_slices` so callers can materialize cursor-selected commit manifests with their ordered StateCells for audit, backup, sync, and replay flows.
-12. Add native file-backed compaction API. Implemented `ContinuityDb<FileKernel>::compact_file_store` so embedders can run JSONL store compaction through the native API without expanding the generic storage-kernel trait.
-13. Add native commit export batches. Implemented `CommitExportBatch` and `ContinuityDb::export_commits` so embedders can page commit slices with a deterministic next cursor for backup, sync, and replay flows.
-14. Add native validated commit import batches. Implemented `ContinuityDb::import_commit_batch` so exported commit batches can be validated and replayed into another store while preserving commit IDs, commit times, cell IDs, and manifest ordering.
-15. Add versioned JSON commit export envelopes. Implemented `CommitExportEnvelope` plus JSON encode/decode helpers so native commit export batches can be written to files or sync channels with explicit format/version validation.
-16. Add native commit backup and restore file helpers. Implemented `ContinuityDb<FileKernel>::export_commits_json_file` and `import_commits_json_file` so embedders can write and read versioned commit export envelope files without duplicating CLI file I/O orchestration.
-17. Add native kernel requirement enforcement. Implemented `ContinuityDb::kernel_satisfies` and `ensure_kernel_requirements` with a typed `KernelRequirementsNotMet` error so embedders can fail early when a backing kernel lacks required production guarantees.
-18. Add file-backed open helpers with requirement enforcement. Implemented `ContinuityDb<FileKernel>::open_file` and `open_file_with_requirements` so embedders can enforce storage profiles before receiving a usable file-backed database handle.
-19. Add native file-store status. Implemented `ContinuityDb<FileKernel>::file_store_status` so embedders can inspect file-backed store shape, including native revision-link counts, without depending on kernel internals.
-20. Add native file-store health reporting. Implemented `ContinuityDb<FileKernel>::file_store_health` so embedders can inspect file format health without depending on kernel internals.
-21. Add canonical file-store requirement gate. Implemented `ensure_file_store_canonical` and `open_canonical_file` so embedders can reject readable but compaction-worthy file stores without automatic mutation.
-22. Add conditional file-store compaction. Implemented `compact_file_store_if_needed` with before/after health summaries so embedders can automate explicit maintenance without rewriting canonical stores.
-23. Add commit import dry-run validation. Implemented `validate_commit_import` and `validate_commits_json_file` so embedders can validate replay batches and backup files without mutating target stores.
-24. Add commit import summaries. Implemented summary-returning import APIs so embedders can retrieve imported counts and backup cursors without decoding envelopes separately.
-25. Add native direct commit copy. Implemented `copy_commits_from` so embedders can replay cursor-selected commit pages between open databases without JSON file envelopes.
-26. Add native Steward proposal audit operations. Implemented optional `steward` feature methods on `ContinuityDb<K>` for policy-evaluated proposal audit recording, listing, and lookup through the backing `StorageKernel`.
-27. Add native Steward conflict-resolution audit operations. Implemented optional `steward` feature method `audit_conflict_resolutions_with_steward` so embedders can analyze stored conflicts, emit deterministic Steward proposals, and record policy-evaluated proposal audits through the backing `StorageKernel`.
-28. Add native Steward frontier/watch audit operations. Implemented optional `steward` feature method `audit_frontier_watch_with_steward` so embedders can run subscribed frontier watch events, emit deterministic Steward proposals, and record policy-evaluated proposal audits through the backing `StorageKernel`.
-29. Add native accepted Steward `MarkFrontier` application. Implemented optional `steward` feature method `apply_accepted_mark_frontier_proposal_at` so embedders can deterministically apply accepted frontier proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
-30. Add native accepted Steward `LabelAnswerability` application. Implemented optional `steward` feature method `apply_accepted_label_answerability_proposal_at` so embedders can deterministically apply accepted answerability-label proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
-31. Add native accepted Steward `AdjustConfidence` application. Implemented optional `steward` feature method `apply_accepted_adjust_confidence_proposal_at` so embedders can deterministically apply accepted confidence proposals as append-only StateCell successors while rejected and unsupported proposals do not mutate committed truth.
-32. Add native accepted Steward `RequestVerification` application. Implemented optional `steward` feature method `apply_accepted_request_verification_proposal_at` so embedders can deterministically materialize accepted verification work as append-only operational StateCells while preserving the model-as-proposer boundary.
-33. Add native accepted Steward `LinkRevision` application. Implemented optional `steward` feature method `apply_accepted_link_revision_proposal_at` so embedders can deterministically materialize accepted revision-link assertions as append-only operational StateCells until the storage kernel grows native revision-link records.
-34. Add native accepted Steward `CreateCellDraft` application. Implemented optional `steward` feature method `apply_accepted_create_cell_draft_proposal_at` so embedders can deterministically promote accepted draft content into append-only StateCells with proposal-derived evidence.
-35. Add native accepted Steward proposal dispatch. Implemented optional `steward` feature method `apply_accepted_steward_proposal_at` so embedders can apply any current accepted Steward action through one deterministic policy-to-commit boundary.
-36. Add native revision-link record operations. Implemented endpoint-validating native API append/list methods for `RevisionLinkRecord` plus a Steward `LinkRevision` application path that writes native revision-link records without adding an operational link StateCell.
-37. Add typed accepted Steward proposal dispatch. Implemented optional `steward` feature enum `StewardApplicationResult` and `apply_accepted_steward_proposal_typed_at` so unified application can return either committed StateCell IDs or native revision-link records while preserving the legacy `StateCellId` dispatcher.
-38. Add revision-link-aware direct audit. Implemented `ContinuityDb::audit_cell` enrichment over native revision-link records so direct cell audit exposes source-side and target-side revision relationships while preserving missing-cell error behavior.
-39. Add revision-link-aware commit export/import/copy. Extended `CommitExportBatch` with source-owned native revision links, validated imported link endpoints against existing or imported StateCells, and restored links after commit cell import.
-40. Add duplicate-safe revision-link import validation. Extended commit export batch validation to reject duplicate incoming revision-link records and revision links already visible in the target before any cells or links are imported.
-41. Add duplicate-safe native revision-link append validation. Native revision-link record operations now surface `KernelError::DuplicateRevisionLink` when a caller attempts to append the same source, target, kind, and recorded time twice.
-42. Add native conflict-resolution Steward audit/application. Implemented `resolve_conflicts_with_steward_at` so embedders can run deterministic conflict stewardship, persist proposal audit records, and apply accepted results through the typed dispatcher in proposal order.
-43. Add native frontier/watch Steward audit/application. Implemented `resolve_frontier_watch_with_steward_at` so embedders can run subscribed frontier stewardship, persist proposal audit records, and apply accepted verification or frontier-maintenance results through the typed dispatcher.
-44. Add native file-kernel lookup-plan introspection. Implemented `ContinuityDb<FileKernel>::file_lookup_plan` so embedders can inspect file-backed indexed lookup candidate planning through the native API without reaching into the concrete kernel.
-45. Add native query-constrained file lookup-plan introspection. Implemented typed, top-level, and strict text query lookup-plan helpers so embedders can inspect file-backed candidate planning for real checkout semantics without duplicating query-to-lookup translation or executing materialization.
-
-## Steward Milestones
-
-1. Define `StewardProposal` types without invoking any model. Implemented in `continuitydb-steward`.
-2. Add policy validation for accepting and rejecting proposals. Implemented in `continuitydb-steward`.
-3. Persist accepted and rejected proposals for audit. Implemented as an in-memory append-only ledger, a pluggable `ProposalLedgerStore` contract, a JSONL `FileProposalStore`, and a generic `StorageKernel`-backed proposal audit adapter in `continuitydb-steward`; specialized production-engine adapters remain future work.
-4. Build a deterministic mock steward for test-first development. Implemented in `continuitydb-steward`.
-5. Add local model inference behind a feature flag. Implemented as a `local-model` backend boundary, local executable runner, and deterministic llama.cpp/mistral.rs runner profiles in `continuitydb-steward`; real runtime execution remains future work.
-6. Publish the local model response contract. Implemented feature-gated JSON Schema and GBNF grammar accessors plus runtime-profile helpers so embedders can constrain real model output before deterministic proposal decoding and policy validation.
-7. Evaluate small open-source steward models against fixed proposal-quality tests. Implemented as a `local-model` evaluation harness with candidate metadata, deterministic pass/fail reasons, an executable runner benchmark fixture, durable JSONL benchmark baseline records, a recorder API for configured real-runtime baseline collection, latest-baseline lookup for candidate regression gates, deterministic baseline regression comparison, and a record-and-compare gate report; environment-specific real model baseline artifacts remain future work.
-8. Add frontier/watch integration so the Steward can propose refresh and verification work. Implemented as deterministic frontier watch events that emit `RequestVerification` and `MarkFrontier` proposals, durable frontier subscription records with in-memory and JSONL file-backed stores, and a subscription runner that filters incoming watch events through stored subscriptions in `continuitydb-steward`.
-9. Add conflict-resolution proposal integration. Implemented `ConflictResolutionSteward` to convert deterministic revision conflict recommendations into auditable `LinkRevision` or `RequestVerification` proposals without mutating committed truth.
-10. Add durable conflict-resolution proposal audit. Implemented `ConflictResolutionSteward::propose_and_record` so deterministic conflict-resolution proposals are policy-evaluated and persisted through any existing `StoredProposalLedger`.
-11. Add kernel-backed conflict-resolution audit. Implemented `ConflictResolutionSteward::propose_and_record_to_kernel` so deterministic conflict-resolution proposal audits can be persisted as StateCells through any `StorageKernel`.
-12. Add borrowed kernel proposal audit adapter. Implemented `BorrowedKernelProposalStore` so embedders can record Steward proposal audits through an existing `ContinuityDb`-owned kernel without moving ownership.
-13. Add native API conflict-resolution stewardship. Implemented `ContinuityDb::audit_conflict_resolutions_with_steward` so stored conflict sets can become audited Steward proposal decisions without leaving the embeddable database API.
-14. Add native API frontier/watch stewardship. Implemented `ContinuityDb::audit_frontier_watch_with_steward` so subscribed frontier watch events can become audited Steward proposal decisions without leaving the embeddable database API.
-15. Add accepted `MarkFrontier` proposal application. Implemented the first deterministic proposal-to-state mutation path: accepted frontier proposals append successor StateCells with `Frontier` activation through the native API, while models remain proposal-only.
-16. Add accepted `LabelAnswerability` proposal application. Implemented deterministic answerability-label proposal application through the native API, preserving the model-as-proposer boundary while allowing accepted labels to become committed append-only StateCell revisions.
-17. Add accepted `AdjustConfidence` proposal application. Implemented deterministic confidence proposal application through the native API by appending successor StateCells with revised evidence confidence while preserving the model-as-proposer boundary.
-18. Add accepted `RequestVerification` proposal application. Implemented deterministic verification-work materialization through the native API by appending operational StateCells with derived evidence, target dependencies when present, and full proposal audit payloads.
-19. Add accepted `LinkRevision` proposal application. Implemented deterministic revision-link assertion materialization through the native API by appending operational StateCells with derived evidence, endpoint dependencies, and full proposal audit payloads.
-20. Add accepted `CreateCellDraft` proposal application. Implemented deterministic draft promotion through the native API by appending StateCells with proposed anchors, proposed text payloads, proposal-derived evidence, and deterministic commit time.
-21. Add unified accepted proposal application. Implemented deterministic dispatch from a policy-evaluated proposal audit record to the correct action-specific application path so embedders no longer need to duplicate Steward action matching.
-22. Add native conflict-resolution application workflow. Implemented a composed native API path that records conflict-resolution proposal audits and applies accepted `LinkRevision` proposals as native revision-link records through the typed dispatcher.
-23. Add native frontier/watch application workflow. Implemented a composed native API path that records subscribed frontier/watch proposal audits and applies accepted `RequestVerification` and `MarkFrontier` proposals through the typed dispatcher.
-24. Add local model runtime manifests. Implemented `LocalModelRuntimeManifest` so benchmark reports and durable baselines preserve the executable path and deterministic arguments used for a local model evaluation, while legacy baseline JSON remains readable.
-25. Add CLI local-model benchmark recording. Implemented a feature-gated `benchmark-local-model` command that runs the fixed Steward evaluation suite against a configured local executable, appends a JSONL baseline, and prints structured candidate, runtime, pass-count, and regression metadata.
-26. Add CLI local-model contract export. Implemented a feature-gated `local-model-contract` command that writes the Steward response JSON Schema and GBNF grammar to operator-selected files for grammar-constrained local model runs.
-27. Add local-model benchmark contract versioning. Implemented response schema version metadata on benchmark reports, durable baselines, legacy baseline decoding, and CLI benchmark summaries so future contract evolution remains auditable.
-28. Add compatible local-model regression gates. Updated record-and-compare baseline gating to compare only previous baselines with matching candidate identity, response schema version, and runtime manifest, preventing invalid regressions across runtime or contract changes.
-29. Add public compatible local-model baseline lookup. Implemented a feature-gated API that returns the newest stored baseline matching candidate identity, response schema version, and runtime manifest without recording a new benchmark run.
-30. Add local-model evaluation summary metrics. Implemented serializable deterministic evaluation summaries for reports and baselines so embedders can inspect total, passed, failed, and pass-rate metrics without duplicating regression internals.
-31. Add CLI local-model evaluation summary output. Routed `benchmark-local-model` JSON through the public evaluation summary API and exposed failed-case and pass-rate metrics alongside existing pass counts.
-32. Add CLI local-model per-case evaluation detail output. Embedded serialized Steward evaluation reports in `benchmark-local-model` JSON so operator artifacts carry case names and deterministic failure reasons alongside aggregate metrics.
-33. Add default local-model conflict-classification evaluation. Expanded the fixed Steward benchmark suite with a deterministic `ConflictsWith` revision-link case so local model baselines test classification behavior beyond thin-evidence verification.
-34. Add local-model evaluation suite introspection. Implemented read-only accessors for fixed evaluation cases, inputs, expectations, required citations, and rationale constraints so embedders can inspect benchmark contracts before running local models.
-35. Add CLI local-model evaluation suite export. Implemented a feature-gated `local-model-evaluation-suite` command that prints the fixed benchmark case contracts as JSON using the public evaluation introspection API.
-36. Add local-model evaluation suite fingerprints. Persisted deterministic evaluation-suite fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
-37. Add CLI local-model evaluation suite fingerprint output. Included the deterministic suite fingerprint in the feature-gated `local-model-evaluation-suite` JSON so operators can match inspected benchmark contracts to recorded baselines.
-38. Add CLI small-model candidate registry output. Exposed the fixed local Steward candidate registry through `local-model-candidates` JSON so operators can inspect supported model IDs and roles before benchmark runs.
-39. Add CLI local-model benchmark dry-run preflight output. Added `benchmark-local-model --dry-run` so operators can inspect candidate, runtime, schema, suite fingerprint, and baseline target metadata without executing a model or mutating baseline records.
-40. Add CLI local-model contract fingerprints. Added deterministic schema and grammar fingerprints to contract export and benchmark dry-run JSON so operators can connect archived constraint files to preflight artifacts.
-41. Add durable local-model contract fingerprints. Persisted schema and grammar fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
-42. Add small-model candidate runtime metadata. Extended the local Steward candidate registry with recommended runtime, artifact format, temperature, grammar requirement, and operational notes, and exposed the metadata through CLI candidate JSON.
-43. Add small-model benchmark argument templates. Added candidate-recommended runner configuration helpers and exposed deterministic benchmark argument vectors through CLI candidate JSON.
-44. Add CLI local-model benchmark candidate defaults. Added `benchmark-local-model --candidate-defaults` so benchmark runs and dry-runs can materialize candidate-recommended runner arguments before operator-supplied extra arguments.
-45. Add CLI local-model benchmark grammar path support. Added `benchmark-local-model --grammar-path` so dry-runs and benchmark runs can pass generated GBNF grammar artifacts as first-class runtime arguments.
-46. Add CLI local-model candidate requirement enforcement. Added `benchmark-local-model --enforce-candidate-requirements` so strict dry-runs and benchmark runs reject grammar-required candidates when no grammar artifact path is supplied.
-47. Add CLI local-model benchmark contract artifact directory. Added `benchmark-local-model --contract-dir` so dry-runs and benchmark runs can materialize schema and grammar artifacts, report their fingerprints, and use the generated grammar path for strict grammar-required candidates.
-48. Add CLI local-model benchmark prompt artifact directory. Added `benchmark-local-model --prompt-dir` so dry-runs and benchmark runs can write deterministic per-case prompt artifacts and report their fingerprints for reproducible local Steward model trials.
-49. Add durable local-model prompt fingerprints. Persisted deterministic prompt-rendering fingerprints on benchmark reports and baselines, exposed them in CLI benchmark JSON, and required matching fingerprints for compatible baseline regression gates.
-50. Add CLI local-model dry-run baseline compatibility preflight. Added read-only `benchmark-local-model --dry-run --compare-baseline` baseline inspection so operators can see whether the current runtime and contract metadata have a compatible previous baseline before executing a model.
-51. Add default local-model unsupported-claim evaluation. Expanded the fixed Steward benchmark suite with a deterministic unsupported-claim boundary case so local model baselines test whether models request verification instead of inventing deployment certainty beyond the cited evidence.
-52. Add default local-model citation preservation evaluation. Expanded the fixed Steward benchmark suite with a deterministic multi-source citation preservation case so local model baselines test whether models preserve all required evidence locators for frontier decisions.
-53. Add local-model benchmark stability reporting. Added a public repeated-run stability report API for local Steward benchmarks so embedders can detect output drift across low-temperature trials even when each individual run still passes deterministic evaluation.
-54. Add CLI local-model benchmark stability reporting. Added `benchmark-local-model --stability-trials` so operators can request repeated-run stability reports from the existing benchmark command, with dry-run preflight metadata and real-run JSON output that does not persist stability as a baseline.
-55. Add CLI local-model instability failure gating. Added `benchmark-local-model --fail-on-unstable` so repeated-run stability drift can fail before baseline recording, making low-temperature output instability usable as a CI gate for Steward model candidates.
-56. Add default local-model policy-rejection evaluation. Expanded the fixed Steward benchmark suite with a deterministic policy-rejection avoidance case so local model baselines test whether models request clarification instead of emitting policy-invalid answerability labels.
-57. Add CLI local-model fixed evaluation failure gating. Added `benchmark-local-model --fail-on-failed-cases` so current fixed-suite failures can exit non-zero before baseline recording, making proposal-quality failures usable as a CI gate separately from baseline regression checks.
-58. Add CLI local-model fixed evaluation failure report artifacts. Added `benchmark-local-model --failure-report-path` so fixed evaluation gate failures can write structured benchmark JSON without recording a baseline.
-59. Add default local-model supersession classification evaluation. Expanded the fixed Steward benchmark suite with a deterministic `Supersedes` revision-link case so local model baselines test whether models distinguish newer replacement evidence from direct conflicts.
-60. Add default local-model confidence-adjustment evaluation. Expanded the fixed Steward benchmark suite with a deterministic `AdjustConfidence` case so local model baselines test belief confidence revision proposals.
-61. Add default local-model targeted-verification evaluation. Expanded the fixed Steward benchmark suite with a deterministic targeted `RequestVerification` case so local model baselines test whether refresh requests preserve the specific stale high-impact StateCell identity.
-62. Add default local-model create-cell-draft evaluation. Expanded the fixed Steward benchmark suite with a deterministic `CreateCellDraft` case so local model baselines test whether new evidence becomes a draft proposal rather than an un-audited truth mutation.
-63. Add CLI local-model benchmark report artifacts. Added `benchmark-local-model --report-path` so successful real runs and dry-run preflights can write the same structured JSON printed to stdout into a durable artifact for CI and reproducible local model trials.
-64. Add CLI local-model benchmark response artifacts. Added `benchmark-local-model --response-dir` so real benchmark runs can persist raw per-case model stdout and report captured response artifact metadata for debugging local Steward model failures.
-65. Add durable local-model response fingerprints. Persisted per-case raw response fingerprints and byte counts in benchmark reports and durable baselines so real model trials can be audited without storing raw model stdout in baseline records.
-66. Add CLI local-model response artifact manifests. Added `local-model-responses.manifest.json` inside `benchmark-local-model --response-dir` output so archived raw response directories remain self-describing without separate stdout capture.
-67. Add CLI local-model benchmark artifact bundles. Added `benchmark-local-model --artifact-dir` so real runs and dry-runs can materialize contracts, prompts, responses where applicable, response manifests, and benchmark reports under one archiveable directory while preserving explicit per-artifact path overrides.
-68. Add CLI local-model benchmark bundle manifests. Added `local-model-benchmark.manifest.json` inside `benchmark-local-model --artifact-dir` output so archived benchmark bundles expose one versioned entry point with report, contract, prompt, response, and nested response-manifest references.
-69. Add CLI local-model fixed-failure artifact bundles. Extended `benchmark-local-model --artifact-dir --fail-on-failed-cases` so failed fixed-suite runs still write contracts, prompts, responses, nested response manifests, `benchmark-report.json`, and the root bundle manifest before exiting non-zero without recording a baseline.
-70. Add CLI local-model regression artifact bundles. Extended `benchmark-local-model --artifact-dir --fail-on-regression` so compatible baseline regressions still write the current benchmark report, regression comparison, responses, and root bundle manifest before exiting non-zero without recording the regressed run.
-71. Add CLI local-model instability artifact bundles. Extended `benchmark-local-model --artifact-dir --stability-trials --fail-on-unstable` so unstable repeated-output checks still write a benchmark report with stability drift metadata, responses, nested response manifests, and the root bundle manifest before exiting non-zero without recording a baseline.
-72. Add CLI local-model regression failure report artifacts. Extended `benchmark-local-model --fail-on-regression --failure-report-path` so compatible baseline regressions can write structured benchmark JSON without requiring a full artifact bundle or recording the regressed run.
-73. Add CLI local-model instability failure report artifacts. Extended `benchmark-local-model --stability-trials --fail-on-unstable --failure-report-path` so unstable repeated-output checks can write structured benchmark JSON without requiring a full artifact bundle or recording a baseline.
-74. Add typed local-model evaluation failure diagnostics. Split generic model errors into execution-failure and invalid-response failure reasons so benchmark reports distinguish runtime failures from undecodable model output while preserving deterministic evaluation artifacts.
-75. Add stable local-model evaluation failure code serialization. Updated durable Steward evaluation failure JSON to emit snake-case failure codes while accepting legacy Rust variant names from existing benchmark artifacts and baselines.
-76. Add local-model evaluation failure count summaries. Added deterministic aggregate counts keyed by stable failure code to public Steward evaluation reports and CLI benchmark JSON so CI can classify failed local model runs without scanning every case report.
-77. Add local-model regression failure count comparisons. Extended compatible baseline regression reports with previous and current stable failure-code count maps so CI can identify which failure classes changed across local Steward model baseline regressions.
-78. Add local-model regression failure count delta summaries. Added deterministic current-minus-previous failure-code deltas to compatible baseline regression reports and CLI JSON so CI can classify newly introduced and cleared local Steward model failure classes directly.
-79. Add local-model regression case outcome summaries. Added deterministic regressed and recovered evaluation case-name lists to compatible baseline regression reports and CLI JSON so CI can identify which fixed Steward contract cases changed without walking embedded per-case reports.
-80. Add local-model regression changed-case failure summaries. Added serializable per-case regression summaries with previous/current pass state and stable failure-code count deltas so CI can diagnose each changed fixed Steward contract case directly from baseline comparison JSON.
-81. Add local-model regression same-outcome failure change summaries. Extended changed-case regression summaries to include cases whose pass/fail outcome is unchanged but stable failure-code counts changed, so CI can detect local Steward model quality shifts that pass-count gates miss.
-82. Add local-model regression changed-case response fingerprints. Added previous/current raw response fingerprints and byte counts to each changed-case regression summary so CI artifacts can connect pass-state or failure-code movement directly to the model outputs that caused it.
-83. Add local-model regression passing-response change summaries. Extended changed-case regression summaries to include cases whose pass state and failure-code counts are unchanged but raw response fingerprints changed, so CI can detect local Steward model output drift that score-only gates miss.
-84. Add local-model regression changed-case reason flags. Added explicit outcome, failure-count, and response-change booleans to each changed-case summary so CI consumers can route local Steward model drift without reimplementing comparison logic.
-85. Add local-model regression changed-case reason counts. Added top-level outcome, failure-count, and response-changed case counts to compatible regression reports and CLI JSON so CI dashboards can summarize Steward model drift without scanning every changed-case record.
-86. Add local-model regression total changed-case counts. Added top-level changed-case totals to compatible regression reports and CLI JSON so CI dashboards can summarize all Steward model drift before drilling into reason-specific counts or per-case records.
-87. Add CLI local-model changed-case report artifacts. Added `benchmark-local-model --changed-case-report-path` so compatible baseline comparisons can write compact changed-case drift reports with totals, reason counts, and per-case summaries without requiring CI consumers to parse the full benchmark report.
-88. Add CLI local-model changed-case bundle artifacts. Extended `benchmark-local-model --artifact-dir --compare-baseline` so archiveable benchmark bundles automatically write `changed-cases.json` and advertise it from `local-model-benchmark.manifest.json`.
-89. Add CLI local-model changed-case report artifact metadata. Added `changed_case_report` path, fingerprint, and byte-count metadata to benchmark JSON and bundle manifests so CI can verify archived changed-case reports without reparsing the full benchmark output.
-90. Add CLI local-model changed-case comparison requirement. Rejected explicit `benchmark-local-model --changed-case-report-path` runs unless `--compare-baseline` or `--fail-on-regression` enables a real baseline comparison, preventing misleading zero-change artifacts.
-91. Add CLI local-model benchmark report artifact metadata. Extended local model benchmark bundle manifests with `benchmark_report_fingerprint` and `benchmark_report_bytes` so archived Steward benchmark bundles identify the exact root benchmark report artifact they describe.
-92. Add CLI local-model benchmark report artifact metadata validation. Added `validate-local-model-bundle --artifact-dir` so archived Steward benchmark bundles can validate `benchmark_report_fingerprint` and `benchmark_report_bytes` against the canonical benchmark report payload with `bundle_manifest` normalized out, preserving report integrity without cyclic manifest/report fingerprints.
-93. Add CLI local-model changed-case report artifact metadata validation. Extended `validate-local-model-bundle --artifact-dir` to validate changed-case report path, fingerprint, and byte-count metadata against archived `changed-cases.json` when a benchmark bundle includes changed-case drift evidence.
-94. Add CLI local-model response artifact manifest metadata validation. Extended `validate-local-model-bundle --artifact-dir` to validate nested response artifact manifest path, fingerprint, and byte-count metadata against archived `responses/local-model-responses.manifest.json` when a benchmark bundle includes raw local-model responses.
-95. Add CLI local-model response artifact metadata validation. Extended `validate-local-model-bundle --artifact-dir` to parse nested response manifests and validate each captured raw response artifact path, fingerprint, and byte-count metadata against archived response files.
-96. Add CLI local-model changed-case report content validation. Extended `validate-local-model-bundle --artifact-dir` to parse archived `changed-cases.json` and verify its candidate identity, baseline path, canonical report path, and compact comparison projection still match the archived benchmark report.
-97. Add CLI local-model response artifact manifest content validation. Extended `validate-local-model-bundle --artifact-dir` to parse archived `responses/local-model-responses.manifest.json` and verify its response artifact list still matches the archived benchmark report.
-98. Add CLI local-model response artifact manifest content mismatch diagnostics. Extended response artifact manifest content validation errors with deterministic mismatch labels for format, format version, and artifact-list drift so CI can diagnose archived response manifest changes without manually diffing bundle files.
-99. Add CLI local-model bundle validation report artifacts. Extended `validate-local-model-bundle` with `--report-path` so successful archived Steward benchmark bundle validation can write the same structured JSON emitted to stdout into a durable CI artifact.
-100. Add CLI local-model bundle validation failure report artifacts. Extended `validate-local-model-bundle` with `--failure-report-path` so rejected archived Steward benchmark bundles can preserve structured validation failure evidence before exiting non-zero.
-101. Add CLI local-model bundle validation manifest failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort manifest path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify the inspected manifest bytes.
-102. Add CLI local-model bundle validation report failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort benchmark report path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify the inspected report bytes.
-103. Add CLI local-model bundle validation changed-case failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort changed-case report path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify archived changed-case drift evidence.
-104. Add CLI local-model bundle validation response manifest failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort response artifact manifest path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify archived raw-response manifest evidence.
-105. Add CLI local-model bundle validation response artifact failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort raw response artifact path, byte count, and fingerprint evidence so rejected Steward benchmark bundles identify current response bytes involved in archive validation failures.
-106. Add CLI local-model bundle validation response artifact output. Extended successful `validate-local-model-bundle` JSON with the validated raw response artifact list so archived Steward benchmark bundle validation reports carry the same response evidence that failure reports preserve.
-107. Add CLI local-model prompt artifact metadata validation. Extended `validate-local-model-bundle` to verify archived prompt artifact paths, byte counts, and fingerprints against `benchmark-report.json` and `local-model-benchmark.manifest.json`, rejecting tampered prompt corpora before Steward benchmark bundles are treated as reproducible.
-108. Add CLI local-model contract artifact metadata validation. Extended `validate-local-model-bundle` to verify archived response schema and grammar artifact paths and fingerprints against `benchmark-report.json` and `local-model-benchmark.manifest.json`, rejecting tampered local-model contracts before Steward benchmark bundles are treated as reproducible.
-109. Add CLI local-model bundle validation contract artifact failure metadata. Extended `validate-local-model-bundle --failure-report-path` with best-effort response schema and grammar path, fingerprint, and byte-count evidence so rejected Steward benchmark bundles identify current contract bytes involved in archive validation failures.
-110. Add CLI local-model contract artifact byte metadata. Extended local-model contract artifact metadata with durable `schema_bytes` and `grammar_bytes` fields in benchmark reports and bundle manifests, and taught `validate-local-model-bundle` to reject archived contract byte-count mismatches before accepting Steward benchmark bundles.
-111. Add CLI local-model contract export byte metadata. Extended standalone `local-model-contract` JSON with `schema_bytes` and `grammar_bytes` so direct contract exports expose the same path, fingerprint, and size evidence as benchmark contract artifacts.
-112. Add CLI local-model dry-run contract byte metadata. Extended `benchmark-local-model --dry-run` preflight JSON with top-level `schema_bytes` and `grammar_bytes` so dry-run contract evidence matches exported and archived contract metadata without writing files.
-113. Add durable local-model contract byte metadata. Persisted response schema and GBNF grammar byte counts in executable local-model benchmark baselines and real benchmark JSON so durable baseline records carry the same contract size evidence as dry-run, export, and artifact paths.
-114. Add CLI local-model dry-run baseline byte evidence. Extended `benchmark-local-model --dry-run --compare-baseline` preflight JSON with the matched baseline's persisted `previous_schema_bytes` and `previous_grammar_bytes`, or nulls when no compatible baseline exists, so CI can inspect contract size evidence without executing a model.
-115. Add CLI local-model dry-run baseline compatibility evidence. Extended `benchmark-local-model --dry-run --compare-baseline` preflight JSON with the matched baseline's schema version, suite fingerprint, contract fingerprints, prompt fingerprint, and runtime manifest, or nulls when no compatible baseline exists, so CI can audit the exact durable baseline identity selected without parsing JSONL.
-
-## Small Embeddable Model Track
-
-The smallest feasible first candidate is **Qwen2.5-0.5B-Instruct**. It is an Apache-2.0 instruction-tuned model with about 0.49B parameters, long context, and explicit model-card claims around instruction following and structured JSON generation. Those traits matter more for a database steward than general chat quality because the Steward must emit constrained proposal objects.
-
-Evaluation candidates:
-
-- **Default feasibility candidate:** `Qwen/Qwen2.5-0.5B-Instruct`
-  - Why: smallest current candidate that is explicitly instruction-tuned and claims improved structured output behavior.
-  - Use for: first real Steward proposal experiments.
-- **Current reasoning candidate:** `Qwen/Qwen3-0.6B`
-  - Why: slightly larger, newer Qwen line with configurable thinking behavior.
-  - Use for: compare proposal quality against Qwen2.5-0.5B.
-- **Ultra-small experimental candidate:** `HuggingFaceTB/SmolLM2-360M-Instruct`
-  - Why: smaller on-device instruction model.
-  - Use for: measure the lower bound; do not assume it is reliable enough for default stewardship.
-- **Smoke-test-only candidate:** `HuggingFaceTB/SmolLM2-135M-Instruct`
-  - Why: extremely small, useful for CI or toy constrained-output tests if it can follow the schema.
-  - Use for: optional experiments, not default stewardship.
-
-Recommended inference path:
-
-- Prefer a local feature-gated backend.
-- Evaluate `llama.cpp`/GGUF first for portability and grammar-constrained JSON output.
-- Evaluate `mistral.rs` as the Rust-native integration path for GGUF and future in-process inference.
-- Keep hosted model APIs outside the core engine.
-
-## Steward Acceptance Tests
-
-Before adding a real model dependency, create fixed test corpora and score proposals for:
-
-- Valid JSON/schema conformance.
-- Correct conflict versus supersession classification.
-- Evidence citation preservation.
-- No unsupported claims beyond source evidence.
-- Stable output under low temperature.
-- Explicit uncertainty when evidence is insufficient; scoreable through required rationale terms.
-- Deterministic policy rejection of invalid proposals.
-
-## Research Sources
-
-- Qwen2.5-0.5B-Instruct model card: <https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct>
-- Qwen3-0.6B model card: <https://huggingface.co/Qwen/Qwen3-0.6B>
-- SmolLM2-360M-Instruct model files/card: <https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct>
-- llama.cpp GGUF and grammar-constrained inference: <https://github.com/ggml-org/llama.cpp>
-- mistral.rs Rust inference engine: <https://docs.rs/crate/mistralrs/latest>
+```text
+append StateCells
+call checkout with a task and token budget
+receive a ContextPacket with evidence-backed operational context
+append new evidence after the agent acts
+```
